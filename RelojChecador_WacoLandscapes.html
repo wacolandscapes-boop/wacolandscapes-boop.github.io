@@ -461,7 +461,7 @@
                 📦 Exportar Todos los Datos
             </button>
 
-            <button class="btn" id="driveBtn" style="width: 100%; background: #e67e22; color: white !important; margin-bottom: 15px; -webkit-text-fill-color: white;" onclick="app.driveConnect()">
+            <button class="btn" id="driveBtn" style="width: 100%; background: #e67e22; color: white !important; margin-bottom: 15px; -webkit-text-fill-color: white;" onclick="app.driveSync()">
                 ☁️ <span id="driveBtnLabel">Conectar Drive</span>
             </button>
             
@@ -495,6 +495,7 @@
             autoSyncInterval: null,
             CLIENT_ID: '1032764332702-uvnqg0ccaer5gp2hr12gmniqe38ria1t.apps.googleusercontent.com',
             FOLDER_NAME: 'WacoLandscapesNomina',
+            SCOPES: 'https://www.googleapis.com/auth/drive.file',
             
             init() {
                 this.loadData();
@@ -1156,25 +1157,49 @@
 
             // ==================== GOOGLE DRIVE SYNC ====================
 
+            driveSync() {
+                if (this.driveConnected) {
+                    this.driveSyncNow();
+                } else {
+                    this.driveConnect();
+                }
+            },
+
             driveConnect() {
-                const client = google.accounts.oauth2.initTokenClient({
+                this.tokenClient = google.accounts.oauth2.initTokenClient({
                     client_id: this.CLIENT_ID,
-                    scope: 'https://www.googleapis.com/auth/drive.file',
+                    scope: this.SCOPES,
+                    prompt: '',
                     callback: async (response) => {
                         if (response.error) { alert('❌ Error: ' + response.error); return; }
                         this.driveToken = response.access_token;
                         this.driveConnected = true;
                         this.tokenExpiry = Date.now() + (55 * 60 * 1000);
-                        localStorage.setItem('waco_drive_token', this.driveToken);
-                        localStorage.setItem('waco_drive_token_expiry', this.tokenExpiry);
-                        document.getElementById('driveBtnLabel').textContent = 'Sincronizando...';
+                        document.getElementById('driveBtnLabel').textContent = 'Sincronizar';
                         document.getElementById('driveBtn').style.background = '#27ae60';
                         await this.driveGetOrCreateFolder();
-                        await this.driveSyncNow();
+                        await this.driveDownloadFromNomina();
                         this.startAutoSync();
+                        await this.driveSyncNow();
+                        if (!this.firstConnect) {
+                            const toast = document.createElement('div');
+                            toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#27ae60;color:white;padding:15px 20px;border-radius:10px;z-index:9999;font-size:1rem;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+                            toast.innerHTML = '☁️ Conectado a Google Drive<br><small>Sincronización automática activada</small>';
+                            document.body.appendChild(toast);
+                            setTimeout(() => toast.remove(), 3000);
+                        }
+                        this.firstConnect = false;
                     }
                 });
-                client.requestAccessToken();
+                this.firstConnect = true;
+                this.tokenClient.requestAccessToken({ prompt: '' });
+            },
+
+            async refreshTokenIfNeeded() {
+                if (!this.tokenClient) return;
+                if (!this.tokenExpiry || Date.now() > this.tokenExpiry) {
+                    this.tokenClient.requestAccessToken({ prompt: '' });
+                }
             },
 
             async driveGetOrCreateFolder() {
@@ -1196,36 +1221,33 @@
                 }
             },
 
-            async driveUploadFile(fileName, fileContent) {
-                const searchRes = await fetch(
-                    `https://www.googleapis.com/drive/v3/files?q=name='${fileName}'+and+'${this.driveFolderId}'+in+parents+and+trashed=false`,
-                    { headers: { Authorization: `Bearer ${this.driveToken}` } }
-                );
-                const searchData = await searchRes.json();
-                const fileId = searchData.files && searchData.files.length > 0 ? searchData.files[0].id : null;
-                const metadata = { name: fileName, parents: fileId ? undefined : [this.driveFolderId] };
-                const form = new FormData();
-                form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-                form.append('file', new Blob([fileContent], { type: 'application/json' }));
-                await fetch(
-                    fileId ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart` : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-                    { method: fileId ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${this.driveToken}` }, body: form }
-                );
-            },
-
             async driveSyncNow() {
                 if (!this.driveConnected || !this.driveFolderId) return;
+                await this.refreshTokenIfNeeded();
                 try {
+                    document.getElementById('driveBtnLabel').textContent = 'Sincronizando...';
                     const data = {
-                        exportType: 'reloj_sync',
-                        exportDate: new Date().toISOString(),
+                        exportType: 'reloj_sync', exportDate: new Date().toISOString(),
                         source: 'Waco Landscapes Reloj',
-                        employees: this.employees,
-                        attendances: this.attendances,
-                        adminPin: this.adminPin,
-                        workConfig: this.workConfig
+                        employees: this.employees, attendances: this.attendances,
+                        adminPin: this.adminPin, workConfig: this.workConfig
                     };
-                    await this.driveUploadFile('waco_reloj_sync.json', JSON.stringify(data, null, 2));
+                    const fileName = 'waco_reloj_sync.json';
+                    const searchRes = await fetch(
+                        `https://www.googleapis.com/drive/v3/files?q=name='${fileName}'+and+'${this.driveFolderId}'+in+parents+and+trashed=false`,
+                        { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                    );
+                    const searchData = await searchRes.json();
+                    const fileId = searchData.files && searchData.files.length > 0 ? searchData.files[0].id : null;
+                    const metadata = { name: fileName, parents: fileId ? undefined : [this.driveFolderId] };
+                    const form = new FormData();
+                    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+                    form.append('file', new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+                    await fetch(
+                        fileId ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`
+                               : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+                        { method: fileId ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${this.driveToken}` }, body: form }
+                    );
                     const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
                     document.getElementById('driveBtnLabel').textContent = `Sync ${now}`;
                     document.getElementById('driveBtn').style.background = '#27ae60';
@@ -1238,8 +1260,55 @@
             startAutoSync() {
                 if (this.autoSyncInterval) clearInterval(this.autoSyncInterval);
                 this.autoSyncInterval = setInterval(async () => {
-                    if (this.driveConnected) await this.driveSyncNow();
-                }, 5 * 60 * 1000); // cada 5 minutos
+                    if (this.driveConnected) {
+                        await this.driveDownloadFromNomina();
+                        await this.driveSyncNow();
+                    }
+                }, 5 * 60 * 1000);
+            },
+
+            async driveDownloadFromNomina() {
+                if (!this.driveConnected || !this.driveFolderId) return;
+                try {
+                    const res = await fetch(
+                        `https://www.googleapis.com/drive/v3/files?q=name='waco_nomina_sync.json'+and+'${this.driveFolderId}'+in+parents+and+trashed=false`,
+                        { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                    );
+                    const data = await res.json();
+                    if (!data.files || data.files.length === 0) return;
+                    const fileRes = await fetch(
+                        `https://www.googleapis.com/drive/v3/files/${data.files[0].id}?alt=media`,
+                        { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                    );
+                    const nominaData = await fileRes.json();
+                    if (nominaData.employees && nominaData.employees.length > 0) {
+                        this.employees = nominaData.employees;
+                    }
+                    if (nominaData.workConfig) this.workConfig = nominaData.workConfig;
+                    if (nominaData.adminPin) this.adminPin = nominaData.adminPin;
+                    if (nominaData.attendances) {
+                        nominaData.attendances.forEach(att => {
+                            const idx = this.attendances.findIndex(a =>
+                                a.employeeId === att.employeeId && a.date === att.date
+                            );
+                            if (idx < 0) {
+                                this.attendances.push(att);
+                            } else {
+                                const local = this.attendances[idx];
+                                if (!local.checkOut && att.checkOut) {
+                                    this.attendances[idx] = att;
+                                }
+                            }
+                        });
+                    }
+                    this.save();
+                    this.updateAdminStats();
+                    const syncNow = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                    document.getElementById('driveBtnLabel').textContent = `Sync ${syncNow}`;
+                    document.getElementById('driveBtn').style.background = '#27ae60';
+                } catch(err) {
+                    console.warn('driveDownloadFromNomina error:', err);
+                }
             }
         };
         
