@@ -1333,8 +1333,8 @@
                 if (this.autoSyncInterval) clearInterval(this.autoSyncInterval);
                 this.autoSyncInterval = setInterval(async () => {
                     if (this.driveConnected) {
-                        await this.driveDownloadFromNomina();
-                        await this.driveSyncNow();
+                        await this.driveSyncNow(); // Primero sube datos del Reloj
+                        await this.driveDownloadFromNomina(); // Luego baja cambios de Nómina
                     }
                 }, 5 * 60 * 1000);
             },
@@ -1359,19 +1359,14 @@
                     if (nominaData.workConfig) this.workConfig = nominaData.workConfig;
                     if (nominaData.adminPin) this.adminPin = nominaData.adminPin;
                     if (nominaData.attendances) {
-                        nominaData.attendances.forEach(att => {
-                            const idx = this.attendances.findIndex(a =>
-                                a.employeeId === att.employeeId && a.date === att.date
-                            );
-                            if (idx < 0) {
-                                this.attendances.push(att);
-                            } else {
-                                const local = this.attendances[idx];
-                                if (!local.checkOut && att.checkOut) {
-                                    this.attendances[idx] = att;
-                                }
-                            }
-                        });
+                        // Reemplazar completamente con los datos de Nómina (respeta borrados)
+                        // pero conservar check-ins locales de HOY que aún no llegaron a Nómina
+                        const today = new Date().toISOString().split('T')[0];
+                        const localTodayNew = this.attendances.filter(a => 
+                            a.date === today && 
+                            !nominaData.attendances.find(n => String(n.id) === String(a.id))
+                        );
+                        this.attendances = [...nominaData.attendances, ...localTodayNew];
                     }
                     this.save();
                     this.updateAdminStats();

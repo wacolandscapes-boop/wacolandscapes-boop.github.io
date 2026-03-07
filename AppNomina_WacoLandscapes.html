@@ -1784,6 +1784,7 @@
                 this.attendances = this.attendances.filter(a => a.id !== id && String(a.id) !== String(id));
                 this.save();
                 this.refreshAttendances();
+                if (this.driveConnected) this.driveSyncNow();
             },
 
             editAttendance(id) {
