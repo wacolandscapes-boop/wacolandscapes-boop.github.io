@@ -3894,7 +3894,7 @@
                         payrollRecords: this.payrollRecords, savedPayrollPeriods: this.savedPayrollPeriods,
                         adminPin: this.adminPin, workConfig: this.workConfig
                     };
-                    await this.driveUploadFile('anas_nomina_sync.json', JSON.stringify(data, null, 2));
+                    await this.driveUploadFile('waco_nomina_sync.json', JSON.stringify(data, null, 2));
                     const now = new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
                     document.getElementById('driveSyncLabel').textContent = `Sync ${now}`;
                     document.getElementById('driveSyncBtn').style.background = '#27ae60';
@@ -3905,10 +3905,10 @@
             },
 
             async driveDownloadNomina() {
-                // Download anas_nomina_sync.json and load into localStorage
+                // Download waco_nomina_sync.json and load into localStorage
                 try {
                     const searchRes = await fetch(
-                        `https://www.googleapis.com/drive/v3/files?q=name='anas_nomina_sync.json'+and+'${this.driveFolderId}'+in+parents+and+trashed=false`,
+                        `https://www.googleapis.com/drive/v3/files?q=name='waco_nomina_sync.json'+and+'${this.driveFolderId}'+in+parents+and+trashed=false`,
                         { headers: { Authorization: `Bearer ${this.driveToken}` } }
                     );
                     const searchData = await searchRes.json();
@@ -3952,7 +3952,7 @@
                 if (!this.driveConnected) { alert('Primero conecta Google Drive ☁️'); return; }
                 try {
                     const res = await fetch(
-                        `https://www.googleapis.com/drive/v3/files?q=name='anas_reloj_sync.json'+and+'${this.driveFolderId}'+in+parents+and+trashed=false`,
+                        `https://www.googleapis.com/drive/v3/files?q=name='waco_reloj_sync.json'+and+'${this.driveFolderId}'+in+parents+and+trashed=false`,
                         { headers: { Authorization: `Bearer ${this.driveToken}` } }
                     );
                     const data = await res.json();
