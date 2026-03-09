@@ -564,14 +564,12 @@
                 // Sincronizar cuando la app vuelve al primer plano (iOS Safari)
                 document.addEventListener('visibilitychange', () => {
                     if (!document.hidden && this.driveConnected) {
-                        this.driveDownloadFromNomina();
-                        this.driveSyncNow();
+                        this.driveDownloadFromNomina().then(() => this.driveSyncNow());
                     }
                 });
                 window.addEventListener('focus', () => {
                     if (this.driveConnected) {
-                        this.driveDownloadFromNomina();
-                        this.driveSyncNow();
+                        this.driveDownloadFromNomina().then(() => this.driveSyncNow());
                     }
                 });
                 
@@ -785,9 +783,7 @@
                 
                 this.save();
                 this.exportDaily();
-                if (this.driveConnected) this.driveSyncNow();
-                
-                // Verificar si llegó tarde
+                if (this.driveConnected) this.driveDownloadFromNomina().then(() => this.driveSyncNow());
                 const late = this.isLate(time);
                 if (late) {
                     this.showConfirm('⚠️', this.currentEmployee.name, 'ENTRADA TARDE', time, `Hora oficial: ${this.workConfig.startTime}`, '#e67e22');
@@ -823,8 +819,6 @@
                 this.save();
                 this.exportDaily();
                 if (this.driveConnected) this.driveSyncNow();
-                
-                // Calcular horas de la semana
                 const weekStart = this.getWeekStart();
                 const weekEnd = new Date(weekStart);
                 weekEnd.setDate(weekStart.getDate() + 6);
@@ -1266,7 +1260,7 @@
 
             driveSync() {
                 if (this.driveConnected) {
-                    this.driveSyncNow();
+                    this.driveDownloadFromNomina().then(() => this.driveSyncNow());
                 } else {
                     this.driveConnect();
                 }
