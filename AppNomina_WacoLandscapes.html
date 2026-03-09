@@ -3968,21 +3968,22 @@
                     const clockData = await fileRes.json();
                     let added = 0; let updated = 0;
                     (clockData.attendances || []).forEach(att => {
+                        // Solo agregar registros que NO fueron borrados de la Nómina
                         const idx = this.attendances.findIndex(a => a.employeeId === att.employeeId && a.date === att.date);
                         if (idx >= 0) {
                             const local = this.attendances[idx];
-                            // Only update if incoming has MORE info
+                            // Solo actualizar si el Reloj tiene checkOut y la Nómina no
                             if (!local.checkOut && att.checkOut) {
-                                this.attendances[idx] = att;
-                                updated++;
-                            } else if (local.checkOut && att.checkOut) {
-                                // Both have checkOut - keep the most recent
                                 this.attendances[idx] = att;
                                 updated++;
                             }
                         } else {
-                            this.attendances.push(att);
-                            added++;
+                            // Solo agregar si la fecha es de hoy (registro nuevo del Reloj)
+                            const today = new Date().toISOString().split('T')[0];
+                            if (att.date === today) {
+                                this.attendances.push(att);
+                                added++;
+                            }
                         }
                     });
                     this.save();
