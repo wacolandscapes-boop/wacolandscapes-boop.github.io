@@ -331,7 +331,7 @@
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.85);
-            z-index: 9999;
+            z-index: 99999;
             justify-content: center;
             align-items: center;
             flex-direction: column;
@@ -764,6 +764,7 @@
                 
                 this.save();
                 this.exportDaily();
+                if (this.driveConnected) this.driveSyncNow();
                 
                 // Verificar si llegó tarde
                 const late = this.isLate(time);
@@ -775,7 +776,7 @@
                 
                 this.updateEmployeeHours();
                 
-                setTimeout(() => this.logout(), 3000);
+                setTimeout(() => this.logout(), 3500);
             },
             
             checkOut() {
@@ -800,6 +801,7 @@
                 
                 this.save();
                 this.exportDaily();
+                if (this.driveConnected) this.driveSyncNow();
                 
                 // Calcular horas de la semana
                 const weekStart = this.getWeekStart();
