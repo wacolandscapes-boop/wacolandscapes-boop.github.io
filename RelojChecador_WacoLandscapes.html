@@ -561,11 +561,25 @@
                 this.updateClock();
                 setInterval(() => this.updateClock(), 1000);
                 
+                // Sincronizar cuando la app vuelve al primer plano (iOS Safari)
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden && this.driveConnected) {
+                        this.driveDownloadFromNomina();
+                        this.driveSyncNow();
+                    }
+                });
+                window.addEventListener('focus', () => {
+                    if (this.driveConnected) {
+                        this.driveDownloadFromNomina();
+                        this.driveSyncNow();
+                    }
+                });
+                
                 // Restaurar UI de Drive si había sesión activa
                 if (this._restoreDrive) {
                     document.getElementById('driveBtnLabel').textContent = 'Drive ✅';
                     document.getElementById('driveBtn').style.background = '#27ae60';
-                    this.startAutoSync();
+                    this.startAutoSync(); // Solo inicia el intervalo, no sincroniza inmediatamente
                 }
                 
                 // Datos de ejemplo
@@ -1358,10 +1372,10 @@
                 if (this.autoSyncInterval) clearInterval(this.autoSyncInterval);
                 this.autoSyncInterval = setInterval(async () => {
                     if (this.driveConnected) {
-                        await this.driveDownloadFromNomina(); // Primero baja cambios de Nómina (respeta borrados)
-                        await this.driveSyncNow(); // Luego sube datos limpios del Reloj
+                        await this.driveDownloadFromNomina();
+                        await this.driveSyncNow();
                     }
-                }, 5 * 60 * 1000);
+                }, 2 * 60 * 1000); // cada 2 minutos
             },
 
             async driveDownloadFromNomina() {
@@ -1373,29 +1387,39 @@
                     );
                     const data = await res.json();
                     if (!data.files || data.files.length === 0) return;
+
                     const fileRes = await fetch(
                         `https://www.googleapis.com/drive/v3/files/${data.files[0].id}?alt=media`,
                         { headers: { Authorization: `Bearer ${this.driveToken}` } }
                     );
                     const nominaData = await fileRes.json();
+
                     if (nominaData.employees && nominaData.employees.length > 0) {
                         this.employees = nominaData.employees;
                     }
                     if (nominaData.workConfig) this.workConfig = nominaData.workConfig;
                     if (nominaData.adminPin) this.adminPin = nominaData.adminPin;
+
+                    // Smart merge - nunca sobreescribir checkOut local con vacío
                     if (nominaData.attendances) {
-                        // Reemplazar completamente con los datos de Nómina (respeta borrados)
-                        // pero conservar check-ins locales de HOY que aún no llegaron a Nómina
-                        const today = new Date().toISOString().split('T')[0];
-                        const localTodayNew = this.attendances.filter(a => 
-                            a.date === today && 
-                            !nominaData.attendances.find(n => String(n.id) === String(a.id))
-                        );
-                        this.attendances = [...nominaData.attendances, ...localTodayNew];
+                        nominaData.attendances.forEach(att => {
+                            const idx = this.attendances.findIndex(a =>
+                                a.employeeId === att.employeeId && a.date === att.date
+                            );
+                            if (idx < 0) {
+                                this.attendances.push(att);
+                            } else {
+                                const local = this.attendances[idx];
+                                if (!local.checkOut && att.checkOut) {
+                                    this.attendances[idx] = att;
+                                }
+                            }
+                        });
                     }
+
                     this.save();
                     this.updateAdminStats();
-                    const syncNow = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                    const syncNow = new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
                     document.getElementById('driveBtnLabel').textContent = `Sync ${syncNow}`;
                     document.getElementById('driveBtn').style.background = '#27ae60';
                 } catch(err) {
