@@ -561,6 +561,13 @@
                 this.updateClock();
                 setInterval(() => this.updateClock(), 1000);
                 
+                // Restaurar UI de Drive si había sesión activa
+                if (this._restoreDrive) {
+                    document.getElementById('driveBtnLabel').textContent = 'Drive ✅';
+                    document.getElementById('driveBtn').style.background = '#27ae60';
+                    this.startAutoSync();
+                }
+                
                 // Datos de ejemplo
                 if (this.employees.length === 0) {
                     this.employees = [
@@ -1192,6 +1199,18 @@
                 this.attendances = JSON.parse(localStorage.getItem('waco_attendances') || '[]');
                 this.adminPin = localStorage.getItem('waco_adminPin') || '0000';
                 this.workConfig = JSON.parse(localStorage.getItem('waco_workConfig') || '{"startTime":"08:00","lateTolerance":15}');
+                
+                // Restaurar Drive si había token guardado
+                const savedToken = localStorage.getItem('waco_drive_token');
+                const savedExpiry = localStorage.getItem('waco_token_expiry');
+                const savedFolder = localStorage.getItem('waco_drive_folder_id');
+                if (savedToken && savedExpiry && savedFolder && Date.now() < parseInt(savedExpiry)) {
+                    this.driveToken = savedToken;
+                    this.driveFolderId = savedFolder;
+                    this.driveConnected = true;
+                    this.tokenExpiry = parseInt(savedExpiry);
+                    this._restoreDrive = true; // flag para restaurar UI después
+                }
             },
             
             exportDaily() {
@@ -1249,6 +1268,8 @@
                         this.driveToken = response.access_token;
                         this.driveConnected = true;
                         this.tokenExpiry = Date.now() + (55 * 60 * 1000);
+                        localStorage.setItem('waco_drive_token', this.driveToken);
+                        localStorage.setItem('waco_token_expiry', this.tokenExpiry);
                         document.getElementById('driveBtnLabel').textContent = 'Sincronizar';
                         document.getElementById('driveBtn').style.background = '#27ae60';
                         await this.driveGetOrCreateFolder();
@@ -1284,6 +1305,7 @@
                 const data = await res.json();
                 if (data.files && data.files.length > 0) {
                     this.driveFolderId = data.files[0].id;
+                    localStorage.setItem('waco_drive_folder_id', this.driveFolderId);
                 } else {
                     const r = await fetch('https://www.googleapis.com/drive/v3/files', {
                         method: 'POST',
@@ -1292,6 +1314,7 @@
                     });
                     const d = await r.json();
                     this.driveFolderId = d.id;
+                    localStorage.setItem('waco_drive_folder_id', this.driveFolderId);
                 }
             },
 
