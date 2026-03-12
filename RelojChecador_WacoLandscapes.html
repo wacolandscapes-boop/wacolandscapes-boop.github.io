@@ -1203,7 +1203,15 @@
                 }
                 
                 // Cargar datos normalmente
-                this.employees = JSON.parse(localStorage.getItem('waco_employees') || '[]');
+                // Cargar y deduplicar empleados por nombre al iniciar
+                const rawEmployees = JSON.parse(localStorage.getItem('waco_employees') || '[]');
+                const seenNames = new Set();
+                this.employees = rawEmployees.filter(e => {
+                    const key = e.name.trim().toLowerCase();
+                    if (seenNames.has(key)) return false;
+                    seenNames.add(key);
+                    return true;
+                });
                 this.attendances = JSON.parse(localStorage.getItem('waco_attendances') || '[]');
                 this.adminPin = localStorage.getItem('waco_adminPin') || '0000';
                 this.workConfig = JSON.parse(localStorage.getItem('waco_workConfig') || '{"startTime":"08:00","lateTolerance":15}');
@@ -1334,7 +1342,7 @@
                     const data = {
                         exportType: 'reloj_sync', exportDate: new Date().toISOString(),
                         source: 'Waco Landscapes Reloj',
-                        employees: this.employees, attendances: this.attendances,
+                        attendances: this.attendances,
                         adminPin: this.adminPin, workConfig: this.workConfig
                     };
                     const fileName = 'waco_reloj_sync.json';
@@ -1388,15 +1396,9 @@
                     );
                     const nominaData = await fileRes.json();
 
+                    // La Nómina es la fuente de verdad — el Reloj solo recibe empleados de ella
                     if (nominaData.employees && nominaData.employees.length > 0) {
-                        nominaData.employees.forEach(emp => {
-                            const idx = this.employees.findIndex(e => e.id === emp.id);
-                            if (idx < 0) {
-                                this.employees.push(emp);
-                            } else {
-                                this.employees[idx] = emp;
-                            }
-                        });
+                        this.employees = nominaData.employees;
                     }
                     if (nominaData.workConfig) this.workConfig = nominaData.workConfig;
                     if (nominaData.adminPin) this.adminPin = nominaData.adminPin;

@@ -4065,14 +4065,7 @@
                     const clockData = await fileRes.json();
                     let added = 0; let updated = 0;
 
-                    // Merge de empleados desde el Reloj (sin reemplazar, solo agregar nuevos)
-                    (clockData.employees || []).forEach(emp => {
-                        const idx = this.employees.findIndex(e => e.id === emp.id);
-                        if (idx < 0) {
-                            this.employees.push(emp);
-                        }
-                        // No sobreescribir - la Nómina es la fuente de verdad para datos de empleados
-                    });
+                    // La Nómina es la fuente de verdad para empleados — no importar del Reloj
 
                     // Merge de asistencias respetando borrados
                     const deletedIds = (this.deletedAttendances || []).map(String);
@@ -4269,7 +4262,15 @@
                 }
                 
                 // Cargar datos normalmente
-                this.employees = JSON.parse(localStorage.getItem('anas_employees') || '[]');
+                // Cargar y deduplicar empleados por nombre al iniciar
+                const rawEmployees = JSON.parse(localStorage.getItem('anas_employees') || '[]');
+                const seenNames = new Set();
+                this.employees = rawEmployees.filter(e => {
+                    const key = e.name.trim().toLowerCase();
+                    if (seenNames.has(key)) return false;
+                    seenNames.add(key);
+                    return true;
+                });
                 this.attendances = JSON.parse(localStorage.getItem('anas_attendances') || '[]');
                 this.deletedAttendances = JSON.parse(localStorage.getItem('anas_deleted_att') || '[]');
                 this.payrollRecords = JSON.parse(localStorage.getItem('anas_payroll') || '[]');
