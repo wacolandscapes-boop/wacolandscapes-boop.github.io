@@ -1389,14 +1389,30 @@
                     const nominaData = await fileRes.json();
 
                     if (nominaData.employees && nominaData.employees.length > 0) {
-                        this.employees = nominaData.employees;
+                        nominaData.employees.forEach(emp => {
+                            const idx = this.employees.findIndex(e => e.id === emp.id);
+                            if (idx < 0) {
+                                this.employees.push(emp);
+                            } else {
+                                this.employees[idx] = emp;
+                            }
+                        });
                     }
                     if (nominaData.workConfig) this.workConfig = nominaData.workConfig;
                     if (nominaData.adminPin) this.adminPin = nominaData.adminPin;
 
-                    // Smart merge - nunca sobreescribir checkOut local con vacío
+                    // Smart merge - respetar registros borrados desde la Nómina
                     if (nominaData.attendances) {
+                        const deletedIds = (nominaData.deletedAttendances || []).map(String);
+                        
+                        // Primero eliminar localmente cualquier registro que fue borrado en Nómina
+                        if (deletedIds.length > 0) {
+                            this.attendances = this.attendances.filter(a => !deletedIds.includes(String(a.id)));
+                        }
+
+                        // Luego hacer merge sin reimportar borrados
                         nominaData.attendances.forEach(att => {
+                            if (deletedIds.includes(String(att.id))) return; // ignorar borrados
                             const idx = this.attendances.findIndex(a =>
                                 a.employeeId === att.employeeId && a.date === att.date
                             );

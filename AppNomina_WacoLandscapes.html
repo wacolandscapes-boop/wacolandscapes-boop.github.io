@@ -1805,6 +1805,12 @@
             
             deleteAttendance(id) {
                 if (!confirm('¿Eliminar este registro de asistencia?')) return;
+                // Registrar el ID borrado para que el Reloj no lo reimporte
+                if (!this.deletedAttendances) this.deletedAttendances = [];
+                if (!this.deletedAttendances.includes(String(id))) {
+                    this.deletedAttendances.push(String(id));
+                    localStorage.setItem('anas_deleted_att', JSON.stringify(this.deletedAttendances));
+                }
                 this.attendances = this.attendances.filter(a => a.id !== id && String(a.id) !== String(id));
                 this.save();
                 this.refreshAttendances();
@@ -2520,7 +2526,7 @@
                     }
                     
                     const p = payroll[att.employeeId];
-                    let dailyHours = att.hours; // Sin redondeo intermedio
+                    let dailyHours = Math.round(att.hours * 100) / 100; // Redondear horas del día a 2 decimales
                     
                     // PASO 1: Registrar horas trabajadas (antes de descuentos)
                     p.totalWorkedHours += dailyHours;
@@ -3982,6 +3988,7 @@
                         exportType: 'nomina_sync', exportDate: new Date().toISOString(),
                         source: "Waco Landscapes Nomina",
                         employees: this.employees, attendances: this.attendances,
+                        deletedAttendances: this.deletedAttendances || [],
                         payrollRecords: this.payrollRecords, savedPayrollPeriods: this.savedPayrollPeriods,
                         adminPin: this.adminPin, workConfig: this.workConfig
                     };
@@ -4057,21 +4064,31 @@
                     );
                     const clockData = await fileRes.json();
                     let added = 0; let updated = 0;
+
+                    // Merge de empleados desde el Reloj (sin reemplazar, solo agregar nuevos)
+                    (clockData.employees || []).forEach(emp => {
+                        const idx = this.employees.findIndex(e => e.id === emp.id);
+                        if (idx < 0) {
+                            this.employees.push(emp);
+                        }
+                        // No sobreescribir - la Nómina es la fuente de verdad para datos de empleados
+                    });
+
+                    // Merge de asistencias respetando borrados
+                    const deletedIds = (this.deletedAttendances || []).map(String);
                     (clockData.attendances || []).forEach(att => {
+                        if (deletedIds.includes(String(att.id))) return; // ignorar borrados
                         const idx = this.attendances.findIndex(a => a.employeeId === att.employeeId && a.date === att.date);
                         if (idx >= 0) {
                             const local = this.attendances[idx];
-                            // Solo actualizar si el Reloj tiene checkOut y la Nómina no
                             if (!local.checkOut && att.checkOut) {
                                 this.attendances[idx] = att;
                                 updated++;
                             } else if (local.checkOut && att.checkOut) {
-                                // Ambos tienen checkOut - conservar el más reciente
                                 this.attendances[idx] = att;
                                 updated++;
                             }
                         } else {
-                            // Agregar registros de cualquier fecha
                             this.attendances.push(att);
                             added++;
                         }
@@ -4254,6 +4271,7 @@
                 // Cargar datos normalmente
                 this.employees = JSON.parse(localStorage.getItem('anas_employees') || '[]');
                 this.attendances = JSON.parse(localStorage.getItem('anas_attendances') || '[]');
+                this.deletedAttendances = JSON.parse(localStorage.getItem('anas_deleted_att') || '[]');
                 this.payrollRecords = JSON.parse(localStorage.getItem('anas_payroll') || '[]');
                 this.savedPayrollPeriods = JSON.parse(localStorage.getItem('anas_payroll_periods') || '[]');
                 this.adminPin = localStorage.getItem('anas_adminPin') || '0000';
