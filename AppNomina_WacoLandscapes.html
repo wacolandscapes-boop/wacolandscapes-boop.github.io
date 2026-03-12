@@ -2485,15 +2485,11 @@
                 }
                 
                 // Filtrar asistencias por rango de fechas y empleados seleccionados
-                const selectedEmpIds = this.getSelectedPayrollEmployeeIds();
-                const selectedEmpNames = this.employees
-                    .filter(e => selectedEmpIds.includes(e.id))
-                    .map(e => e.name.trim().toLowerCase());
+                const selectedEmpNames = this.getSelectedPayrollEmployeeNames();
                 const periodAttendances = this.attendances.filter(a => {
                     const date = new Date(a.date + 'T00:00:00');
-                    const matchId   = selectedEmpIds.includes(a.employeeId);
                     const matchName = a.employeeName && selectedEmpNames.includes(a.employeeName.trim().toLowerCase());
-                    return date >= startDate && date <= endDate && a.hours && (matchId || matchName);
+                    return date >= startDate && date <= endDate && a.hours && matchName;
                 });
                 
                 // Mostrar período seleccionado
@@ -2838,7 +2834,7 @@
                 const sorted = [...this.employees].sort((a,b) => a.name.localeCompare(b.name));
                 container.innerHTML = sorted.map(emp => `
                     <label style="display: flex; align-items: center; gap: 8px; background: white; padding: 8px 12px; border-radius: 6px; cursor: pointer; border: 1px solid #c8e6c9;">
-                        <input type="checkbox" class="tc-emp-check" value="${emp.id}" checked style="width: 16px; height: 16px; accent-color: #2e7d32;">
+                        <input type="checkbox" class="tc-emp-check" value="${emp.name.trim().toLowerCase()}" checked style="width: 16px; height: 16px; accent-color: #2e7d32;">
                         <span style="font-size: 0.9rem;">${emp.name}</span>
                     </label>
                 `).join('');
@@ -2850,7 +2846,7 @@
                 const sorted = [...this.employees].sort((a,b) => a.name.localeCompare(b.name));
                 container.innerHTML = sorted.map(emp => `
                     <label style="display: flex; align-items: center; gap: 8px; background: white; padding: 8px 12px; border-radius: 6px; cursor: pointer; border: 1px solid #c8e6c9;">
-                        <input type="checkbox" class="payroll-emp-check" value="${emp.id}" checked style="width: 16px; height: 16px; accent-color: #2e7d32;">
+                        <input type="checkbox" class="payroll-emp-check" value="${emp.name.trim().toLowerCase()}" checked style="width: 16px; height: 16px; accent-color: #2e7d32;">
                         <span style="font-size: 0.9rem;">${emp.name}</span>
                     </label>
                 `).join('');
@@ -2872,15 +2868,15 @@
                 document.querySelectorAll('.tc-emp-check').forEach(cb => cb.checked = false);
             },
             
-            getSelectedPayrollEmployeeIds() {
+            getSelectedPayrollEmployeeNames() {
                 const checked = document.querySelectorAll('.payroll-emp-check:checked');
-                if (checked.length === 0) return this.employees.map(e => e.id); // fallback todos
+                if (checked.length === 0) return this.employees.map(e => e.name.trim().toLowerCase());
                 return [...checked].map(cb => cb.value);
             },
             
-            getSelectedTimecardEmployeeIds() {
+            getSelectedTimecardEmployeeNames() {
                 const checked = document.querySelectorAll('.tc-emp-check:checked');
-                if (checked.length === 0) return this.employees.map(e => e.id); // fallback todos
+                if (checked.length === 0) return this.employees.map(e => e.name.trim().toLowerCase());
                 return [...checked].map(cb => cb.value);
             },
             
@@ -3022,9 +3018,9 @@
                 }
                 
                 // Ordenar alfabéticamente, filtrar solo los seleccionados, y agrupar en páginas
-                const selectedTcIds = this.getSelectedTimecardEmployeeIds();
+                const selectedTcNames = this.getSelectedTimecardEmployeeNames();
                 const sortedEmps = [...this.employees]
-                    .filter(e => selectedTcIds.includes(e.id))
+                    .filter(e => selectedTcNames.includes(e.name.trim().toLowerCase()))
                     .sort((a,b) => a.name.localeCompare(b.name));
                 const pages = [];
                 for (let i = 0; i < sortedEmps.length; i += cardsPerPage) {
@@ -3055,10 +3051,9 @@
                 // Same logic as displayTimeCard but returns HTML instead of setting innerHTML
                 const periodAtt = this.attendances.filter(a => {
                     const date = new Date(a.date + 'T00:00:00');  // Forzar medianoche
-                    const matchId   = a.employeeId === emp.id;
-                    const matchName = a.employeeName && emp.name && 
+                    const matchName = a.employeeName && emp.name &&
                                       a.employeeName.trim().toLowerCase() === emp.name.trim().toLowerCase();
-                    return (matchId || matchName) && date >= startDate && date <= endOfDay;
+                    return matchName && date >= startDate && date <= endOfDay;
                 });
                 
                 const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
