@@ -2382,6 +2382,8 @@
             },
             
             calculatePayroll() {
+                // Asegurar que los checkboxes estén renderizados
+                this.renderPayrollEmployeeCheckboxes();
                 const period = document.getElementById('payrollPeriod').value;
                 const now = new Date();
                 const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Medianoche
@@ -2488,8 +2490,10 @@
                 const selectedEmpNames = this.getSelectedPayrollEmployeeNames();
                 const periodAttendances = this.attendances.filter(a => {
                     const date = new Date(a.date + 'T00:00:00');
-                    const matchName = a.employeeName && selectedEmpNames.includes(a.employeeName.trim().toLowerCase());
-                    return date >= startDate && date <= endDate && a.hours && matchName;
+                    const inRange = date >= startDate && date <= endDate && a.hours;
+                    if (!inRange) return false;
+                    if (!selectedEmpNames) return true; // todos seleccionados
+                    return a.employeeName && selectedEmpNames.includes(a.employeeName.trim().toLowerCase());
                 });
                 
                 // Mostrar período seleccionado
@@ -2503,13 +2507,16 @@
                 const payroll = {};
                 
                 // Agrupar por empleado y calcular horas normales vs extras
+                // Usar nombre como key para evitar problemas de ID entre Reloj y Nómina
                 periodAttendances.forEach(att => {
-                    if (!payroll[att.employeeId]) {
-                        const emp = this.employees.find(e => e.id === att.employeeId);
-                        payroll[att.employeeId] = {
+                    const empKey = (att.employeeName || '').trim().toLowerCase();
+                    if (!payroll[empKey]) {
+                        const emp = this.employees.find(e => e.name.trim().toLowerCase() === empKey) ||
+                                    this.employees.find(e => e.id === att.employeeId);
+                        payroll[empKey] = {
                             employeeId: att.employeeId,
                             employeeName: att.employeeName,
-                            rate: emp ? emp.rate : 0,
+                            rate: emp ? parseFloat(emp.rate) || 0 : 0,
                             empDeduction: emp ? (emp.deduction || 0) : 0,
                             regularHours: 0,
                             overtimeHours: 0,
@@ -2526,7 +2533,7 @@
                         };
                     }
                     
-                    const p = payroll[att.employeeId];
+                    const p = payroll[empKey];
                     let dailyHours = Math.round(att.hours * 100) / 100; // Redondear horas del día a 2 decimales
                     
                     // PASO 1: Registrar horas trabajadas (antes de descuentos)
@@ -2871,7 +2878,11 @@
             getSelectedPayrollEmployeeNames() {
                 const checked = document.querySelectorAll('.payroll-emp-check:checked');
                 if (checked.length === 0) return this.employees.map(e => e.name.trim().toLowerCase());
-                return [...checked].map(cb => cb.value);
+                const selected = [...checked].map(cb => cb.value);
+                // Si todos están seleccionados, devolver null para no filtrar
+                const total = document.querySelectorAll('.payroll-emp-check').length;
+                if (selected.length === total) return null;
+                return selected;
             },
             
             getSelectedTimecardEmployeeNames() {
