@@ -2486,9 +2486,14 @@
                 
                 // Filtrar asistencias por rango de fechas y empleados seleccionados
                 const selectedEmpIds = this.getSelectedPayrollEmployeeIds();
+                const selectedEmpNames = this.employees
+                    .filter(e => selectedEmpIds.includes(e.id))
+                    .map(e => e.name.trim().toLowerCase());
                 const periodAttendances = this.attendances.filter(a => {
                     const date = new Date(a.date + 'T00:00:00');
-                    return date >= startDate && date <= endDate && a.hours && selectedEmpIds.includes(a.employeeId);
+                    const matchId   = selectedEmpIds.includes(a.employeeId);
+                    const matchName = a.employeeName && selectedEmpNames.includes(a.employeeName.trim().toLowerCase());
+                    return date >= startDate && date <= endDate && a.hours && (matchId || matchName);
                 });
                 
                 // Mostrar período seleccionado
@@ -3050,7 +3055,10 @@
                 // Same logic as displayTimeCard but returns HTML instead of setting innerHTML
                 const periodAtt = this.attendances.filter(a => {
                     const date = new Date(a.date + 'T00:00:00');  // Forzar medianoche
-                    return a.employeeId === emp.id && date >= startDate && date <= endOfDay;
+                    const matchId   = a.employeeId === emp.id;
+                    const matchName = a.employeeName && emp.name && 
+                                      a.employeeName.trim().toLowerCase() === emp.name.trim().toLowerCase();
+                    return (matchId || matchName) && date >= startDate && date <= endOfDay;
                 });
                 
                 const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
