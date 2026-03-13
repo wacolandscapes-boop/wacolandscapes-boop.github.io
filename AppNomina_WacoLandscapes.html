@@ -4056,7 +4056,17 @@
             async refreshTokenIfNeeded() {
                 if (!this.tokenClient) return;
                 if (!this.tokenExpiry || Date.now() > this.tokenExpiry) {
-                    this.tokenClient.requestAccessToken({ prompt: '' });
+                    // Esperar el nuevo token antes de continuar
+                    await new Promise((resolve) => {
+                        this.tokenClient.callback = (response) => {
+                            if (response.error) { resolve(); return; }
+                            this.driveToken = response.access_token;
+                            this.tokenExpiry = Date.now() + (55 * 60 * 1000);
+                            this.driveConnected = true;
+                            resolve();
+                        };
+                        this.tokenClient.requestAccessToken({ prompt: '' });
+                    });
                 }
             },
 
