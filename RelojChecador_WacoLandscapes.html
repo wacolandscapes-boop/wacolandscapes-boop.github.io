@@ -331,7 +331,7 @@
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.85);
-            z-index: 99999;
+            z-index: 9999;
             justify-content: center;
             align-items: center;
             flex-direction: column;
@@ -561,25 +561,6 @@
                 this.updateClock();
                 setInterval(() => this.updateClock(), 1000);
                 
-                // Sincronizar cuando la app vuelve al primer plano (iOS Safari)
-                document.addEventListener('visibilitychange', () => {
-                    if (!document.hidden && this.driveConnected) {
-                        this.driveDownloadFromNomina().then(() => this.driveSyncNow());
-                    }
-                });
-                window.addEventListener('focus', () => {
-                    if (this.driveConnected) {
-                        this.driveDownloadFromNomina().then(() => this.driveSyncNow());
-                    }
-                });
-                
-                // Restaurar UI de Drive si había sesión activa
-                if (this._restoreDrive) {
-                    document.getElementById('driveBtnLabel').textContent = 'Drive ✅';
-                    document.getElementById('driveBtn').style.background = '#27ae60';
-                    this.startAutoSync(); // Solo inicia el intervalo, no sincroniza inmediatamente
-                }
-                
                 // Datos de ejemplo
                 if (this.employees.length === 0) {
                     this.employees = [
@@ -783,7 +764,8 @@
                 
                 this.save();
                 this.exportDaily();
-                if (this.driveConnected) this.driveDownloadFromNomina().then(() => this.driveSyncNow());
+                
+                // Verificar si llegó tarde
                 const late = this.isLate(time);
                 if (late) {
                     this.showConfirm('⚠️', this.currentEmployee.name, 'ENTRADA TARDE', time, `Hora oficial: ${this.workConfig.startTime}`, '#e67e22');
@@ -793,7 +775,7 @@
                 
                 this.updateEmployeeHours();
                 
-                setTimeout(() => this.logout(), 3500);
+                setTimeout(() => this.logout(), 3000);
             },
             
             checkOut() {
@@ -818,7 +800,8 @@
                 
                 this.save();
                 this.exportDaily();
-                if (this.driveConnected) this.driveSyncNow();
+                
+                // Calcular horas de la semana
                 const weekStart = this.getWeekStart();
                 const weekEnd = new Date(weekStart);
                 weekEnd.setDate(weekStart.getDate() + 6);
@@ -1203,30 +1186,10 @@
                 }
                 
                 // Cargar datos normalmente
-                // Cargar y deduplicar empleados por nombre al iniciar
-                const rawEmployees = JSON.parse(localStorage.getItem('waco_employees') || '[]');
-                const seenNames = new Set();
-                this.employees = rawEmployees.filter(e => {
-                    const key = e.name.trim().toLowerCase();
-                    if (seenNames.has(key)) return false;
-                    seenNames.add(key);
-                    return true;
-                });
+                this.employees = JSON.parse(localStorage.getItem('waco_employees') || '[]');
                 this.attendances = JSON.parse(localStorage.getItem('waco_attendances') || '[]');
                 this.adminPin = localStorage.getItem('waco_adminPin') || '0000';
                 this.workConfig = JSON.parse(localStorage.getItem('waco_workConfig') || '{"startTime":"08:00","lateTolerance":15}');
-                
-                // Restaurar Drive si había token guardado
-                const savedToken = localStorage.getItem('waco_drive_token');
-                const savedExpiry = localStorage.getItem('waco_token_expiry');
-                const savedFolder = localStorage.getItem('waco_drive_folder_id');
-                if (savedToken && savedExpiry && savedFolder && Date.now() < parseInt(savedExpiry)) {
-                    this.driveToken = savedToken;
-                    this.driveFolderId = savedFolder;
-                    this.driveConnected = true;
-                    this.tokenExpiry = parseInt(savedExpiry);
-                    this._restoreDrive = true; // flag para restaurar UI después
-                }
             },
             
             exportDaily() {
@@ -1268,7 +1231,7 @@
 
             driveSync() {
                 if (this.driveConnected) {
-                    this.driveDownloadFromNomina().then(() => this.driveSyncNow());
+                    this.driveSyncNow();
                 } else {
                     this.driveConnect();
                 }
@@ -1284,8 +1247,6 @@
                         this.driveToken = response.access_token;
                         this.driveConnected = true;
                         this.tokenExpiry = Date.now() + (55 * 60 * 1000);
-                        localStorage.setItem('waco_drive_token', this.driveToken);
-                        localStorage.setItem('waco_token_expiry', this.tokenExpiry);
                         document.getElementById('driveBtnLabel').textContent = 'Sincronizar';
                         document.getElementById('driveBtn').style.background = '#27ae60';
                         await this.driveGetOrCreateFolder();
@@ -1321,7 +1282,6 @@
                 const data = await res.json();
                 if (data.files && data.files.length > 0) {
                     this.driveFolderId = data.files[0].id;
-                    localStorage.setItem('waco_drive_folder_id', this.driveFolderId);
                 } else {
                     const r = await fetch('https://www.googleapis.com/drive/v3/files', {
                         method: 'POST',
@@ -1330,7 +1290,6 @@
                     });
                     const d = await r.json();
                     this.driveFolderId = d.id;
-                    localStorage.setItem('waco_drive_folder_id', this.driveFolderId);
                 }
             },
 
@@ -1374,10 +1333,10 @@
                 if (this.autoSyncInterval) clearInterval(this.autoSyncInterval);
                 this.autoSyncInterval = setInterval(async () => {
                     if (this.driveConnected) {
-                        await this.driveDownloadFromNomina();
-                        await this.driveSyncNow();
+                        await this.driveSyncNow(); // Primero sube datos del Reloj
+                        await this.driveDownloadFromNomina(); // Luego baja cambios de Nómina
                     }
-                }, 2 * 60 * 1000); // cada 2 minutos
+                }, 5 * 60 * 1000);
             },
 
             async driveDownloadFromNomina() {
@@ -1389,49 +1348,32 @@
                     );
                     const data = await res.json();
                     if (!data.files || data.files.length === 0) return;
-
                     const fileRes = await fetch(
                         `https://www.googleapis.com/drive/v3/files/${data.files[0].id}?alt=media`,
                         { headers: { Authorization: `Bearer ${this.driveToken}` } }
                     );
                     const nominaData = await fileRes.json();
-
-                    // La Nómina es la fuente de verdad — el Reloj solo recibe empleados de ella
                     if (nominaData.employees && nominaData.employees.length > 0) {
                         this.employees = nominaData.employees;
                     }
                     if (nominaData.workConfig) this.workConfig = nominaData.workConfig;
                     if (nominaData.adminPin) this.adminPin = nominaData.adminPin;
-
-                    // Smart merge - respetar registros borrados desde la Nómina
                     if (nominaData.attendances) {
                         const deletedIds = (nominaData.deletedAttendances || []).map(String);
-                        
-                        // Primero eliminar localmente cualquier registro que fue borrado en Nómina
-                        if (deletedIds.length > 0) {
-                            this.attendances = this.attendances.filter(a => !deletedIds.includes(String(a.id)));
-                        }
-
-                        // Luego hacer merge sin reimportar borrados
-                        nominaData.attendances.forEach(att => {
-                            if (deletedIds.includes(String(att.id))) return; // ignorar borrados
-                            const idx = this.attendances.findIndex(a =>
-                                a.employeeId === att.employeeId && a.date === att.date
-                            );
-                            if (idx < 0) {
-                                this.attendances.push(att);
-                            } else {
-                                const local = this.attendances[idx];
-                                if (!local.checkOut && att.checkOut) {
-                                    this.attendances[idx] = att;
-                                }
-                            }
-                        });
+                        // Filtrar borrados de la lista de nómina
+                        const nominaAtts = nominaData.attendances.filter(a => !deletedIds.includes(String(a.id)));
+                        // Conservar check-ins locales de HOY que aún no llegaron a Nómina
+                        const today = new Date().toISOString().split('T')[0];
+                        const localTodayNew = this.attendances.filter(a =>
+                            a.date === today &&
+                            !deletedIds.includes(String(a.id)) &&
+                            !nominaAtts.find(n => String(n.id) === String(a.id))
+                        );
+                        this.attendances = [...nominaAtts, ...localTodayNew];
                     }
-
                     this.save();
                     this.updateAdminStats();
-                    const syncNow = new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
+                    const syncNow = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
                     document.getElementById('driveBtnLabel').textContent = `Sync ${syncNow}`;
                     document.getElementById('driveBtn').style.background = '#27ae60';
                 } catch(err) {
