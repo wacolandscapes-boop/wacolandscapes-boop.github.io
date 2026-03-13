@@ -555,6 +555,8 @@
             driveFolderId: null,
             tokenExpiry: null,
             autoSyncInterval: null,
+            isSyncing: false,
+            pendingSync: false,
             CLIENT_ID: '1032764332702-uvnqg0ccaer5gp2hr12gmniqe38ria1t.apps.googleusercontent.com',
             FOLDER_NAME: 'WacoLandscapesNomina',
             SCOPES: 'https://www.googleapis.com/auth/drive.file',
@@ -1333,6 +1335,12 @@
 
             async driveSyncNow() {
                 if (!this.driveConnected || !this.driveFolderId) return;
+                // Si ya hay un sync en curso, marcar como pendiente y salir
+                if (this.isSyncing) {
+                    this.pendingSync = true;
+                    return;
+                }
+                this.isSyncing = true;
                 await this.refreshTokenIfNeeded();
                 try {
                     document.getElementById('driveBtnLabel').textContent = 'Sincronizando...';
@@ -1364,6 +1372,13 @@
                 } catch(err) {
                     document.getElementById('driveBtnLabel').textContent = '⚠️ Error';
                     document.getElementById('driveBtn').style.background = '#e74c3c';
+                } finally {
+                    this.isSyncing = false;
+                    // Si hubo registros mientras sincronizaba, volver a sincronizar
+                    if (this.pendingSync) {
+                        this.pendingSync = false;
+                        setTimeout(() => this.driveSyncNow(), 500);
+                    }
                 }
             },
 
