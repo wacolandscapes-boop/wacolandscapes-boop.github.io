@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://accounts.google.com/gsi/client" async></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🌿 Waco Landscapes & Irrigation - Nómina</title>
     <style>
@@ -3905,6 +3905,10 @@
             },
 
             driveConnect() {
+                if (typeof google === 'undefined' || !google.accounts) {
+                    alert('⚠️ Google no cargó correctamente. Recarga la página e intenta de nuevo.');
+                    return;
+                }
                 this.tokenClient = google.accounts.oauth2.initTokenClient({
                     client_id: this.CLIENT_ID,
                     scope: this.SCOPES,
