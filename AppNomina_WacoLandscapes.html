@@ -770,11 +770,15 @@
                     </div>
                 </div>
                 <div class="form-grid" style="margin-bottom: 20px;">
-                    <div class="form-group">
-                        <label>Filtrar por empleado:</label>
-                        <select id="filterEmployee" onchange="app.refreshAttendances()">
-                            <option value="all">Todos</option>
-                        </select>
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label style="margin:0;">Filtrar por empleado:</label>
+                            <div style="display:flex; gap:6px;">
+                                <button class="btn btn-success" onclick="app.selectAllAttFilter()" style="padding:4px 10px; font-size:0.8rem;">✅ Todos</button>
+                                <button class="btn btn-danger" onclick="app.selectNoneAttFilter()" style="padding:4px 10px; font-size:0.8rem;">❌ Ninguno</button>
+                            </div>
+                        </div>
+                        <div id="attFilterCheckboxes" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px,1fr)); gap:6px; background:#f9f9f9; padding:10px; border-radius:8px; border:1px solid #e0e0e0;"></div>
                     </div>
                     <div class="form-group">
                         <label>Período:</label>
@@ -1730,12 +1734,7 @@
                 html += '</tbody></table>';
                 container.innerHTML = html;
                 
-                // Actualizar filtro
-                const filter = document.getElementById('filterEmployee');
-                filter.innerHTML = '<option value="all">Todos</option>';
-                [...this.employees].sort((a,b) => a.name.localeCompare(b.name)).forEach(emp => {
-                    filter.innerHTML += `<option value="${emp.id}">${emp.name}</option>`;
-                });
+                // Los checkboxes se renderizan en refreshAttendances()
             },
             
             // ASISTENCIAS
@@ -2070,6 +2069,39 @@
                 this.refreshAttendances();
             },
             
+            renderAttFilterCheckboxes() {
+                const container = document.getElementById('attFilterCheckboxes');
+                if (!container) return;
+                const current = [...document.querySelectorAll('.att-emp-check:checked')].map(cb => cb.value);
+                const hasExisting = document.querySelectorAll('.att-emp-check').length > 0;
+                const sorted = [...this.employees].sort((a,b) => a.name.localeCompare(b.name));
+                container.innerHTML = sorted.map(emp => {
+                    const val = emp.name.trim().toLowerCase();
+                    const isChecked = !hasExisting || current.includes(val);
+                    return `<label style="display:flex; align-items:center; gap:7px; background:white; padding:7px 10px; border-radius:6px; cursor:pointer; border:1px solid #e0e0e0; font-size:0.875rem;">
+                        <input type="checkbox" class="att-emp-check" value="${val}" ${isChecked ? 'checked' : ''} onchange="app.refreshAttendances()" style="width:15px; height:15px; accent-color:#2e7d32;">
+                        <span>${emp.name}</span>
+                    </label>`;
+                }).join('');
+            },
+
+            selectAllAttFilter() {
+                document.querySelectorAll('.att-emp-check').forEach(cb => { cb.checked = true; });
+                this.refreshAttendances();
+            },
+
+            selectNoneAttFilter() {
+                document.querySelectorAll('.att-emp-check').forEach(cb => { cb.checked = false; });
+                this.refreshAttendances();
+            },
+
+            getSelectedAttEmployeeNames() {
+                const all = document.querySelectorAll('.att-emp-check');
+                const checked = document.querySelectorAll('.att-emp-check:checked');
+                if (all.length === 0 || all.length === checked.length) return null; // todos
+                return [...checked].map(cb => cb.value);
+            },
+
             renderWeeklySummary() {
                 const container = document.getElementById('weeklyHoursSummary');
                 if (!container) return;
@@ -2086,9 +2118,12 @@
                 const weekLabel = weekStart.toLocaleDateString('en-US', {month:'short', day:'numeric'}) +
                     ' – ' + weekEnd.toLocaleDateString('en-US', {month:'short', day:'numeric'});
 
-                // Horas por empleado esta semana (match por nombre o ID, incluye pendientes)
+                // Horas por empleado esta semana (solo empleados seleccionados)
+                const selectedForSummary = this.getSelectedAttEmployeeNames();
                 const empHours = {};
-                this.employees.forEach(emp => {
+                this.employees.filter(emp =>
+                    !selectedForSummary || selectedForSummary.includes(emp.name.trim().toLowerCase())
+                ).forEach(emp => {
                     const atts = this.attendances.filter(a => {
                         const d = new Date(a.date + 'T00:00:00');
                         const matchId   = a.employeeId === emp.id;
@@ -2133,15 +2168,19 @@
             },
 
             refreshAttendances() {
+                this.renderAttFilterCheckboxes();
                 this.renderWeeklySummary();
-                const filterEmp = document.getElementById('filterEmployee').value;
                 const filterPeriod = document.getElementById('filterPeriod').value;
+                const filterEmp = 'all'; // mantenido para compatibilidad
                 
                 let filtered = this.attendances;
                 
-                // Filtro por empleado
-                if (filterEmp !== 'all') {
-                    filtered = filtered.filter(a => a.employeeId === filterEmp);
+                // Filtro por empleado (checkboxes)
+                const selectedAttNames = this.getSelectedAttEmployeeNames();
+                if (selectedAttNames) {
+                    filtered = filtered.filter(a =>
+                        a.employeeName && selectedAttNames.includes(a.employeeName.trim().toLowerCase())
+                    );
                 }
                 
                 // Helper fecha local
