@@ -2109,7 +2109,10 @@
                 // Semana actual: domingo a sábado (igual que el Reloj)
                 const today = new Date();
                 const weekStart = new Date(today);
-                weekStart.setDate(today.getDate() - today.getDay()); // retroceder al domingo
+                const weekStartDay = this.workConfig.weekStartDay || 1; // lunes por defecto
+                const currentDay = today.getDay(); // 0=dom, 1=lun...
+                const diffToStart = (currentDay - weekStartDay + 7) % 7;
+                weekStart.setDate(today.getDate() - diffToStart);
                 weekStart.setHours(0, 0, 0, 0);
                 const weekEnd = new Date(weekStart);
                 weekEnd.setDate(weekStart.getDate() + 6);
