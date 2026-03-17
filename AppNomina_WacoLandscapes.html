@@ -4401,6 +4401,15 @@
             },
             
             loadData() {
+                // MIGRACIÓN AUTOMÁTICA: keys anas_ → waco_
+                const anasToWaco = ['employees','attendances','deleted_att','payroll','payroll_periods','adminPin','workConfig','checkConfig'];
+                anasToWaco.forEach(k => {
+                    if (!localStorage.getItem('waco_' + k) && localStorage.getItem('anas_' + k)) {
+                        localStorage.setItem('waco_' + k, localStorage.getItem('anas_' + k));
+                        console.log('✅ Migrado anas_' + k + ' → waco_' + k);
+                    }
+                });
+
                 // MIGRACIÓN AUTOMÁTICA: Importar datos de versiones anteriores
                 if (!localStorage.getItem('waco_employees')) {
                     const oldKeys = ['nomina_employees', 'employees', 'app_employees', 'payroll_employees'];
