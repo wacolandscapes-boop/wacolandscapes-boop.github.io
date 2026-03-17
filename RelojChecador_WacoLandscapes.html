@@ -1413,7 +1413,7 @@
                     if (nominaData.adminPin) this.adminPin = nominaData.adminPin;
                     if (nominaData.attendances) {
                         const deletedIds = (nominaData.deletedAttendances || []).map(String);
-                        // Filtrar borrados de la lista de nómina
+                        // Filtrar borrados
                         const nominaAtts = nominaData.attendances.filter(a => !deletedIds.includes(String(a.id)));
                         // Conservar check-ins locales de HOY que aún no llegaron a Nómina
                         const today = new Date().toISOString().split('T')[0];
@@ -1422,7 +1422,19 @@
                             !deletedIds.includes(String(a.id)) &&
                             !nominaAtts.find(n => String(n.id) === String(a.id))
                         );
-                        this.attendances = [...nominaAtts, ...localTodayNew];
+                        // Merge inteligente por updatedAt — ediciones de Nómina ganan si son más recientes
+                        const merged = [...nominaAtts];
+                        localTodayNew.forEach(local => {
+                            const idx = merged.findIndex(n => String(n.id) === String(local.id));
+                            if (idx < 0) {
+                                merged.push(local);
+                            } else {
+                                const localTime = local.updatedAt || local.checkIn || '';
+                                const remoteTime = merged[idx].updatedAt || merged[idx].checkIn || '';
+                                if (localTime > remoteTime) merged[idx] = local;
+                            }
+                        });
+                        this.attendances = merged;
                     }
                     this.save();
                     this.updateAdminStats();
