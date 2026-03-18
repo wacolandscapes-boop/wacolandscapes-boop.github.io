@@ -4259,20 +4259,27 @@
                     const deletedIds = (this.deletedAttendances || []).map(String);
                     (clockData.attendances || []).forEach(att => {
                         if (deletedIds.includes(String(att.id))) return; // ignorar borrados
-                        // Buscar por ID o por nombre+fecha (los IDs pueden diferir entre Reloj y Nómina)
-                        const idx = this.attendances.findIndex(a =>
-                            a.date === att.date && (
-                                a.employeeId === att.employeeId ||
-                                (a.employeeName && att.employeeName &&
-                                 a.employeeName.trim().toLowerCase() === att.employeeName.trim().toLowerCase())
-                            )
+
+                        // Normalizar employeeId del Reloj al ID correcto de la Nómina por nombre
+                        const empMatch = this.employees.find(e =>
+                            e.name && att.employeeName &&
+                            e.name.trim().toLowerCase() === att.employeeName.trim().toLowerCase()
                         );
+                        if (empMatch) {
+                            att.employeeId = empMatch.id; // usar ID de la Nómina
+                            att.employeeName = empMatch.name; // normalizar nombre también
+                        }
+
+                        // Buscar por employeeId+date
+                        let idx = this.attendances.findIndex(a =>
+                            a.date === att.date && a.employeeId === att.employeeId
+                        );
+
                         if (idx >= 0) {
                             const local = this.attendances[idx];
-                            if (!local.checkOut && att.checkOut) {
-                                this.attendances[idx] = att;
-                                updated++;
-                            } else if (local.checkOut && att.checkOut) {
+                            const localTime = local.updatedAt || local.checkOut || local.checkIn || '';
+                            const remoteTime = att.updatedAt || att.checkOut || att.checkIn || '';
+                            if (remoteTime > localTime || (!local.checkOut && att.checkOut)) {
                                 this.attendances[idx] = att;
                                 updated++;
                             }
