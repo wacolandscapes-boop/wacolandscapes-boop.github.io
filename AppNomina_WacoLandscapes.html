@@ -4193,12 +4193,29 @@
                     );
                     const data = await fileRes.json();
 
-                    // Load data into app
+                    // Load data into app — merge inteligente para asistencias
                     if (data.employees) this.employees = data.employees;
-                    if (data.attendances) this.attendances = data.attendances;
                     if (data.payrollRecords) this.payrollRecords = data.payrollRecords;
                     if (data.savedPayrollPeriods) this.savedPayrollPeriods = data.savedPayrollPeriods;
                     if (data.workConfig) this.workConfig = data.workConfig;
+
+                    // Merge asistencias — no sobreescribir, combinar por employeeId+date
+                    if (data.attendances) {
+                        data.attendances.forEach(remote => {
+                            const idx = this.attendances.findIndex(a =>
+                                a.employeeId === remote.employeeId && a.date === remote.date
+                            );
+                            if (idx < 0) {
+                                this.attendances.push(remote); // nueva
+                            } else {
+                                const localTime = this.attendances[idx].updatedAt || this.attendances[idx].checkIn || '';
+                                const remoteTime = remote.updatedAt || remote.checkIn || '';
+                                if (remoteTime > localTime) {
+                                    this.attendances[idx] = remote; // remoto más reciente
+                                }
+                            }
+                        });
+                    }
 
                     // Save to localStorage
                     localStorage.setItem('waco_employees', JSON.stringify(this.employees));
