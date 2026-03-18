@@ -1408,6 +1408,17 @@
                     const nominaData = await fileRes.json();
                     if (nominaData.employees && nominaData.employees.length > 0) {
                         this.employees = nominaData.employees;
+                        // Normalizar IDs viejos en asistencias locales usando los empleados actualizados
+                        this.attendances.forEach(a => {
+                            const emp = this.employees.find(e =>
+                                e.name && a.employeeName &&
+                                e.name.trim().toLowerCase() === a.employeeName.trim().toLowerCase()
+                            );
+                            if (emp && emp.id !== a.employeeId) {
+                                a.employeeId = emp.id;
+                                a.employeeName = emp.name;
+                            }
+                        });
                     }
                     if (nominaData.workConfig) this.workConfig = nominaData.workConfig;
                     if (nominaData.adminPin) this.adminPin = nominaData.adminPin;
