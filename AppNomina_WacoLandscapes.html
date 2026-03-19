@@ -1203,17 +1203,6 @@
                 this.loadData();
                 this.refreshEmployees();
                 this.refreshAttendances();
-                // Mostrar indicador si hay cambios pendientes de subir
-                if (localStorage.getItem('waco_pendingSync') === 'true') {
-                    setTimeout(() => {
-                        const btn = document.getElementById('driveSyncBtn');
-                        const lbl = document.getElementById('driveSyncLabel');
-                        if (btn && lbl) {
-                            btn.style.background = '#e67e22';
-                            lbl.textContent = '⚠️ Cambios sin subir';
-                        }
-                    }, 500);
-                }
                 const adminPinField = document.getElementById('adminPin');
                 if (adminPinField) adminPinField.value = this.adminPin;
                 this.loadWorkConfig();
@@ -1460,7 +1449,7 @@
                 };
                 console.log('Nueva configuración:', this.workConfig);
                 this.save();
-                console.log('Guardado en localStorage:', localStorage.getItem('waco_workConfig'));
+                console.log('Guardado en localStorage:', localStorage.getItem('anas_workConfig'));
                 this.updateNextPaymentDisplay();
                 alert('✅ Configuración guardada correctamente');
                 this.refreshAttendances();
@@ -1821,7 +1810,7 @@
                 if (!this.deletedAttendances) this.deletedAttendances = [];
                 if (!this.deletedAttendances.includes(String(id))) {
                     this.deletedAttendances.push(String(id));
-                    localStorage.setItem('waco_deleted_att', JSON.stringify(this.deletedAttendances));
+                    localStorage.setItem('anas_deleted_att', JSON.stringify(this.deletedAttendances));
                 }
                 this.attendances = this.attendances.filter(a => a.id !== id && String(a.id) !== String(id));
                 this.save();
@@ -1954,7 +1943,6 @@
                         att.checkIn = checkIn;
                         att.checkOut = checkOut;
                         att.hours = checkOut ? hours : null;
-                        att.updatedAt = new Date().toISOString();
                         this.save();
                         this.closeAttendanceModal();
                         this.refreshAttendances();
@@ -2121,10 +2109,7 @@
                 // Semana actual: domingo a sábado (igual que el Reloj)
                 const today = new Date();
                 const weekStart = new Date(today);
-                const weekStartDay = this.workConfig.weekStartDay || 1; // lunes por defecto
-                const currentDay = today.getDay(); // 0=dom, 1=lun...
-                const diffToStart = (currentDay - weekStartDay + 7) % 7;
-                weekStart.setDate(today.getDate() - diffToStart);
+                weekStart.setDate(today.getDate() - today.getDay()); // retroceder al domingo
                 weekStart.setHours(0, 0, 0, 0);
                 const weekEnd = new Date(weekStart);
                 weekEnd.setDate(weekStart.getDate() + 6);
@@ -4054,11 +4039,9 @@
                         if (this.employees.length === 0) {
                             await this.driveDownloadNomina();
                         } else {
+                            // Ya tiene datos, subir a Drive
                             await this.driveSyncNow();
                         }
-                        // Limpiar flag de pendientes
-                        localStorage.removeItem('waco_pendingSync');
-                        localStorage.removeItem('waco_pendingSyncAt');
                         // Show toast instead of blocking alert
                         const toast = document.createElement('div');
                         toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#27ae60;color:white;padding:15px 20px;border-radius:10px;z-index:9999;font-size:1rem;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
@@ -4073,17 +4056,7 @@
             async refreshTokenIfNeeded() {
                 if (!this.tokenClient) return;
                 if (!this.tokenExpiry || Date.now() > this.tokenExpiry) {
-                    // Esperar el nuevo token antes de continuar
-                    await new Promise((resolve) => {
-                        this.tokenClient.callback = (response) => {
-                            if (response.error) { resolve(); return; }
-                            this.driveToken = response.access_token;
-                            this.tokenExpiry = Date.now() + (55 * 60 * 1000);
-                            this.driveConnected = true;
-                            resolve();
-                        };
-                        this.tokenClient.requestAccessToken({ prompt: '' });
-                    });
+                    this.tokenClient.requestAccessToken({ prompt: '' });
                 }
             },
 
@@ -4129,40 +4102,10 @@
                 await this.refreshTokenIfNeeded();
                 try {
                     document.getElementById('driveSyncLabel').textContent = 'Sincronizando...';
-
-                    // Merge empleados con Drive antes de subir — nunca sobreescribir
-                    let mergedEmployees = [...this.employees];
-                    try {
-                        const searchRes = await fetch(
-                            `https://www.googleapis.com/drive/v3/files?q=name='waco_nomina_sync.json'+and+'${this.driveFolderId}'+in+parents+and+trashed=false&fields=files(id)`,
-                            { headers: { Authorization: `Bearer ${this.driveToken}` } }
-                        );
-                        const searchData = await searchRes.json();
-                        if (searchData.files && searchData.files.length > 0) {
-                            const fileRes = await fetch(
-                                `https://www.googleapis.com/drive/v3/files/${searchData.files[0].id}?alt=media`,
-                                { headers: { Authorization: `Bearer ${this.driveToken}` } }
-                            );
-                            const driveData = await fileRes.json();
-                            if (driveData.employees) {
-                                driveData.employees.forEach(remote => {
-                                    const idx = mergedEmployees.findIndex(e => e.id === remote.id);
-                                    if (idx < 0) {
-                                        mergedEmployees.push(remote);
-                                        this.employees.push(remote);
-                                        localStorage.setItem('waco_employees', JSON.stringify(this.employees));
-                                    }
-                                });
-                            }
-                        }
-                    } catch(mergeErr) {
-                        console.warn('Merge pre-upload warning:', mergeErr);
-                    }
-
                     const data = {
                         exportType: 'nomina_sync', exportDate: new Date().toISOString(),
                         source: "Waco Landscapes Nomina",
-                        employees: mergedEmployees, attendances: this.attendances,
+                        employees: this.employees, attendances: this.attendances,
                         deletedAttendances: this.deletedAttendances || [],
                         payrollRecords: this.payrollRecords, savedPayrollPeriods: this.savedPayrollPeriods,
                         adminPin: this.adminPin, workConfig: this.workConfig
@@ -4193,36 +4136,19 @@
                     );
                     const data = await fileRes.json();
 
-                    // Load data into app — merge inteligente para asistencias
+                    // Load data into app
                     if (data.employees) this.employees = data.employees;
+                    if (data.attendances) this.attendances = data.attendances;
                     if (data.payrollRecords) this.payrollRecords = data.payrollRecords;
                     if (data.savedPayrollPeriods) this.savedPayrollPeriods = data.savedPayrollPeriods;
                     if (data.workConfig) this.workConfig = data.workConfig;
 
-                    // Merge asistencias — no sobreescribir, combinar por employeeId+date
-                    if (data.attendances) {
-                        data.attendances.forEach(remote => {
-                            const idx = this.attendances.findIndex(a =>
-                                a.employeeId === remote.employeeId && a.date === remote.date
-                            );
-                            if (idx < 0) {
-                                this.attendances.push(remote); // nueva
-                            } else {
-                                const localTime = this.attendances[idx].updatedAt || this.attendances[idx].checkIn || '';
-                                const remoteTime = remote.updatedAt || remote.checkIn || '';
-                                if (remoteTime > localTime) {
-                                    this.attendances[idx] = remote; // remoto más reciente
-                                }
-                            }
-                        });
-                    }
-
                     // Save to localStorage
-                    localStorage.setItem('waco_employees', JSON.stringify(this.employees));
-                    localStorage.setItem('waco_attendances', JSON.stringify(this.attendances));
-                    localStorage.setItem('waco_payroll', JSON.stringify(this.payrollRecords));
-                    localStorage.setItem('waco_payroll_periods', JSON.stringify(this.savedPayrollPeriods));
-                    localStorage.setItem('waco_workConfig', JSON.stringify(this.workConfig));
+                    localStorage.setItem('anas_employees', JSON.stringify(this.employees));
+                    localStorage.setItem('anas_attendances', JSON.stringify(this.attendances));
+                    localStorage.setItem('anas_payroll', JSON.stringify(this.payrollRecords));
+                    localStorage.setItem('anas_payroll_periods', JSON.stringify(this.savedPayrollPeriods));
+                    localStorage.setItem('anas_workConfig', JSON.stringify(this.workConfig));
 
                     // Refresh UI
                     this.refreshEmployees();
@@ -4259,27 +4185,20 @@
                     const deletedIds = (this.deletedAttendances || []).map(String);
                     (clockData.attendances || []).forEach(att => {
                         if (deletedIds.includes(String(att.id))) return; // ignorar borrados
-
-                        // Normalizar employeeId del Reloj al ID correcto de la Nómina por nombre
-                        const empMatch = this.employees.find(e =>
-                            e.name && att.employeeName &&
-                            e.name.trim().toLowerCase() === att.employeeName.trim().toLowerCase()
+                        // Buscar por ID o por nombre+fecha (los IDs pueden diferir entre Reloj y Nómina)
+                        const idx = this.attendances.findIndex(a =>
+                            a.date === att.date && (
+                                a.employeeId === att.employeeId ||
+                                (a.employeeName && att.employeeName &&
+                                 a.employeeName.trim().toLowerCase() === att.employeeName.trim().toLowerCase())
+                            )
                         );
-                        if (empMatch) {
-                            att.employeeId = empMatch.id; // usar ID de la Nómina
-                            att.employeeName = empMatch.name; // normalizar nombre también
-                        }
-
-                        // Buscar por employeeId+date
-                        let idx = this.attendances.findIndex(a =>
-                            a.date === att.date && a.employeeId === att.employeeId
-                        );
-
                         if (idx >= 0) {
                             const local = this.attendances[idx];
-                            const localTime = local.updatedAt || local.checkOut || local.checkIn || '';
-                            const remoteTime = att.updatedAt || att.checkOut || att.checkIn || '';
-                            if (remoteTime > localTime || (!local.checkOut && att.checkOut)) {
+                            if (!local.checkOut && att.checkOut) {
+                                this.attendances[idx] = att;
+                                updated++;
+                            } else if (local.checkOut && att.checkOut) {
                                 this.attendances[idx] = att;
                                 updated++;
                             }
@@ -4403,80 +4322,60 @@
             
             // PERSISTENCIA
             save() {
-                if (this.driveConnected) {
-                    setTimeout(() => this.driveSyncNow(), 500);
-                } else {
-                    localStorage.setItem('waco_pendingSync', 'true');
-                    localStorage.setItem('waco_pendingSyncAt', new Date().toISOString());
-                    const btn = document.getElementById('driveSyncBtn');
-                    const lbl = document.getElementById('driveSyncLabel');
-                    if (btn && lbl) {
-                        btn.style.background = '#e67e22';
-                        lbl.textContent = '⚠️ Cambios sin subir';
-                    }
-                }
-                localStorage.setItem('waco_employees', JSON.stringify(this.employees));
-                localStorage.setItem('waco_attendances', JSON.stringify(this.attendances));
-                localStorage.setItem('waco_payroll', JSON.stringify(this.payrollRecords));
-                localStorage.setItem('waco_payroll_periods', JSON.stringify(this.savedPayrollPeriods));
-                localStorage.setItem('waco_adminPin', this.adminPin);
-                localStorage.setItem('waco_workConfig', JSON.stringify(this.workConfig));
-                localStorage.setItem('waco_checkConfig', JSON.stringify(this.checkConfig));
+                if (this.driveConnected) setTimeout(() => this.driveSyncNow(), 500);
+                localStorage.setItem('anas_employees', JSON.stringify(this.employees));
+                localStorage.setItem('anas_attendances', JSON.stringify(this.attendances));
+                localStorage.setItem('anas_payroll', JSON.stringify(this.payrollRecords));
+                localStorage.setItem('anas_payroll_periods', JSON.stringify(this.savedPayrollPeriods));
+                localStorage.setItem('anas_adminPin', this.adminPin);
+                localStorage.setItem('anas_workConfig', JSON.stringify(this.workConfig));
+                localStorage.setItem('anas_checkConfig', JSON.stringify(this.checkConfig));
             },
             
             loadData() {
-                // MIGRACIÓN AUTOMÁTICA: keys anas_ → waco_
-                const anasToWaco = ['employees','attendances','deleted_att','payroll','payroll_periods','adminPin','workConfig','checkConfig'];
-                anasToWaco.forEach(k => {
-                    if (!localStorage.getItem('waco_' + k) && localStorage.getItem('anas_' + k)) {
-                        localStorage.setItem('waco_' + k, localStorage.getItem('anas_' + k));
-                        console.log('✅ Migrado anas_' + k + ' → waco_' + k);
-                    }
-                });
-
                 // MIGRACIÓN AUTOMÁTICA: Importar datos de versiones anteriores
-                if (!localStorage.getItem('waco_employees')) {
+                if (!localStorage.getItem('anas_employees')) {
                     const oldKeys = ['nomina_employees', 'employees', 'app_employees', 'payroll_employees'];
                     for (const key of oldKeys) {
                         const oldData = localStorage.getItem(key);
                         if (oldData) {
-                            localStorage.setItem('waco_employees', oldData);
+                            localStorage.setItem('anas_employees', oldData);
                             console.log('✅ Empleados migrados desde', key);
                             break;
                         }
                     }
                 }
                 
-                if (!localStorage.getItem('waco_attendances')) {
+                if (!localStorage.getItem('anas_attendances')) {
                     const oldKeys = ['nomina_attendances', 'attendances', 'app_attendances', 'payroll_attendances'];
                     for (const key of oldKeys) {
                         const oldData = localStorage.getItem(key);
                         if (oldData) {
-                            localStorage.setItem('waco_attendances', oldData);
+                            localStorage.setItem('anas_attendances', oldData);
                             console.log('✅ Asistencias migradas desde', key);
                             break;
                         }
                     }
                 }
                 
-                if (!localStorage.getItem('waco_payroll')) {
+                if (!localStorage.getItem('anas_payroll')) {
                     const oldKeys = ['nomina_payroll', 'payrollRecords', 'payroll', 'checks'];
                     for (const key of oldKeys) {
                         const oldData = localStorage.getItem(key);
                         if (oldData) {
-                            localStorage.setItem('waco_payroll', oldData);
+                            localStorage.setItem('anas_payroll', oldData);
                             console.log('✅ Registros de nómina migrados desde', key);
                             break;
                         }
                     }
                 }
                 
-                if (!localStorage.getItem('waco_adminPin')) {
+                if (!localStorage.getItem('anas_adminPin')) {
                     const oldKeys = ['nomina_adminPin', 'adminPin', 'app_adminPin', 'payroll_adminPin'];
                     for (const key of oldKeys) {
                         const oldData = localStorage.getItem(key);
                         if (oldData) {
-                            localStorage.setItem('waco_adminPin', oldData);
+                            localStorage.setItem('anas_adminPin', oldData);
                             console.log('✅ PIN admin migrado desde', key);
                             break;
                         }
@@ -4484,12 +4383,12 @@
                 }
                 
                 // Cargar datos normalmente
-                this.employees = JSON.parse(localStorage.getItem('waco_employees') || '[]');
-                this.attendances = JSON.parse(localStorage.getItem('waco_attendances') || '[]');
-                this.deletedAttendances = JSON.parse(localStorage.getItem('waco_deleted_att') || '[]');
-                this.payrollRecords = JSON.parse(localStorage.getItem('waco_payroll') || '[]');
-                this.savedPayrollPeriods = JSON.parse(localStorage.getItem('waco_payroll_periods') || '[]');
-                this.adminPin = localStorage.getItem('waco_adminPin') || '0000';
+                this.employees = JSON.parse(localStorage.getItem('anas_employees') || '[]');
+                this.attendances = JSON.parse(localStorage.getItem('anas_attendances') || '[]');
+                this.deletedAttendances = JSON.parse(localStorage.getItem('anas_deleted_att') || '[]');
+                this.payrollRecords = JSON.parse(localStorage.getItem('anas_payroll') || '[]');
+                this.savedPayrollPeriods = JSON.parse(localStorage.getItem('anas_payroll_periods') || '[]');
+                this.adminPin = localStorage.getItem('anas_adminPin') || '0000';
                 
                 const defaultConfig = {
                     startTime: '08:00',
@@ -4511,10 +4410,10 @@
                     lateDeductionMax: 30
                 };
                 
-                const savedConfig = JSON.parse(localStorage.getItem('waco_workConfig') || '{}');
+                const savedConfig = JSON.parse(localStorage.getItem('anas_workConfig') || '{}');
                 this.workConfig = Object.assign({}, defaultConfig, savedConfig);
                 console.log('=== CARGANDO CONFIGURACIÓN ===');
-                console.log('Desde localStorage:', localStorage.getItem('waco_workConfig'));
+                console.log('Desde localStorage:', localStorage.getItem('anas_workConfig'));
                 console.log('workConfig cargado:', this.workConfig);
                 
                 const defaultCheckConfig = {
@@ -4532,7 +4431,7 @@
                     words_left: 0.5
                 };
                 
-                this.checkConfig = JSON.parse(localStorage.getItem('waco_checkConfig') || JSON.stringify(defaultCheckConfig));
+                this.checkConfig = JSON.parse(localStorage.getItem('anas_checkConfig') || JSON.stringify(defaultCheckConfig));
             }
         };
         
