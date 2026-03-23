@@ -598,8 +598,9 @@
                 this.updateClock();
                 setInterval(() => this.updateClock(), 1000);
                 this.updateTodayPanel();
-                // Actualizar panel cada minuto
                 setInterval(() => this.updateTodayPanel(), 60000);
+                // Limpiar IDs duplicados automáticamente al cargar
+                this.cleanDuplicateIds();
                 
                 // Datos de ejemplo
                 if (this.employees.length === 0) {
@@ -894,6 +895,48 @@
                 this.clearPin();
             },
             
+            cleanDuplicateIds() {
+                // IDs viejos del Reloj que causan duplicados en la Nómina
+                const idMap = {
+                    'emp1772918357157': 'emp1772913505187', // Fidel
+                    'emp1772918413597': 'emp1772913619812'  // Jesus
+                };
+                const nameMap = {
+                    'emp1772913505187': 'Fidel De La Cruz',
+                    'emp1772913619812': 'Jesus Perez'
+                };
+                let fixed = 0;
+
+                // Normalizar asistencias
+                this.attendances.forEach(a => {
+                    if (idMap[a.employeeId]) {
+                        a.employeeId = idMap[a.employeeId];
+                        a.employeeName = nameMap[a.employeeId] || a.employeeName;
+                        fixed++;
+                    }
+                });
+
+                // Eliminar asistencias duplicadas
+                const seen = {};
+                const before = this.attendances.length;
+                this.attendances = this.attendances.filter(a => {
+                    const key = a.employeeId + '_' + a.date;
+                    if (seen[key]) return false;
+                    seen[key] = true;
+                    return true;
+                });
+                const removed = before - this.attendances.length;
+
+                // Eliminar empleados con IDs viejos
+                const oldIds = Object.keys(idMap);
+                this.employees = this.employees.filter(e => !oldIds.includes(e.id));
+
+                if (fixed > 0 || removed > 0) {
+                    console.log(`✅ Limpieza automática: ${fixed} asistencias normalizadas, ${removed} duplicados eliminados`);
+                    this.save();
+                }
+            },
+
             updateSyncStatus(status, lastTime) {
                 const dot = document.getElementById('syncDot');
                 const txt = document.getElementById('syncStatusText');
@@ -1566,6 +1609,8 @@
                                 a.employeeName = emp.name;
                             }
                         });
+                        // Limpiar IDs hardcodeados por si acaso
+                        this.cleanDuplicateIds();
                     }
                     if (nominaData.workConfig) this.workConfig = nominaData.workConfig;
                     if (nominaData.adminPin) this.adminPin = nominaData.adminPin;
