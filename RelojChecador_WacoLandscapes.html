@@ -468,6 +468,16 @@
             <button class="admin-btn" onclick="app.openAdmin()">⚙️ Administrador</button>
         </div>
 
+        <!-- SYNC STATUS PANEL -->
+        <div id="syncStatusPanel" style="margin:12px 16px 0; background:white; border-radius:14px; padding:10px 14px; box-shadow:0 2px 10px rgba(0,0,0,0.1); display:flex; align-items:center; gap:10px;">
+            <div id="syncDot" style="width:10px; height:10px; border-radius:50%; background:#e74c3c; flex-shrink:0;"></div>
+            <div style="flex:1;">
+                <div id="syncStatusText" style="font-size:0.78rem; font-weight:700; color:#2c3e50;">☁️ Sin conectar</div>
+                <div id="syncLastTime" style="font-size:0.68rem; color:#aaa; margin-top:1px;">—</div>
+            </div>
+            <button id="syncNowBtn" onclick="app.manualSync()" style="background:#27ae60; color:white; border:none; border-radius:10px; padding:8px 14px; font-size:0.78rem; font-weight:800; cursor:pointer; -webkit-text-fill-color:white;">🔄 Sync</button>
+        </div>
+
         <!-- ASISTENCIA DEL DÍA -->
         <div id="todayPanel" style="margin:12px 16px 0; background:white; border-radius:14px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
             <div style="background:#2c3e50; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
@@ -884,6 +894,47 @@
                 this.clearPin();
             },
             
+            updateSyncStatus(status, lastTime) {
+                const dot = document.getElementById('syncDot');
+                const txt = document.getElementById('syncStatusText');
+                const sub = document.getElementById('syncLastTime');
+                const btn = document.getElementById('syncNowBtn');
+                if (!dot) return;
+                if (status === 'connected') {
+                    dot.style.background = '#27ae60';
+                    txt.textContent = '☁️ Drive conectado';
+                    txt.style.color = '#27ae60';
+                    btn.style.background = '#27ae60';
+                    btn.textContent = '🔄 Sync';
+                } else if (status === 'syncing') {
+                    dot.style.background = '#f39c12';
+                    txt.textContent = '🔄 Sincronizando...';
+                    txt.style.color = '#f39c12';
+                } else if (status === 'error') {
+                    dot.style.background = '#e74c3c';
+                    txt.textContent = '⚠️ Token expirado — Toca Sync';
+                    txt.style.color = '#e74c3c';
+                    btn.style.background = '#e74c3c';
+                    btn.textContent = '🔁 Reconectar';
+                } else {
+                    dot.style.background = '#bbb';
+                    txt.textContent = '☁️ Sin conectar';
+                    txt.style.color = '#aaa';
+                }
+                if (lastTime) sub.textContent = 'Última sync: ' + lastTime;
+            },
+
+            async manualSync() {
+                if (!this.driveConnected) {
+                    // Reconectar Drive
+                    this.driveSync();
+                    return;
+                }
+                this.updateSyncStatus('syncing');
+                await this.driveSyncNow();
+                await this.driveDownloadFromNomina();
+            },
+
             updateTodayPanel() {
                 const today = new Date().toISOString().split('T')[0];
                 const todayStr = new Date().toLocaleDateString('es-MX', { weekday:'long', day:'numeric', month:'long' });
@@ -1395,7 +1446,16 @@
             async refreshTokenIfNeeded() {
                 if (!this.tokenClient) return;
                 if (!this.tokenExpiry || Date.now() > this.tokenExpiry) {
+                    // Token expirado — detener autosync y avisar visualmente
+                    this.driveConnected = false;
+                    if (this.autoSyncInterval) {
+                        clearInterval(this.autoSyncInterval);
+                        this.autoSyncInterval = null;
+                    }
+                    this.updateSyncStatus('error');
+                    // Intentar renovar sin prompt (silencioso)
                     this.tokenClient.requestAccessToken({ prompt: '' });
+                    throw new Error('Token expirado');
                 }
             },
 
@@ -1474,7 +1534,7 @@
                         await this.driveSyncNow(); // Primero sube datos del Reloj
                         await this.driveDownloadFromNomina(); // Luego baja cambios de Nómina
                     }
-                }, 5 * 60 * 1000);
+                }, 3 * 60 * 1000); // 3 min para compensar throttling de Safari iOS
             },
 
             async driveDownloadFromNomina() {

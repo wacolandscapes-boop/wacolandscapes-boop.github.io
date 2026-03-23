@@ -4102,10 +4102,32 @@
                 await this.refreshTokenIfNeeded();
                 try {
                     document.getElementById('driveSyncLabel').textContent = 'Sincronizando...';
+
+                    // Merge empleados con Drive antes de subir — nunca perder empleados
+                    let mergedEmployees = [...this.employees];
+                    try {
+                        const sr = await fetch(
+                            `https://www.googleapis.com/drive/v3/files?q=name='waco_nomina_sync.json'+and+'${this.driveFolderId}'+in+parents+and+trashed=false`,
+                            { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                        );
+                        const sd = await sr.json();
+                        if (sd.files && sd.files.length > 0) {
+                            const fr = await fetch(
+                                `https://www.googleapis.com/drive/v3/files/${sd.files[0].id}?alt=media`,
+                                { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                            );
+                            const existing = await fr.json();
+                            (existing.employees || []).forEach(remote => {
+                                const idx = mergedEmployees.findIndex(e => e.id === remote.id);
+                                if (idx < 0) mergedEmployees.push(remote);
+                            });
+                        }
+                    } catch(e) { /* si falla el merge, subir lo que tenemos */ }
+
                     const data = {
                         exportType: 'nomina_sync', exportDate: new Date().toISOString(),
                         source: "Waco Landscapes Nomina",
-                        employees: this.employees, attendances: this.attendances,
+                        employees: mergedEmployees, attendances: this.attendances,
                         deletedAttendances: this.deletedAttendances || [],
                         payrollRecords: this.payrollRecords, savedPayrollPeriods: this.savedPayrollPeriods,
                         adminPin: this.adminPin, workConfig: this.workConfig
@@ -4136,19 +4158,43 @@
                     );
                     const data = await fileRes.json();
 
-                    // Load data into app
-                    if (data.employees) this.employees = data.employees;
-                    if (data.attendances) this.attendances = data.attendances;
+                    // Merge inteligente — nunca sobreescribir arrays completos
+                    if (data.employees) {
+                        data.employees.forEach(remote => {
+                            const idx = this.employees.findIndex(e => e.id === remote.id);
+                            if (idx < 0) this.employees.push(remote);
+                            else {
+                                const localTime = this.employees[idx].updatedAt || '';
+                                const remoteTime = remote.updatedAt || '';
+                                if (remoteTime > localTime) this.employees[idx] = remote;
+                            }
+                        });
+                    }
+                    if (data.attendances) {
+                        data.attendances.forEach(remote => {
+                            const idx = this.attendances.findIndex(a =>
+                                a.employeeId === remote.employeeId && a.date === remote.date
+                            );
+                            if (idx < 0) this.attendances.push(remote);
+                            else {
+                                const localTime = this.attendances[idx].updatedAt || this.attendances[idx].checkOut || '';
+                                const remoteTime = remote.updatedAt || remote.checkOut || '';
+                                if (remoteTime > localTime || (!this.attendances[idx].checkOut && remote.checkOut)) {
+                                    this.attendances[idx] = remote;
+                                }
+                            }
+                        });
+                    }
                     if (data.payrollRecords) this.payrollRecords = data.payrollRecords;
                     if (data.savedPayrollPeriods) this.savedPayrollPeriods = data.savedPayrollPeriods;
                     if (data.workConfig) this.workConfig = data.workConfig;
 
                     // Save to localStorage
-                    localStorage.setItem('anas_employees', JSON.stringify(this.employees));
-                    localStorage.setItem('anas_attendances', JSON.stringify(this.attendances));
-                    localStorage.setItem('anas_payroll', JSON.stringify(this.payrollRecords));
-                    localStorage.setItem('anas_payroll_periods', JSON.stringify(this.savedPayrollPeriods));
-                    localStorage.setItem('anas_workConfig', JSON.stringify(this.workConfig));
+                    localStorage.setItem('waco_employees', JSON.stringify(this.employees));
+                    localStorage.setItem('waco_attendances', JSON.stringify(this.attendances));
+                    localStorage.setItem('waco_payroll', JSON.stringify(this.payrollRecords));
+                    localStorage.setItem('waco_payroll_periods', JSON.stringify(this.savedPayrollPeriods));
+                    localStorage.setItem('waco_workConfig', JSON.stringify(this.workConfig));
 
                     // Refresh UI
                     this.refreshEmployees();
@@ -4184,21 +4230,28 @@
                     let added = 0; let updated = 0;
                     const deletedIds = (this.deletedAttendances || []).map(String);
                     (clockData.attendances || []).forEach(att => {
-                        if (deletedIds.includes(String(att.id))) return; // ignorar borrados
-                        // Buscar por ID o por nombre+fecha (los IDs pueden diferir entre Reloj y Nómina)
-                        const idx = this.attendances.findIndex(a =>
-                            a.date === att.date && (
-                                a.employeeId === att.employeeId ||
-                                (a.employeeName && att.employeeName &&
-                                 a.employeeName.trim().toLowerCase() === att.employeeName.trim().toLowerCase())
-                            )
+                        if (deletedIds.includes(String(att.id))) return;
+
+                        // Normalizar employeeId del Reloj al ID correcto de la Nómina por nombre
+                        const empMatch = this.employees.find(e =>
+                            e.name && att.employeeName &&
+                            e.name.trim().toLowerCase() === att.employeeName.trim().toLowerCase()
                         );
+                        if (empMatch) {
+                            att.employeeId = empMatch.id;
+                            att.employeeName = empMatch.name;
+                        }
+
+                        // Buscar por employeeId+date
+                        let idx = this.attendances.findIndex(a =>
+                            a.date === att.date && a.employeeId === att.employeeId
+                        );
+
                         if (idx >= 0) {
                             const local = this.attendances[idx];
-                            if (!local.checkOut && att.checkOut) {
-                                this.attendances[idx] = att;
-                                updated++;
-                            } else if (local.checkOut && att.checkOut) {
+                            const localTime = local.updatedAt || local.checkOut || local.checkIn || '';
+                            const remoteTime = att.updatedAt || att.checkOut || att.checkIn || '';
+                            if (remoteTime > localTime || (!local.checkOut && att.checkOut)) {
                                 this.attendances[idx] = att;
                                 updated++;
                             }
@@ -4323,12 +4376,12 @@
             // PERSISTENCIA
             save() {
                 if (this.driveConnected) setTimeout(() => this.driveSyncNow(), 500);
-                localStorage.setItem('anas_employees', JSON.stringify(this.employees));
-                localStorage.setItem('anas_attendances', JSON.stringify(this.attendances));
-                localStorage.setItem('anas_payroll', JSON.stringify(this.payrollRecords));
-                localStorage.setItem('anas_payroll_periods', JSON.stringify(this.savedPayrollPeriods));
+                localStorage.setItem('waco_employees', JSON.stringify(this.employees));
+                localStorage.setItem('waco_attendances', JSON.stringify(this.attendances));
+                localStorage.setItem('waco_payroll', JSON.stringify(this.payrollRecords));
+                localStorage.setItem('waco_payroll_periods', JSON.stringify(this.savedPayrollPeriods));
                 localStorage.setItem('anas_adminPin', this.adminPin);
-                localStorage.setItem('anas_workConfig', JSON.stringify(this.workConfig));
+                localStorage.setItem('waco_workConfig', JSON.stringify(this.workConfig));
                 localStorage.setItem('anas_checkConfig', JSON.stringify(this.checkConfig));
             },
             
