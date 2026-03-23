@@ -1514,9 +1514,11 @@
                     const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
                     document.getElementById('driveBtnLabel').textContent = `Sync ${now}`;
                     document.getElementById('driveBtn').style.background = '#27ae60';
+                    this.updateSyncStatus('connected', now);
                 } catch(err) {
                     document.getElementById('driveBtnLabel').textContent = '⚠️ Error';
                     document.getElementById('driveBtn').style.background = '#e74c3c';
+                    this.updateSyncStatus('error');
                 } finally {
                     this.isSyncing = false;
                     // Si hubo registros mientras sincronizaba, volver a sincronizar
