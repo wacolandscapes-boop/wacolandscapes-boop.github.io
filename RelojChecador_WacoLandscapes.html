@@ -971,13 +971,20 @@
 
             async manualSync() {
                 if (!this.driveConnected) {
-                    // Reconectar Drive
-                    this.driveSync();
+                    // Reconectar Drive — el status se actualiza en el callback
+                    this.updateSyncStatus('error');
+                    this.driveConnect();
                     return;
                 }
                 this.updateSyncStatus('syncing');
-                await this.driveSyncNow();
-                await this.driveDownloadFromNomina();
+                try {
+                    await this.driveSyncNow();
+                    await this.driveDownloadFromNomina();
+                    const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                    this.updateSyncStatus('connected', now);
+                } catch(e) {
+                    this.updateSyncStatus('error');
+                }
             },
 
             updateTodayPanel() {
@@ -1481,6 +1488,8 @@
                             document.body.appendChild(toast);
                             setTimeout(() => toast.remove(), 3000);
                         }
+                        const nowStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                        this.updateSyncStatus('connected', nowStr);
                         this.firstConnect = false;
                     }
                 });
