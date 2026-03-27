@@ -4117,10 +4117,18 @@
                                 { headers: { Authorization: `Bearer ${this.driveToken}` } }
                             );
                             const existing = await fr.json();
+                            const OLD_IDS_SYNC = ['emp1772918357157', 'emp1772918413597'];
                             (existing.employees || []).forEach(remote => {
+                                if (OLD_IDS_SYNC.includes(remote.id)) return; // Ignorar IDs viejos
                                 const idx = mergedEmployees.findIndex(e => e.id === remote.id);
                                 if (idx < 0) mergedEmployees.push(remote);
                             });
+                            // Filtrar IDs viejos del merged
+                            mergedEmployees = mergedEmployees.filter(e => !OLD_IDS_SYNC.includes(e.id));
+                            // Asegurar Ranulfo
+                            if (!mergedEmployees.find(e => e.id === 'emp1773429584911')) {
+                                mergedEmployees.push({ id: 'emp1773429584911', name: 'Ranulfo Castaneda', pin: '1581', rate: 0, updatedAt: new Date().toISOString() });
+                            }
                         }
                     } catch(e) { /* si falla el merge, subir lo que tenemos */ }
 
@@ -4159,8 +4167,12 @@
                     const data = await fileRes.json();
 
                     // Merge inteligente — nunca sobreescribir arrays completos
+                    const OLD_IDS = ['emp1772918357157', 'emp1772918413597'];
+                    const CORRECT_IDS = ['emp1772913505187','emp1772913619812','emp1773325160598','emp1773325209111','emp1773429584911'];
                     if (data.employees) {
                         data.employees.forEach(remote => {
+                            // Ignorar IDs viejos que causan duplicados
+                            if (OLD_IDS.includes(remote.id)) return;
                             const idx = this.employees.findIndex(e => e.id === remote.id);
                             if (idx < 0) this.employees.push(remote);
                             else {
@@ -4169,6 +4181,12 @@
                                 if (remoteTime > localTime) this.employees[idx] = remote;
                             }
                         });
+                    }
+                    // Eliminar IDs viejos si llegaron
+                    this.employees = this.employees.filter(e => !OLD_IDS.includes(e.id));
+                    // Asegurar que Ranulfo siempre esté
+                    if (!this.employees.find(e => e.id === 'emp1773429584911')) {
+                        this.employees.push({ id: 'emp1773429584911', name: 'Ranulfo Castaneda', pin: '1581', rate: 0, updatedAt: new Date().toISOString() });
                     }
                     if (data.attendances) {
                         data.attendances.forEach(remote => {
