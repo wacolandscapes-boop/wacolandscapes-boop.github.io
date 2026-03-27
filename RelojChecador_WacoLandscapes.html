@@ -1629,23 +1629,33 @@
                         const deletedIds = (nominaData.deletedAttendances || []).map(String);
                         // Filtrar borrados
                         const nominaAtts = nominaData.attendances.filter(a => !deletedIds.includes(String(a.id)));
-                        // Conservar check-ins locales de HOY que aún no llegaron a Nómina
-                        const today = new Date().toISOString().split('T')[0];
-                        const localTodayNew = this.attendances.filter(a =>
-                            a.date === today &&
+                        // Conservar TODOS los registros locales que no están en Nómina
+                        // (no solo de hoy — también días anteriores con salidas registradas)
+                        const localNotInNomina = this.attendances.filter(a =>
                             !deletedIds.includes(String(a.id)) &&
                             !nominaAtts.find(n => String(n.id) === String(a.id))
                         );
-                        // Merge inteligente por updatedAt — ediciones de Nómina ganan si son más recientes
+                        // Merge: empezar con Nómina como base
                         const merged = [...nominaAtts];
-                        localTodayNew.forEach(local => {
-                            const idx = merged.findIndex(n => String(n.id) === String(local.id));
-                            if (idx < 0) {
-                                merged.push(local);
-                            } else {
-                                const localTime = local.updatedAt || local.checkIn || '';
-                                const remoteTime = merged[idx].updatedAt || merged[idx].checkIn || '';
-                                if (localTime > remoteTime) merged[idx] = local;
+                        // Agregar registros locales que no están en Nómina
+                        localNotInNomina.forEach(local => {
+                            merged.push(local);
+                        });
+                        // Para registros que están en ambos — el local gana si tiene checkOut y el remoto no
+                        this.attendances.forEach(local => {
+                            const idx = merged.findIndex(n => String(n.id) === String(local.id) && n !== local);
+                            if (idx >= 0) {
+                                const remote = merged[idx];
+                                // Si local tiene checkOut y remoto no — local gana
+                                if (local.checkOut && !remote.checkOut) {
+                                    merged[idx] = local;
+                                }
+                                // Si ambos tienen checkOut — gana el más reciente
+                                else if (local.checkOut && remote.checkOut) {
+                                    const localTime = local.updatedAt || local.checkOut || '';
+                                    const remoteTime = remote.updatedAt || remote.checkOut || '';
+                                    if (localTime > remoteTime) merged[idx] = local;
+                                }
                             }
                         });
                         this.attendances = merged;
