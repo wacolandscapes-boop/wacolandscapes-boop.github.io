@@ -1943,6 +1943,8 @@
                         att.checkIn = checkIn;
                         att.checkOut = checkOut;
                         att.hours = checkOut ? hours : null;
+                        att.manualEdit = true; // Editado manualmente en Nómina — proteger de sobrescritura
+                        att.updatedAt = new Date().toISOString();
                         this.save();
                         this.closeAttendanceModal();
                         this.refreshAttendances();
@@ -4267,6 +4269,8 @@
 
                         if (idx >= 0) {
                             const local = this.attendances[idx];
+                            // Si fue editado manualmente en Nómina — nunca sobreescribir
+                            if (local.manualEdit) return;
                             const localTime = local.updatedAt || local.checkOut || local.checkIn || '';
                             const remoteTime = att.updatedAt || att.checkOut || att.checkIn || '';
                             if (remoteTime > localTime || (!local.checkOut && att.checkOut)) {
