@@ -1978,6 +1978,8 @@
                             
                             if (confirm(message)) {
                                 duplicate.checkIn = checkIn;
+                                duplicate.manualEdit = true;
+                                duplicate.updatedAt = new Date().toISOString();
                                 if (duplicate.checkOut) {
                                     const [inH, inM] = checkIn.split(':').map(Number);
                                     const [outH, outM] = duplicate.checkOut.split(':').map(Number);
@@ -2041,7 +2043,9 @@
                         date,
                         checkIn,
                         checkOut,
-                        hours: checkOut ? hours : null
+                        hours: checkOut ? hours : null,
+                        manualEdit: true, // Registro manual — proteger de sobrescritura del Reloj
+                        updatedAt: new Date().toISOString()
                     });
                     alert('✅ Registro agregado correctamente');
                 }
