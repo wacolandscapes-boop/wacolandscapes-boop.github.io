@@ -4398,7 +4398,8 @@
                 localStorage.setItem('waco_attendances', JSON.stringify(this.attendances));
                 localStorage.setItem('waco_payroll', JSON.stringify(this.payrollRecords));
                 localStorage.setItem('waco_payroll_periods', JSON.stringify(this.savedPayrollPeriods));
-                localStorage.setItem('anas_adminPin', this.adminPin);
+                localStorage.setItem('waco_adminPin', this.adminPin);
+                localStorage.setItem('anas_adminPin', this.adminPin); // compatibilidad
                 localStorage.setItem('waco_workConfig', JSON.stringify(this.workConfig));
                 localStorage.setItem('anas_checkConfig', JSON.stringify(this.checkConfig));
             },
@@ -4454,12 +4455,18 @@
                 }
                 
                 // Cargar datos normalmente
-                this.employees = JSON.parse(localStorage.getItem('anas_employees') || '[]');
-                this.attendances = JSON.parse(localStorage.getItem('anas_attendances') || '[]');
-                this.deletedAttendances = JSON.parse(localStorage.getItem('anas_deleted_att') || '[]');
-                this.payrollRecords = JSON.parse(localStorage.getItem('anas_payroll') || '[]');
-                this.savedPayrollPeriods = JSON.parse(localStorage.getItem('anas_payroll_periods') || '[]');
-                this.adminPin = localStorage.getItem('anas_adminPin') || '0000';
+                this.employees = JSON.parse(localStorage.getItem('waco_employees') || localStorage.getItem('anas_employees') || '[]');
+                // Limpiar IDs viejos al cargar — siempre
+                const BOOT_OLD_IDS = ['emp1772918357157', 'emp1772918413597'];
+                this.employees = this.employees.filter(e => !BOOT_OLD_IDS.includes(e.id));
+                if (!this.employees.find(e => e.id === 'emp1773429584911')) {
+                    this.employees.push({ id: 'emp1773429584911', name: 'Ranulfo Castaneda', pin: '1581', rate: 0, updatedAt: new Date().toISOString() });
+                }
+                this.attendances = JSON.parse(localStorage.getItem('waco_attendances') || localStorage.getItem('anas_attendances') || '[]');
+                this.deletedAttendances = JSON.parse(localStorage.getItem('waco_deleted_att') || localStorage.getItem('anas_deleted_att') || '[]');
+                this.payrollRecords = JSON.parse(localStorage.getItem('waco_payroll') || localStorage.getItem('anas_payroll') || '[]');
+                this.savedPayrollPeriods = JSON.parse(localStorage.getItem('waco_payroll_periods') || localStorage.getItem('anas_payroll_periods') || '[]');
+                this.adminPin = localStorage.getItem('waco_adminPin') || localStorage.getItem('anas_adminPin') || '0000';
                 
                 const defaultConfig = {
                     startTime: '08:00',
@@ -4481,7 +4488,7 @@
                     lateDeductionMax: 30
                 };
                 
-                const savedConfig = JSON.parse(localStorage.getItem('anas_workConfig') || '{}');
+                const savedConfig = JSON.parse(localStorage.getItem('waco_workConfig') || localStorage.getItem('anas_workConfig') || '{}');
                 this.workConfig = Object.assign({}, defaultConfig, savedConfig);
                 console.log('=== CARGANDO CONFIGURACIÓN ===');
                 console.log('Desde localStorage:', localStorage.getItem('anas_workConfig'));
