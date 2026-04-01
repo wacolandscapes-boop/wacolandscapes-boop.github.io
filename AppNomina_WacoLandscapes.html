@@ -2218,7 +2218,7 @@
                     const absentEmps = this.employees.filter(e => !presentIds.includes(e.id));
                     if (absentEmps.length > 0) {
                         const absentHtml = `
-                            <div style="background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:15px; margin-bottom:20px;">
+                            <div id="absentBlock" style="background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:15px; margin-bottom:20px;">
                                 <strong>⚠️ Sin registro hoy (${absentEmps.length} empleadas):</strong>
                                 <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">
                                     ${absentEmps.sort((a,b) => a.name.localeCompare(b.name)).map(e => 
@@ -2228,7 +2228,12 @@
                             </div>`;
                         setTimeout(() => {
                             const container = document.getElementById('attendancesTable');
-                            if (container) container.insertAdjacentHTML('afterbegin', absentHtml);
+                            if (container) {
+                                // Eliminar bloque anterior antes de agregar nuevo
+                                const old = document.getElementById('absentBlock');
+                                if (old) old.remove();
+                                container.insertAdjacentHTML('afterbegin', absentHtml);
+                            }
                         }, 50);
                     }
 
@@ -4041,13 +4046,13 @@
                         document.getElementById('driveSyncBtn').style.background = '#27ae60';
                         await this.driveGetOrCreateFolder();
                         this.startAutoSync();
-                        // Si no hay empleados locales, bajar de Drive primero
+                        // Siempre bajar del Reloj y sincronizar al conectar
                         if (this.employees.length === 0) {
                             await this.driveDownloadNomina();
                         } else {
-                            // Ya tiene datos, subir a Drive
-                            await this.driveSyncNow();
+                            await this.driveSyncNow(); // Subir datos locales
                         }
+                        await this.driveDownloadClock(); // Bajar asistencias del Reloj inmediatamente
                         // Show toast instead of blocking alert
                         const toast = document.createElement('div');
                         toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#27ae60;color:white;padding:15px 20px;border-radius:10px;z-index:9999;font-size:1rem;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
@@ -4522,6 +4527,33 @@
         };
         
         app.init();
+
+        // ── Detectar cuando la Nómina vuelve al primer plano ──
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') {
+                if (app.driveConnected) {
+                    if (!app.tokenExpiry || Date.now() > app.tokenExpiry) {
+                        // Token expirado — reconectar silenciosamente
+                        app.driveConnected = false;
+                        document.getElementById('driveSyncLabel').textContent = 'Reconectando...';
+                        app.driveConnect();
+                    } else {
+                        // Token válido — sincronizar y reiniciar autosync
+                        await app.driveSyncNow();
+                        app.startAutoSync();
+                    }
+                }
+            }
+        });
+
+        // pageshow — Safari bfcache
+        window.addEventListener('pageshow', (e) => {
+            if (e.persisted) {
+                app.startAutoSync();
+                app.refreshAttendances();
+            }
+        });
+
     </script>
 </body>
 </html>
