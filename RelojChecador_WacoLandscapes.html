@@ -1567,12 +1567,18 @@
 
             async driveSyncNow() {
                 if (!this.driveConnected || !this.driveFolderId) return;
-                // Si ya hay un sync en curso, marcar como pendiente y salir
+                // Si ya hay un sync en curso, verificar si lleva más de 30 seg bloqueado
                 if (this.isSyncing) {
-                    this.pendingSync = true;
-                    return;
+                    const elapsed = this.syncStartTime ? Date.now() - this.syncStartTime : 99999;
+                    if (elapsed < 30000) {
+                        this.pendingSync = true;
+                        return;
+                    }
+                    // Más de 30 seg — resetear el flag y continuar
+                    console.warn('isSyncing bloqueado por más de 30s — reseteando');
                 }
                 this.isSyncing = true;
+                this.syncStartTime = Date.now();
                 await this.refreshTokenIfNeeded();
                 try {
                     document.getElementById('driveBtnLabel').textContent = 'Sincronizando...';
@@ -1677,25 +1683,42 @@
                                 n.date === local.date && String(n.employeeId) === String(local.employeeId)
                             );
                             if (idx < 0) {
-                                // No existe en Nómina — agregar
-                                merged.push(local);
+                                // No existe en Nómina — agregar (sin heredar manualEdit)
+                                const toAdd = { ...local };
+                                delete toAdd.manualEdit;
+                                merged.push(toAdd);
                             } else {
                                 const remote = merged[idx];
                                 // Local tiene checkOut y remoto no → local gana
                                 if (local.checkOut && !remote.checkOut) {
-                                    merged[idx] = local;
+                                    const winner = { ...local };
+                                    delete winner.manualEdit; // El Reloj nunca hereda manualEdit
+                                    merged[idx] = winner;
                                 }
                                 // Ambos tienen checkOut → gana el más reciente
                                 else if (local.checkOut && remote.checkOut) {
                                     const localTime = local.updatedAt || local.checkOut || '';
                                     const remoteTime = remote.updatedAt || remote.checkOut || '';
-                                    if (localTime > remoteTime) merged[idx] = local;
+                                    if (localTime > remoteTime) {
+                                        const winner = { ...local };
+                                        delete winner.manualEdit;
+                                        merged[idx] = winner;
+                                    }
                                 }
-                                // Solo remoto tiene checkOut → remoto gana (edición manual en Nómina)
-                                // No hacer nada — merged[idx] ya es el remoto
+                                // Si remoto tiene manualEdit pero local tiene checkOut más reciente → local gana
+                                if (remote.manualEdit && local.checkOut) {
+                                    const localTime = local.updatedAt || local.checkOut || '';
+                                    const remoteTime = remote.updatedAt || remote.checkOut || '';
+                                    if (localTime > remoteTime) {
+                                        const winner = { ...local };
+                                        delete winner.manualEdit;
+                                        merged[idx] = winner;
+                                    }
+                                }
                             }
                         });
-                        this.attendances = merged;
+                        // Nunca dejar manualEdit en registros del Reloj
+                        this.attendances = merged.map(a => { const r = {...a}; delete r.manualEdit; return r; });
                     }
                     this.save();
                     this.updateAdminStats();
