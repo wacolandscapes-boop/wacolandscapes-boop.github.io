@@ -1663,6 +1663,43 @@
         };
         
         app.init();
+
+        // ── Detectar cuando el iPad vuelve al primer plano ──
+        // Safari suspende setInterval cuando la pantalla se apaga o se cambia de app
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') {
+                console.log('App visible de nuevo — verificando sync...');
+                if (app.driveConnected) {
+                    // Verificar si el token expiró mientras estaba en background
+                    if (!app.tokenExpiry || Date.now() > app.tokenExpiry) {
+                        console.log('Token expirado — reconectando...');
+                        app.updateSyncStatus('error');
+                        app.driveConnect();
+                    } else {
+                        // Token válido — sincronizar inmediatamente
+                        console.log('Token válido — sincronizando...');
+                        app.cleanDuplicateIds();
+                        await app.driveSyncNow();
+                        await app.driveDownloadFromNomina();
+                        const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                        app.updateSyncStatus('connected', now);
+                        // Reiniciar autosync por si se congeló
+                        app.startAutoSync();
+                    }
+                }
+            }
+        });
+
+        // pageshow cubre el caso de volver desde otra pestaña en Safari
+        window.addEventListener('pageshow', (e) => {
+            if (e.persisted) {
+                // La página viene del cache de Safari (bfcache)
+                console.log('Página restaurada desde bfcache — reiniciando...');
+                app.startAutoSync();
+                app.updateTodayPanel();
+            }
+        });
+
     </script>
 </body>
 </html>
