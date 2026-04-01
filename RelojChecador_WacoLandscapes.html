@@ -75,6 +75,9 @@
         /* LOGIN SCREEN */
         .login-screen {
             display: block;
+            max-width: 380px;
+            margin: 0 auto;
+            padding: 0 16px;
         }
         
         .pin-display {
@@ -468,18 +471,30 @@
             <button class="admin-btn" onclick="app.openAdmin()">⚙️ Administrador</button>
         </div>
 
-        <!-- SYNC STATUS PANEL -->
-        <div id="syncStatusPanel" style="margin:12px 16px 0; background:white; border-radius:14px; padding:10px 14px; box-shadow:0 2px 10px rgba(0,0,0,0.1); display:flex; align-items:center; gap:10px;">
-            <div id="syncDot" style="width:10px; height:10px; border-radius:50%; background:#e74c3c; flex-shrink:0;"></div>
+        <!-- BARRA INFERIOR COLAPSABLE -->
+        <div style="margin:10px 16px 0; display:flex; gap:8px; justify-content:center;">
+            <!-- Botón Drive/Sync -->
+            <button onclick="app.toggleSyncPanel()" style="background:white; border:none; border-radius:12px; padding:8px 14px; font-size:0.78rem; font-weight:700; color:#2c3e50; box-shadow:0 2px 8px rgba(0,0,0,0.12); cursor:pointer; display:flex; align-items:center; gap:6px; -webkit-tap-highlight-color:transparent;">
+                <div id="syncDot" style="width:8px; height:8px; border-radius:50%; background:#e74c3c;"></div>
+                <span id="syncStatusText" style="font-size:0.75rem;">Sin conectar</span>
+            </button>
+            <!-- Botón Historial -->
+            <button onclick="app.toggleTodayPanel()" style="background:white; border:none; border-radius:12px; padding:8px 14px; font-size:0.78rem; font-weight:700; color:#2c3e50; box-shadow:0 2px 8px rgba(0,0,0,0.12); cursor:pointer; -webkit-tap-highlight-color:transparent;">
+                📋 Historial
+            </button>
+        </div>
+
+        <!-- SYNC STATUS PANEL (colapsado por defecto) -->
+        <div id="syncStatusPanel" style="margin:8px 16px 0; background:white; border-radius:14px; padding:10px 14px; box-shadow:0 2px 10px rgba(0,0,0,0.1); display:none; align-items:center; gap:10px;">
             <div style="flex:1;">
-                <div id="syncStatusText" style="font-size:0.78rem; font-weight:700; color:#2c3e50;">☁️ Sin conectar</div>
+                <div style="font-size:0.78rem; font-weight:700; color:#2c3e50;">☁️ Drive</div>
                 <div id="syncLastTime" style="font-size:0.68rem; color:#aaa; margin-top:1px;">—</div>
             </div>
             <button id="syncNowBtn" onclick="app.manualSync()" style="background:#27ae60; color:white; border:none; border-radius:10px; padding:8px 14px; font-size:0.78rem; font-weight:800; cursor:pointer; -webkit-text-fill-color:white;">🔄 Sync</button>
         </div>
 
-        <!-- ASISTENCIA DEL DÍA -->
-        <div id="todayPanel" style="margin:12px 16px 0; background:white; border-radius:14px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
+        <!-- ASISTENCIA DEL DÍA (colapsado por defecto) -->
+        <div id="todayPanel" style="margin:8px 16px 0; background:white; border-radius:14px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.1); display:none;">
             <div style="background:#2c3e50; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
                 <span style="color:white; font-weight:800; font-size:0.85rem; letter-spacing:1px;">📋 ASISTENCIA HOY</span>
                 <span id="todayDate" style="color:rgba(255,255,255,0.7); font-size:0.75rem;"></span>
@@ -985,6 +1000,23 @@
                 } catch(e) {
                     this.updateSyncStatus('error');
                 }
+            },
+
+            toggleSyncPanel() {
+                const panel = document.getElementById('syncStatusPanel');
+                const todayPanel = document.getElementById('todayPanel');
+                const isVisible = panel.style.display !== 'none';
+                panel.style.display = isVisible ? 'none' : 'flex';
+                if (!isVisible) todayPanel.style.display = 'none'; // cerrar el otro
+            },
+
+            toggleTodayPanel() {
+                const panel = document.getElementById('todayPanel');
+                const syncPanel = document.getElementById('syncStatusPanel');
+                const isVisible = panel.style.display !== 'none';
+                panel.style.display = isVisible ? 'none' : 'block';
+                if (!isVisible) syncPanel.style.display = 'none'; // cerrar el otro
+                if (!isVisible) this.updateTodayPanel(); // actualizar al abrir
             },
 
             updateTodayPanel() {
