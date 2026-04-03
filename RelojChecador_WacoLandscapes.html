@@ -693,7 +693,7 @@
                 }, 3000);
             },
             
-            showConfirm(icon, name, type, time, extra, color) {
+            showConfirm(icon, name, type, time, extra, color, autoLogout = false) {
                 document.getElementById('confirmIcon').textContent = icon;
                 document.getElementById('confirmName').textContent = name;
                 document.getElementById('confirmType').textContent = type;
@@ -704,7 +704,8 @@
                 document.getElementById('confirmOverlay').classList.add('show');
                 setTimeout(() => {
                     document.getElementById('confirmOverlay').classList.remove('show');
-                }, 3500);
+                    if (autoLogout) this.logout();
+                }, 3000);
             },
 
             showSuccess(msg) {
@@ -826,14 +827,12 @@
                 // Verificar si llegó tarde
                 const late = this.isLate(time);
                 if (late) {
-                    this.showConfirm('⚠️', this.currentEmployee.name, 'ENTRADA TARDE', time, `Hora oficial: ${this.workConfig.startTime}`, '#e67e22');
+                    this.showConfirm('⚠️', this.currentEmployee.name, 'ENTRADA TARDE', time, `Hora oficial: ${this.workConfig.startTime}`, '#e67e22', true);
                 } else {
-                    this.showConfirm('✅', this.currentEmployee.name, 'ENTRADA REGISTRADA', time, '', '#27ae60');
+                    this.showConfirm('✅', this.currentEmployee.name, 'ENTRADA REGISTRADA', time, '', '#27ae60', true);
                 }
                 
                 this.updateEmployeeHours();
-                
-                setTimeout(() => this.logout(), 3000);
             },
             
             checkOut() {
@@ -878,7 +877,7 @@
                     .reduce((sum, a) => sum + a.hours, 0);
                 
                 const hoursDetail = `Hoy: ${openEntry.hours.toFixed(1)} hrs   |   Semana: ${weekHours.toFixed(1)} hrs`;
-                this.showConfirm('👋', this.currentEmployee.name, 'SALIDA REGISTRADA', time, hoursDetail, '#2980b9');
+                this.showConfirm('👋', this.currentEmployee.name, 'SALIDA REGISTRADA', time, hoursDetail, '#2980b9', true);
                 
                 setTimeout(() => this.logout(), 3500);
             },
