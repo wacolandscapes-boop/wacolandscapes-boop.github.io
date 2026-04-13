@@ -1646,7 +1646,9 @@
                     );
                     const nominaData = await fileRes.json();
                     if (nominaData.employees && nominaData.employees.length > 0) {
-                        this.employees = nominaData.employees;
+                        // Respetar lista de empleados eliminados
+                        const deletedEmps = (nominaData.deletedEmployees || []).map(String);
+                        this.employees = nominaData.employees.filter(e => !deletedEmps.includes(String(e.id)));
                         // Normalizar IDs viejos en asistencias locales usando los empleados actualizados
                         this.attendances.forEach(a => {
                             const emp = this.employees.find(e =>
@@ -1732,6 +1734,18 @@
         };
         
         app.init();
+
+        // ── Detectar cambios en localStorage desde Nómina (misma PC/navegador) ──
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'waco_employees') {
+                const nuevos = JSON.parse(e.newValue || '[]');
+                app.employees = nuevos;
+                localStorage.setItem('waco_employees', JSON.stringify(nuevos));
+                app.renderEmployees && app.renderEmployees();
+                app.render && app.render();
+                console.log('👥 Lista de empleados actualizada desde Nómina:', nuevos.length, 'empleados');
+            }
+        });
 
         // ── Detectar cuando el iPad vuelve al primer plano ──
         // Safari suspende setInterval cuando la pantalla se apaga o se cambia de app
