@@ -4482,9 +4482,8 @@
                 // Limpiar IDs viejos al cargar — siempre
                 const BOOT_OLD_IDS = ['emp1772918357157', 'emp1772918413597'];
                 this.employees = this.employees.filter(e => !BOOT_OLD_IDS.includes(e.id));
-                if (!this.employees.find(e => e.id === 'emp1773429584911')) {
-                    this.employees.push({ id: 'emp1773429584911', name: 'Ranulfo Castaneda', pin: '1581', rate: 0, updatedAt: new Date().toISOString() });
-                }
+
+
                 this.attendances = JSON.parse(localStorage.getItem('waco_attendances') || localStorage.getItem('anas_attendances') || '[]');
                 this.deletedAttendances = JSON.parse(localStorage.getItem('waco_deleted_att') || localStorage.getItem('anas_deleted_att') || '[]');
                 this.payrollRecords = JSON.parse(localStorage.getItem('waco_payroll') || localStorage.getItem('anas_payroll') || '[]');
