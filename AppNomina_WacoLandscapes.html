@@ -1672,6 +1672,10 @@
             deleteEmployee(id) {
                 if (!confirm('¿Eliminar este empleado?')) return;
                 this.employees = this.employees.filter(e => e.id !== id);
+                // Guardar ID en lista de eliminados para que el Reloj lo elimine también
+                if (!this.deletedEmployees) this.deletedEmployees = [];
+                if (!this.deletedEmployees.includes(String(id))) this.deletedEmployees.push(String(id));
+                localStorage.setItem('waco_deletedEmployees', JSON.stringify(this.deletedEmployees));
                 this.save();
                 this.refreshEmployees();
             },
@@ -4129,13 +4133,17 @@
                             );
                             const existing = await fr.json();
                             const OLD_IDS_SYNC = ['emp1772918357157', 'emp1772918413597'];
+                            const deletedIds = (this.deletedEmployees || []).map(String);
                             (existing.employees || []).forEach(remote => {
                                 if (OLD_IDS_SYNC.includes(remote.id)) return; // Ignorar IDs viejos
+                                if (deletedIds.includes(String(remote.id))) return; // No resucitar eliminados
                                 const idx = mergedEmployees.findIndex(e => e.id === remote.id);
                                 if (idx < 0) mergedEmployees.push(remote);
                             });
-                            // Filtrar IDs viejos del merged
-                            mergedEmployees = mergedEmployees.filter(e => !OLD_IDS_SYNC.includes(e.id));
+                            // Filtrar IDs viejos y eliminados del merged
+                            mergedEmployees = mergedEmployees.filter(e =>
+                                !OLD_IDS_SYNC.includes(e.id) && !deletedIds.includes(String(e.id))
+                            );
                             // Asegurar Ranulfo
                             if (!mergedEmployees.find(e => e.id === 'emp1773429584911')) {
                                 mergedEmployees.push({ id: 'emp1773429584911', name: 'Ranulfo Castaneda', pin: '1581', rate: 0, updatedAt: new Date().toISOString() });
@@ -4147,6 +4155,7 @@
                         exportType: 'nomina_sync', exportDate: new Date().toISOString(),
                         source: "Waco Landscapes Nomina",
                         employees: mergedEmployees, attendances: this.attendances,
+                        deletedEmployees: this.deletedEmployees || [],
                         deletedAttendances: this.deletedAttendances || [],
                         payrollRecords: this.payrollRecords, savedPayrollPeriods: this.savedPayrollPeriods,
                         adminPin: this.adminPin, workConfig: this.workConfig
@@ -4469,6 +4478,7 @@
                 
                 // Cargar datos normalmente
                 this.employees = JSON.parse(localStorage.getItem('waco_employees') || localStorage.getItem('anas_employees') || '[]');
+                this.deletedEmployees = JSON.parse(localStorage.getItem('waco_deletedEmployees') || '[]');
                 // Limpiar IDs viejos al cargar — siempre
                 const BOOT_OLD_IDS = ['emp1772918357157', 'emp1772918413597'];
                 this.employees = this.employees.filter(e => !BOOT_OLD_IDS.includes(e.id));
