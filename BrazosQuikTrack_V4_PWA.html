@@ -318,18 +318,6 @@ function connectDrive(){
   }});
   tc.requestAccessToken({prompt:'select_account', login_hint:'wacolandscapes@gmail.com'});
 }
-function saveSupPin(){
-  const pin = document.getElementById('cfgSupPin').value.trim();
-  const confirm2 = document.getElementById('cfgSupPinConfirm').value.trim();
-  const msg = document.getElementById('supPinMsg');
-  if (!pin || pin.length < 4) { msg.style.color='#e74c3c'; msg.textContent='⚠️ Mínimo 4 dígitos.'; return; }
-  if (pin !== confirm2) { msg.style.color='#e74c3c'; msg.textContent='⚠️ Los PINs no coinciden.'; return; }
-  localStorage.setItem('brazos_supervisorPin', pin);
-  document.getElementById('cfgSupPin').value='';
-  document.getElementById('cfgSupPinConfirm').value='';
-  msg.style.color='#27ae60'; msg.textContent='✅ PIN guardado.';
-  setTimeout(()=>{ msg.textContent=''; }, 3000);
-}
 
 function markConnected(){const b=document.getElementById('btnDrive');b.classList.add('connected');b.innerHTML='✅ Drive conectado — recargar';const bd=document.getElementById('btnDisconnect');if(bd)bd.style.display='block';}
 
