@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>BrazosCalendar · Brazos Cleaning</title>
+<meta name="theme-color" content="#0ea5e9">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BrazosCalendar">
+<link rel="manifest" id="pwaManifest">
+<script>
+const _manifest={
+  name:"BrazosCalendar · Brazos Cleaning",short_name:"BrazosCalendar",
+  description:"Tu horario de servicios — Brazos Cleaning Services",
+  start_url:"./",display:"standalone",
+  background_color:"#0f1117",theme_color:"#0ea5e9",orientation:"portrait",
+  icons:[
+    {src:"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='32' fill='%230f1117'/><text x='96' y='130' font-size='110' text-anchor='middle'>📅</text></svg>",sizes:"192x192",type:"image/svg+xml"},
+    {src:"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%230f1117'/><text x='256' y='360' font-size='300' text-anchor='middle'>📅</text></svg>",sizes:"512x512",type:"image/svg+xml"}
+  ]
+};
+const _blob=new Blob([JSON.stringify(_manifest)],{type:'application/json'});
+document.getElementById('pwaManifest').href=URL.createObjectURL(_blob);
+const APP_VERSION='2.0.5';
+if('serviceWorker' in navigator){
+  const _sw=`const CACHE='brazozcalendar-v${APP_VERSION}';const ASSETS=['./'];self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).catch(()=>caches.match('./'))));});`;
+  navigator.serviceWorker.register(URL.createObjectURL(new Blob([_sw],{type:'text/javascript'}))).then(reg=>{
+    reg.addEventListener('updatefound',()=>{
+      const newWorker=reg.installing;
+      newWorker.addEventListener('statechange',()=>{
+        if(newWorker.state==='installed'&&navigator.serviceWorker.controller){
+          const banner=document.createElement('div');
+          banner.style.cssText='position:fixed;top:0;left:0;right:0;background:#0ea5e9;color:white;padding:12px 16px;z-index:9999;display:flex;justify-content:space-between;align-items:center;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:700;';
+          banner.innerHTML='🔄 Nueva versión disponible <button onclick="window.location.reload()" style="background:white;color:#0ea5e9;border:none;padding:6px 14px;border-radius:6px;font-weight:700;cursor:pointer;">Actualizar</button>';
+          document.body.appendChild(banner);
+        }
+      });
+    });
+  }).catch(()=>{});
+}
+let _installPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();_installPrompt=e;setTimeout(()=>{if(!window.matchMedia('(display-mode: standalone)').matches)showInstallBanner();},2000);});
+function showInstallBanner(){
+  if(document.getElementById('_pwaBanner'))return;
+  const b=document.createElement('div');b.id='_pwaBanner';
+  b.style.cssText='position:fixed;bottom:80px;left:16px;right:16px;max-width:398px;margin:0 auto;background:#0c2a3a;border:1.5px solid #0ea5e9;border-radius:14px;padding:12px 14px;z-index:500;display:flex;align-items:center;justify-content:space-between;gap:10px;font-family:Barlow,sans-serif;box-shadow:0 4px 24px rgba(0,0,0,.5)';
+  b.innerHTML=`<div><div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;color:#0ea5e9">📲 Instalar BrazosCalendar</div><div style="font-size:11px;color:#94a3b8;margin-top:2px">Agrega al inicio para acceso rápido</div></div><div style="display:flex;gap:7px"><button onclick="doInstall()" style="background:#0ea5e9;border:none;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;padding:8px 14px;border-radius:8px;cursor:pointer">Instalar</button><button onclick="dismissBanner()" style="background:none;border:1px solid #2e3349;color:#94a3b8;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;padding:8px 10px;border-radius:8px;cursor:pointer">✕</button></div>`;
+  document.body.appendChild(b);
+}
+function doInstall(){if(_installPrompt){_installPrompt.prompt();_installPrompt.userChoice.then(()=>{_installPrompt=null;dismissBanner();});}else{dismissBanner();}}
+function dismissBanner(){const b=document.getElementById('_pwaBanner');if(b)b.remove();}
+window.addEventListener('appinstalled',()=>{dismissBanner();});
+</script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0f1117;--s1:#1a1d27;--s2:#22263a;--border:#2e3349;--blue:#3b82f6;--green:#60a5fa;--gbg:#1e2d3d;--yellow:#f59e0b;--ybg:#451a03;--text:#f1f5f9;--muted:#94a3b8;--brand:#0ea5e9;--bbg:#0c2a3a;--sms:#10b981;--smsbg:#064e3b}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-height:100vh;max-width:430px;margin:0 auto;padding-bottom:76px}
+.screen{display:none}.screen.active{display:block}
+
+/* ── HEADER ── */
+.hdr{background:var(--s1);border-bottom:1px solid var(--border);padding:12px 16px;position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between}
+.logo{font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:21px;letter-spacing:-.5px}.logo em{color:var(--brand);font-style:normal}
+.badge{font-size:10px;font-weight:700;letter-spacing:1px;padding:3px 9px;border-radius:20px;text-transform:uppercase;background:var(--bbg);color:var(--brand);border:1px solid var(--brand)}
+.hdr-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:5px 10px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Barlow',sans-serif}
+.sync{display:flex;align-items:center;gap:7px;padding:7px 16px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)}
+.sdot{width:6px;height:6px;border-radius:50%;background:var(--muted);flex-shrink:0}.sdot.ok{background:var(--green)}.sdot.err{background:#ef4444}.sdot.spin{background:var(--yellow);animation:blink 1s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── SETUP / WELCOME ── */
+.setup{padding:28px 20px;display:flex;flex-direction:column;align-items:center;gap:20px;min-height:92vh;justify-content:center}
+.setup-logo{font-family:'Barlow Condensed',sans-serif;font-size:54px;font-weight:800;letter-spacing:-2px;line-height:1}.setup-logo em{color:var(--brand);font-style:normal}
+.setup-co{font-size:13px;color:var(--brand);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-top:4px;text-align:center}
+.setup-sub{font-size:12px;color:var(--muted);text-align:center;line-height:1.6;margin-top:-8px}
+.card{background:var(--s1);border:1px solid var(--border);border-radius:16px;padding:22px;width:100%;max-width:360px}
+.card h3{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:10px}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;letter-spacing:.4px}
+select,input[type=date]{width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:11px 13px;font-size:15px;font-family:'Barlow',sans-serif;appearance:none;-webkit-appearance:none;margin-bottom:14px}
+select:focus,input:focus{outline:none;border-color:var(--brand)}
+.btn-drive{width:100%;padding:14px;border-radius:11px;background:#4285f4;border:none;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
+.btn-drive.connected{background:var(--gbg);border:1px solid var(--green);color:var(--green)}
+.btn{width:100%;padding:14px;border-radius:11px;background:var(--brand);border:none;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;cursor:pointer}.btn:active{opacity:.8}.btn:disabled{opacity:.4;cursor:not-allowed}
+.ds{font-size:12px;color:var(--muted);text-align:center;line-height:1.6;padding:8px 12px;background:var(--s2);border-radius:8px;margin-bottom:14px}.ds.ok{color:var(--green);background:var(--gbg)}.ds.err{color:#ef4444;background:#450a0a}
+
+/* Employee search input */
+.emp-search{width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:11px 13px;font-size:15px;font-family:'Barlow',sans-serif;margin-bottom:8px}
+.emp-search:focus{outline:none;border-color:var(--brand)}
+.emp-list{max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:9px;margin-bottom:14px;background:var(--s2)}
+.emp-item{padding:11px 14px;cursor:pointer;font-size:15px;border-bottom:1px solid var(--border);transition:background .1s}
+.emp-item:last-child{border-bottom:none}
+.emp-item:active,.emp-item.selected{background:var(--bbg);color:var(--brand)}
+.emp-item .emp-grp{font-size:11px;color:var(--muted);margin-top:2px}
+.emp-selected{display:flex;align-items:center;justify-content:space-between;background:var(--bbg);border:1px solid var(--brand);border-radius:9px;padding:11px 14px;margin-bottom:14px}
+.emp-selected-name{font-size:15px;font-weight:600;color:var(--brand)}
+.emp-selected-grp{font-size:11px;color:var(--muted);margin-top:2px}
+.emp-change{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline;padding:0}
+
+/* ── WEEK NAV / DAY STRIP ── */
+.week-nav{display:flex;align-items:center;justify-content:space-between;padding:10px 16px 0}
+.week-label{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:800}
+.week-tabs{display:flex;background:var(--s2);border-radius:8px;overflow:hidden;border:1px solid var(--border)}
+.wtab{padding:5px 14px;font-size:12px;font-weight:600;font-family:'Barlow Condensed',sans-serif;cursor:pointer;color:var(--muted);letter-spacing:.5px}.wtab.active{background:var(--brand);color:#fff}
+.day-strip{display:flex;padding:10px 16px 6px;overflow-x:auto;scrollbar-width:none}.day-strip::-webkit-scrollbar{display:none}
+.dp{min-width:48px;padding:6px 4px;border-radius:10px;text-align:center;cursor:pointer;flex-shrink:0;border:1.5px solid transparent;transition:all .15s}.dp.today{border-color:var(--brand)}.dp.sel{background:var(--brand)}
+.dp .dn{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}.dp.sel .dn,.dp.sel .dd{color:#fff}.dp .dd{font-size:17px;font-weight:700;font-family:'Barlow Condensed',sans-serif}
+.dpdot{width:5px;height:5px;border-radius:50%;margin:2px auto 0}.dp.sel .dpdot{background:rgba(255,255,255,.5)}
+
+/* ── AGENDA (read-only) ── */
+.agenda{padding:10px 16px 0}.grp-lbl{font-size:11px;font-weight:700;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;margin-bottom:10px}
+.ag-grid{display:grid;grid-template-columns:36px 1fr}.tcol{display:flex;flex-direction:column}
+.tslot{font-size:10px;color:var(--muted);padding-top:4px;text-align:right;padding-right:8px;height:auto;min-height:76px;flex-shrink:0}
+.bcol{display:flex;flex-direction:column;gap:8px;padding-bottom:16px}
+
+/* Service card - read-only */
+.sb{border-radius:11px;overflow:hidden;border:1.5px solid var(--border)}
+.sb.pending .sh{background:var(--s2);border-left:4px solid var(--border)}
+.sb.active .sh{background:var(--ybg);border-left:4px solid var(--yellow)}
+.sb.done .sh{background:var(--gbg);border-left:4px solid var(--green)}
+.sb.active{border-color:var(--yellow)}.sb.done{border-color:var(--green)}
+.sh{padding:10px 12px;cursor:pointer;display:flex;justify-content:space-between;align-items:flex-start}
+.si{flex:1;min-width:0}.sn{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:700;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb.active .sn{color:var(--yellow)}.sb.done .sn{color:var(--green)}
+.str{font-size:11px;margin-top:3px}.sb.pending .str{color:var(--muted)}.sb.active .str{color:#fcd34d}.sb.done .str{color:#93c5fd}
+.sadr{font-size:11px;color:var(--muted);margin-top:2px}
+.sr{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;margin-left:8px}
+.stb{font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;padding:2px 7px;border-radius:20px}
+.stp{background:var(--s2);color:var(--muted)}.sta{background:var(--ybg);color:var(--yellow)}.std{background:#052e16;color:#4ade80;border:1px solid #4ade80}
+.chev{font-size:15px;color:var(--muted);transition:transform .2s}.sb.open .chev{transform:rotate(180deg)}
+.sp{display:none;border-top:1px solid var(--border);background:var(--s1);padding:12px}.sb.open .sp{display:block}
+
+/* Time display boxes (read-only) */
+.tr2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px}
+.tb{background:var(--s2);border-radius:9px;padding:10px;text-align:center}
+.tbl{font-size:10px;color:var(--muted);margin-bottom:4px}
+.tbv{font-size:22px;font-weight:700;font-family:'Barlow Condensed',sans-serif}
+.tb.has .tbv{color:var(--text)}.tb.empty .tbv{color:var(--border)}
+.tbs{font-size:9px;color:var(--muted);margin-top:2px}
+.dur-row{text-align:center;padding:6px;font-size:12px;color:var(--muted)}
+.dur-row span{color:var(--text);font-weight:600}
+
+/* Shop info card (read-only) */
+.shop-info{background:var(--s2);border:1.5px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+.shop-info.active{border-color:var(--green);background:var(--gbg)}
+.shop-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0}
+.shop-lbl{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700;color:var(--text)}
+.shop-time{font-size:14px;font-weight:700;font-family:'Barlow Condensed',sans-serif;color:var(--green)}
+.shop-none{font-size:12px;color:var(--muted)}
+.shop-divider{border:none;border-top:1px solid var(--border);margin:6px 0}
+
+/* Week grid */
+.wg{padding:10px 16px}.wgh{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:5px}.wgdh{text-align:center;font-size:10px;color:var(--muted);font-weight:600}
+.wgc-wrap{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.wgc{background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:5px 3px;min-height:64px;cursor:pointer}.wgc.today{border-color:var(--brand)}.wgc.sel{border-color:var(--brand);background:var(--s2)}
+.wgdn{font-size:9px;color:var(--muted);text-align:center}.wgdd{font-size:15px;font-weight:700;font-family:'Barlow Condensed',sans-serif;text-align:center;margin-bottom:3px}.wgc.today .wgdd{color:var(--brand)}
+
+/* Bottom nav */
+.bnav{position:fixed;bottom:0;left:0;right:0;max-width:430px;margin:0 auto;background:var(--s1);border-top:1px solid var(--border);display:none;padding:8px 0 12px}
+.bnav-i{display:flex}.ni{flex:1;text-align:center;cursor:pointer;padding:3px 0;display:flex;flex-direction:column;align-items:center;gap:2px}
+.ni-ic{font-size:19px}.ni-lb{font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.4px}.ni.active .ni-lb{color:var(--brand)}
+
+/* Settings panel */
+#sp{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:100;display:none;align-items:flex-end}#sp.open{display:flex}
+.ssh{background:var(--s1);border-top:1px solid var(--border);border-radius:20px 20px 0 0;padding:22px 18px 38px;width:100%;max-width:430px;margin:0 auto}
+.ssh h3{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:800;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}
+.xb{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer}
+.sett-emp{background:var(--s2);border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:14px}
+.sett-emp-name{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:var(--brand)}
+.sett-emp-grp{font-size:12px;color:var(--muted);margin-top:3px}
+.btn-outline{width:100%;padding:13px;border-radius:11px;background:none;border:1px solid var(--border);color:var(--muted);font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:8px}
+.btn-outline:active{border-color:var(--brand);color:var(--brand)}
+
+/* Empty state */
+.no-sv{padding:32px 0;text-align:center;color:var(--muted);font-size:14px;line-height:1.8}.no-sv strong{color:var(--text);font-size:16px;display:block;margin-bottom:6px}
+
+/* Toast */
+.toast{position:fixed;bottom:86px;left:50%;transform:translateX(-50%) translateY(16px);background:var(--s2);border:1px solid var(--border);border-radius:9px;padding:9px 16px;font-size:13px;font-weight:600;color:var(--text);opacity:0;transition:all .28s;pointer-events:none;z-index:300;white-space:nowrap}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* Refresh spinner */
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.spinning{animation:spin .8s linear infinite;display:inline-block}
+</style>
+</head>
+<body>
+
+<!-- ══ SCREEN: SETUP / EMPLOYEE SELECTION ══ -->
+<div id="scrSetup" class="screen active">
+  <div class="setup">
+    <div>
+      <div class="setup-logo">Brazos<em>Calendar</em></div>
+      <div class="setup-co">🌸 Brazos Cleaning Services</div>
+    </div>
+    <div class="setup-sub">Tu horario de servicios</div>
+
+    <div class="card">
+      <h3>Google Drive</h3>
+      <div class="ds" id="driveStatus">Sin conectar — toca para autenticar</div>
+      <button class="btn-drive" id="btnDrive" onclick="connectDrive()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M6.28 3l5.72 9.9L6.28 3zm-3.7 6.42L.86 13.1c-.4.69-.4 1.53 0 2.22l2.97 5.14h5.94L6.28 15.2 2.58 9.42zm18.84 0L17.72 3l-5.72 9.9 3.44 5.95h5.94l2.97-5.14c.4-.69.4-1.53 0-2.22l-3.69-3.07zm-7.12 8.76H9l-2.22 3.84h10.44l-2.22-3.84z"/></svg>
+        Conectar Drive
+      </button>
+
+      <div id="empSection" style="display:none">
+        <h3>¿Quién eres?</h3>
+        <input type="text" class="emp-search" id="empSearch" placeholder="Busca tu nombre…" oninput="filterEmps()" autocomplete="off">
+        <div class="emp-list" id="empList"></div>
+      </div>
+
+      <div id="empSelected" style="display:none">
+        <h3>Empleado</h3>
+        <div class="emp-selected">
+          <div>
+            <div class="emp-selected-name" id="selEmpName">—</div>
+            <div class="emp-selected-grp" id="selEmpGrp">—</div>
+          </div>
+          <button class="emp-change" onclick="changeEmp()">Cambiar</button>
+        </div>
+      </div>
+
+      <button class="btn" id="btnStart" onclick="startCalendar()" disabled>📅 VER MI CALENDARIO</button>
+
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+        <button onclick="loadLocal()" style="width:100%;padding:10px;border-radius:9px;background:none;border:1px solid var(--border);color:var(--muted);font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;cursor:pointer">📱 Usar localStorage</button>
+      </div>
+    </div>
+
+    <div style="font-size:11px;color:var(--muted);text-align:center;line-height:1.7;max-width:300px">
+      Lee <strong style="color:var(--text)">brazosCS_sync.json</strong> desde Drive.<br>Solo lectura — no modifica nada.
+    </div>
+  </div>
+</div>
+
+<!-- ══ SCREEN: AGENDA ══ -->
+<div id="scrAgenda" class="screen">
+  <div class="hdr">
+    <div style="display:flex;align-items:center;gap:9px">
+      <div class="logo">Brazos<em>Calendar</em></div>
+      <div class="badge">BRAZOS</div>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="hdr-btn" onclick="refreshData()" id="btnRefresh" title="Actualizar">🔄</button>
+      <button class="hdr-btn" id="btnNotes" onclick="openNotesPanel()" title="Notas del supervisor" style="display:none;position:relative;">📝<span id="notesBadge" style="position:absolute;top:-4px;right:-4px;background:#e74c3c;color:white;border-radius:50%;width:14px;height:14px;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:700;"></span></button>
+      <button class="hdr-btn" id="btnSuplente" onclick="openSuplenteModal()" title="Modo Suplente" style="display:none;">🔑</button>
+      <button class="hdr-btn" onclick="openSett()">⚙</button>
+    </div>
+  </div>
+  <div class="sync"><div class="sdot" id="syncDot"></div><span id="syncLbl">—</span></div>
+  <div class="week-nav">
+    <div class="week-label" id="weekLabel">Hoy</div>
+    <div class="week-tabs">
+      <div class="wtab active" id="tabDay" onclick="setView('day')">DÍA</div>
+      <div class="wtab" id="tabWeek" onclick="setView('week')">SEMANA</div>
+    </div>
+  </div>
+  <div class="day-strip" id="dayStrip"></div>
+  <div id="viewDay"><div class="agenda" id="agendaEl"></div></div>
+  <div id="viewWeek" style="display:none"><div class="wg"><div class="wgh" id="wgHead"></div><div class="wgc-wrap" id="wgCells"></div></div></div>
+</div>
+
+<!-- ══ BOTTOM NAV ══ -->
+<div class="bnav" id="bnav">
+  <div class="bnav-i">
+    <div class="ni active" id="niAg" onclick="showTab('agenda')"><div class="ni-ic">📅</div><div class="ni-lb">AGENDA</div></div>
+    <div class="ni" id="niInfo" onclick="showTab('info')"><div class="ni-ic">👤</div><div class="ni-lb">YO</div></div>
+  </div>
+</div>
+
+<!-- ══ SCREEN: INFO (mi perfil) ══ -->
+<div id="scrInfo" class="screen">
+  <div class="hdr">
+    <div class="logo">Brazos<em>Calendar</em></div>
+  </div>
+  <div style="padding:20px 16px">
+    <h2 style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;margin-bottom:16px">👤 Mi Perfil</h2>
+    <div style="background:var(--s1);border:1px solid var(--border);border-radius:13px;padding:18px;margin-bottom:14px">
+      <div style="font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Nombre</div>
+      <div id="infoName" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:700;color:var(--brand)">—</div>
+      <div style="font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin:12px 0 6px">Grupo asignado</div>
+      <div id="infoGrp" style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700">—</div>
+      <div style="font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin:12px 0 6px">Compañeros de grupo</div>
+      <div id="infoTeam" style="font-size:13px;color:var(--muted);line-height:1.8">—</div>
+    </div>
+    <button class="btn-outline" onclick="changeEmpFromInfo()">🔄 Cambiar empleado</button>
+  </div>
+</div>
+
+<!-- ══ SETTINGS SHEET ══ -->
+<div id="sp" onclick="if(event.target.id==='sp')closeSett()">
+  <div class="ssh">
+    <h3>⚙ Configuración <button class="xb" onclick="closeSett()">✕</button></h3>
+    <div class="sett-emp">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:.5px">EMPLEADO ACTIVO</div>
+      <div class="sett-emp-name" id="settEmpName">—</div>
+      <div class="sett-emp-grp" id="settEmpGrp">—</div>
+    </div>
+    <button class="btn-outline" onclick="changeEmpFromSett()">👤 Cambiar empleado</button>
+    <button class="btn-outline" onclick="refreshData();closeSett()">🔄 Actualizar datos</button>
+    <button class="btn-outline" onclick="disconnectDrive()" style="border-color:#e74c3c;color:#e74c3c;">🔌 Cambiar cuenta de Drive</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Modal Modo Suplente -->
+<div id="suplenteModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:3000;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:16px;width:90%;max-width:340px;padding:24px;">
+    <h3 style="margin:0 0 6px;color:#e67e22;">🔑 Modo Suplente</h3>
+    <p style="font-size:0.83rem;color:#666;margin:0 0 16px;">Ingresa la clave de 4 dígitos proporcionada por el supervisor.</p>
+    <input type="password" id="suplentePin" maxlength="4" placeholder="••••"
+      style="width:100%;padding:14px;border:2px solid #e67e22;border-radius:8px;font-size:1.8rem;text-align:center;letter-spacing:8px;box-sizing:border-box;margin-bottom:10px;"
+      oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+    <div id="suplenteError" style="color:#e74c3c;font-size:0.82rem;min-height:18px;margin-bottom:10px;text-align:center;"></div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="closeSuplenteModal()" style="flex:1;padding:12px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px;cursor:pointer;font-weight:700;">Cancelar</button>
+      <button onclick="activarModoSuplente()" style="flex:2;padding:12px;background:#e67e22;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:0.95rem;">✅ Activar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Panel de Notas del Supervisor -->
+<div id="notesPanel" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;align-items:flex-end;justify-content:center;">
+  <div style="background:white;border-radius:16px 16px 0 0;width:100%;max-width:480px;max-height:75vh;overflow-y:auto;padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;color:#2c3e50;">📝 Notas del Supervisor</h3>
+      <button onclick="closeNotesPanel()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:#888;">✕</button>
+    </div>
+    <div id="notesPanelContent"></div>
+  </div>
+</div>
+
+<script>
+const CLIENT_ID='1032764332702-uvnqg0ccaer5gp2hr12gmniqe38ria1t.apps.googleusercontent.com';
+const SCOPES='https://www.googleapis.com/auth/drive.readonly';
+const FOLDER='BrazosCleaningApp', FILE='brazosCS_sync.json', RFILE='quiktrack_bra_reports.json';
+const RPTS_KEY='qt_bra_reports';
+const SESS='ac_bra_sess', TKEY='brazos_drive_token', TEXP='brazos_drive_token_expiry';
+const DAYS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+const MON=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+// App state
+const S={
+  driveToken:null, folderId:null, reportsFileId:null,
+  grupos:{}, servs:[], clis:[], emps:[], reports:{},
+  empId:null, empName:'', group:'',
+  selectedDate:'', weekStart:'', view:'day'
+};
+
+// All employees flattened with their group
+let allEmpsList = [];
+
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible'){
+    // App retomada del segundo plano — refrescar datos si hay token
+    setTimeout(()=>{ try{ refreshData() }catch(e){} }, 800);
+  }
+});
+
+window.addEventListener('DOMContentLoaded',()=>{
+  const tok=localStorage.getItem(TKEY), exp=parseInt(localStorage.getItem(TEXP)||'0');
+  if(tok && Date.now()<exp){
+    S.driveToken=tok; markConnected();
+    loadSyncFile().then(()=>{
+      tryRestoreSession();
+    });
+  } else {
+    // Token expirado — restaurar sesión local primero, luego reconectar Drive
+    tryRestoreSession();
+    // Si hubo sesión guardada, intentar reconectar Drive automáticamente
+    if(tok && typeof google !== 'undefined'){
+      setTimeout(()=>{
+        try{
+          const tc2=google.accounts.oauth2.initTokenClient({
+            client_id:CLIENT_ID, scope:SCOPES,
+            callback:async(r)=>{
+              if(r.error) return;
+              S.driveToken=r.access_token;
+              localStorage.setItem(TKEY,r.access_token);
+              localStorage.setItem(TEXP,(Date.now()+(r.expires_in||3600)*1000).toString());
+              markConnected();
+              await loadSyncFile();
+            }
+          });
+          tc2.requestAccessToken({prompt:''});
+        }catch(e){}
+      }, 1000);
+    }
+  }
+});
+
+function tryRestoreSession(){
+  try{
+    const sess=JSON.parse(localStorage.getItem(SESS)||'null');
+    if(sess && sess.empId && sess.group){
+      Object.assign(S, sess);
+      if(S.emps && S.emps.length) buildEmpsList();
+      launch(false);
+      // Si hay token válido, refrescar desde Drive automáticamente
+      const tok=localStorage.getItem(TKEY);
+      const exp=parseInt(localStorage.getItem(TEXP)||'0');
+      if(tok && Date.now() < exp){ setTimeout(()=>refreshData(), 1500); } try{checkBtnSuplente();}catch(e){}
+      return;
+    }
+  }catch(e){}
+}
+
+/* ── DRIVE AUTH ── */
+let tc=null;
+function connectDrive(){
+  if(S.driveToken){loadSyncFile();return;}
+  if(typeof google==='undefined'){setDS('err','⚠ Google API no cargó');return;}
+  tc=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPES,callback:async(r)=>{
+    if(r.error){setDS('err','⚠ '+r.error);return;}
+    S.driveToken=r.access_token;
+    localStorage.setItem(TKEY,r.access_token);
+    localStorage.setItem(TEXP,(Date.now()+(r.expires_in||3600)*1000).toString());
+    markConnected(); await loadSyncFile();
+  }});
+  tc.requestAccessToken({prompt:'select_account', login_hint:'wacolandscapes@gmail.com'});
+}
+function markConnected(){
+  const b=document.getElementById('btnDrive');
+  b.classList.add('connected');
+  b.innerHTML='✅ Drive conectado';
+}
+
+async function loadSyncFile(){
+  setDS('spin','Buscando datos…');
+  try{
+    const fr=await dGet(`https://www.googleapis.com/drive/v3/files?q=name='${FOLDER}'+and+mimeType='application/vnd.google-apps.folder'+and+trashed=false&fields=files(id)`);
+    if(!fr.files||!fr.files.length){setDS('err',`⚠ Carpeta "${FOLDER}" no encontrada`);return;}
+    S.folderId=fr.files[0].id;
+    const sr=await dGet(`https://www.googleapis.com/drive/v3/files?q=name='${FILE}'+and+'${S.folderId}'+in+parents+and+trashed=false&fields=files(id,modifiedTime)`);
+    if(!sr.files||!sr.files.length){setDS('err',`⚠ ${FILE} no encontrado`);return;}
+    const data=await dGet(`https://www.googleapis.com/drive/v3/files/${sr.files[0].id}?alt=media`);
+    if(!data||data.exportType!=='anaCS_sync'){setDS('err','⚠ Archivo inválido');return;}
+    S.grupos=data.grupos||{}; S.servs=data.servs||[]; S.clis=data.clis||[]; S.emps=data.emps||[]; S.cellNotes=data.cellNotes||{}; if(data.clavesSuplente) S.clavesSuplente=data.clavesSuplente;
+    const mod=new Date(sr.files[0].modifiedTime).toLocaleString('es-MX',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    setDS('ok',`✅ ${S.servs.length} servicios · ${mod}`);
+    // also try to load reports
+    try{
+      const rr=await dGet(`https://www.googleapis.com/drive/v3/files?q=name='${RFILE}'+and+'${S.folderId}'+in+parents+and+trashed=false&fields=files(id)`);
+      if(rr.files&&rr.files.length){
+        S.reportsFileId=rr.files[0].id;
+        const rdata=await dGet(`https://www.googleapis.com/drive/v3/files/${rr.files[0].id}?alt=media`);
+        S.reports=rdata||{};
+      }
+    }catch(e){}
+    buildEmpsList();
+    showEmpSection();
+  }catch(e){setDS('err','⚠ '+e.message);if(e.status===401){S.driveToken=null;localStorage.removeItem(TKEY);}}
+}
+
+async function dGet(url){
+  const r=await fetch(url,{headers:{Authorization:`Bearer ${S.driveToken}`}});
+  if(!r.ok){const e=new Error(await r.text());e.status=r.status;throw e;}
+  return r.json();
+}
+function setDS(t,m){
+  const el=document.getElementById('driveStatus');
+  el.textContent=m; el.className='ds'+(t==='ok'?' ok':t==='err'?' err':'');
+  sdot(t);
+}
+function sdot(t,m){
+  const d=document.getElementById('syncDot'),l=document.getElementById('syncLbl');
+  if(d)d.className='sdot '+(t==='ok'?'ok':t==='err'?'err':t==='spin'?'spin':'');
+  if(l&&m)l.textContent=m;
+}
+
+/* ── EMPLOYEE LIST ── */
+function buildEmpsList(){
+  allEmpsList=[];
+  Object.keys(S.grupos).forEach(grp=>{
+    const memberIds=(S.grupos[grp]||[]).map(String);
+    memberIds.forEach(mid=>{
+      const emp=S.emps.find(e=>String(e.id)===mid);
+      if(emp){
+        const name=(emp.name||(emp.firstName+' '+(emp.lastName||'')).trim()).trim();
+        if(name) allEmpsList.push({id:mid, name, group:grp});
+      }
+    });
+  });
+  allEmpsList.sort((a,b)=>a.name.localeCompare(b.name));
+  renderEmpList('');
+}
+
+function showEmpSection(){
+  document.getElementById('empSection').style.display='block';
+  // If we already have a saved employee, show selected state
+  if(S.empId){
+    showEmpSelected(S.empName, S.group);
+  }
+}
+
+function renderEmpList(filter){
+  const list=document.getElementById('empList');
+  const filtered=filter
+    ? allEmpsList.filter(e=>e.name.toLowerCase().includes(filter.toLowerCase()))
+    : allEmpsList;
+  if(!filtered.length){
+    list.innerHTML='<div style="padding:12px 14px;font-size:13px;color:var(--muted)">No se encontró ningún empleado</div>';
+    return;
+  }
+  list.innerHTML=filtered.map(e=>`
+    <div class="emp-item" onclick="selectEmp('${e.id}','${e.name.replace(/'/g,"\\'")}','${e.group.replace(/'/g,"\\'")}')">
+      <div>${e.name}</div>
+      <div class="emp-grp">👥 ${e.group}</div>
+    </div>`).join('');
+}
+
+function filterEmps(){
+  const q=document.getElementById('empSearch').value;
+  renderEmpList(q);
+}
+
+function selectEmp(id, name, group){
+  S.empId=id; S.empName=name; S.group=group;
+  showEmpSelected(name, group);
+  document.getElementById('btnStart').disabled=false;
+  toast(`✅ ${name} seleccionado/a`);
+}
+
+function showEmpSelected(name, group){
+  document.getElementById('empSection').style.display='none';
+  document.getElementById('empSelected').style.display='block';
+  document.getElementById('selEmpName').textContent=name;
+  document.getElementById('selEmpGrp').textContent='👥 '+group;
+  document.getElementById('btnStart').disabled=false;
+}
+
+function changeEmp(){
+  document.getElementById('empSelected').style.display='none';
+  document.getElementById('empSection').style.display='block';
+  document.getElementById('empSearch').value='';
+  renderEmpList('');
+  document.getElementById('btnStart').disabled=true;
+  S.empId=null; S.empName=''; S.group='';
+}
+
+/* ── START ── */
+function startCalendar(){
+  if(!S.empId){toast('⚠ Selecciona tu nombre primero');return;}
+  S.selectedDate=today();
+  S.weekStart=mondayOf(S.selectedDate);
+  S.view='day';
+  launch(true);
+}
+
+function launch(save){
+  if(save) saveSess();
+  document.getElementById('scrSetup').classList.remove('active');
+  document.getElementById('scrAgenda').classList.add('active');
+  document.getElementById('bnav').style.display='block';
+  sdot('ok', S.driveToken?`Drive · ${FILE}`:'Datos locales');
+  document.getElementById('syncLbl').textContent=S.driveToken?`Drive · ${FILE}`:'Datos locales';
+  buildStrip(); renderView();
+  updateInfoScreen();
+}
+
+/* ── WEEK STRIP ── */
+function buildStrip(){
+  const strip=document.getElementById('dayStrip'); strip.innerHTML='';
+  const td=today();
+  for(let i=0;i<7;i++){
+    const d=addDays(S.weekStart,i), svcs=getSvcs(d);
+    const rpts=getReportsForDay(d);
+    const done=svcs.some(s=>rpts[s.id]?.status==='done');
+    const act=svcs.some(s=>rpts[s.id]?.status==='active');
+    const dc=done?'var(--green)':act?'var(--yellow)':svcs.length?'var(--brand)':'transparent';
+    const dObj=new Date(d+'T12:00:00'), pill=document.createElement('div');
+    pill.className='dp'+(d===td?' today':'')+(d===S.selectedDate?' sel':'');
+    pill.innerHTML=`<div class="dn">${DAYS[dObj.getDay()]}</div><div class="dd">${dObj.getDate()}</div><div class="dpdot" style="background:${dc}"></div>`;
+    pill.onclick=()=>{S.selectedDate=d;saveSess();buildStrip();renderView();};
+    strip.appendChild(pill);
+  }
+  const pills=strip.querySelectorAll('.dp'), idx=[...pills].findIndex(p=>p.classList.contains('sel'));
+  if(idx>=0) pills[idx].scrollIntoView({inline:'center',behavior:'smooth'});
+}
+
+function setView(v){
+  S.view=v;
+  document.getElementById('tabDay').classList.toggle('active',v==='day');
+  document.getElementById('tabWeek').classList.toggle('active',v==='week');
+  document.getElementById('viewDay').style.display=v==='day'?'block':'none';
+  document.getElementById('viewWeek').style.display=v==='week'?'block':'none';
+  renderView();
+}
+function renderView(){
+  const d=new Date(S.selectedDate+'T12:00:00');
+  document.getElementById('weekLabel').textContent=S.selectedDate===today()?'Hoy':`${DAYS[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`;
+  S.view==='day'?renderAgenda():renderWeek();
+}
+
+/* ── AGENDA (read-only) ── */
+function getReportsForDay(date){
+  // Read from S.reports which is structured as reports[date][group]
+  return (S.reports[date]&&S.reports[date][S.group]&&S.reports[date][S.group].services)
+    ? S.reports[date][S.group].services.reduce((acc,svc)=>{acc[svc.id]=svc;return acc;},{})
+    : {};
+}
+
+function renderAgenda(){
+  const el=document.getElementById('agendaEl'); el.innerHTML='';
+  const svcs=getSvcs(S.selectedDate);
+  const rpts=getReportsForDay(S.selectedDate);
+  const dayRpt=S.reports[S.selectedDate]&&S.reports[S.selectedDate][S.group];
+
+  if(!svcs.length){
+    el.innerHTML=`<div class="no-sv"><strong>Sin servicios</strong>No hay servicios para hoy.<br>¡Día libre! 🎉</div>`;
+    return;
+  }
+
+  el.innerHTML=`<div class="grp-lbl">👥 ${S.group}</div>`;
+
+  // Shop info card (read-only)
+  if(dayRpt&&(dayRpt.shopOut||dayRpt.shopBack)){
+    const shopDiv=document.createElement('div');
+    shopDiv.className='shop-info'+(dayRpt.shopOut&&dayRpt.shopBack?' active':'');
+    shopDiv.innerHTML=`
+      <div class="shop-row"><div class="shop-lbl">🚐 Salida del Shop</div><div class="${dayRpt.shopOut?'shop-time':'shop-none'}">${dayRpt.shopOut?fmt12(dayRpt.shopOut):'Pendiente'}</div></div>
+      <hr class="shop-divider">
+      <div class="shop-row"><div class="shop-lbl">🏠 Regreso al Shop</div><div class="${dayRpt.shopBack?'shop-time':'shop-none'}">${dayRpt.shopBack?fmt12(dayRpt.shopBack):'Pendiente'}</div></div>
+      ${dayRpt.shopOut&&dayRpt.shopBack?`<hr class="shop-divider"><div class="shop-row"><div style="font-size:12px;color:var(--muted)">Jornada total</div><div class="shop-time">${calcDur(dayRpt.shopOut,dayRpt.shopBack)}</div></div>`:''}
+    `;
+    el.appendChild(shopDiv);
+  }
+
+  const grid=document.createElement('div'); grid.className='ag-grid';
+  const tc=document.createElement('div'); tc.className='tcol';
+  const bc=document.createElement('div'); bc.className='bcol';
+
+  svcs.forEach(svc=>{
+    const rpt=rpts[svc.id]||{status:'pending',checkin:null,checkout:null};
+    const st=rpt.status||'pending';
+    const sc=st==='done'?'std':st==='active'?'sta':'stp';
+    const sx=st==='done'?'Terminado':st==='active'?'En servicio':'Pendiente';
+
+    const tl=document.createElement('div');
+    tl.className='tslot';
+    tl.textContent=svc.scheduledStart?fmt12s(svc.scheduledStart):'';
+    tc.appendChild(tl);
+
+    const blk=document.createElement('div');
+    blk.className=`sb ${st}`;
+    blk.id=`blk_${svc.id}`;
+
+    const timeStr=bts(svc,rpt);
+    const hasCheckin=!!(rpt.checkin);
+    const hasCheckout=!!(rpt.checkout);
+    const dur=(rpt.checkin&&rpt.checkout)?calcDur(rpt.checkin,rpt.checkout):null;
+
+    blk.innerHTML=`
+      <div class="sh" onclick="tog('${svc.id}')">
+        <div class="si">
+          <div class="sn">${svc.clientName}</div>
+          <div class="str">${timeStr}</div>
+          <div class="sadr">${svc.address}</div>
+        </div>
+        <div class="sr">
+          <div class="stb ${sc}">${sx}</div>
+          <div class="chev">▾</div>
+        </div>
+      </div>
+      <div class="sp">
+        ${checkSuplenteActivo()?`
+        <div class="tr2">
+          <div class="tb ${hasCheckin?'has':'empty'}">
+            <div class="tbl">🟡 Llegada</div>
+            <input type="time" value="${rpt.checkin||''}" style="width:100%;background:transparent;border:none;border-bottom:1.5px solid ${hasCheckin?'var(--yellow)':'var(--border)'};color:${hasCheckin?'var(--text)':'var(--muted)'};font-size:18px;font-weight:700;font-family:'Barlow Condensed',sans-serif;text-align:center;padding:4px 0;outline:none;" onchange="suplenteUpdTime('${svc.id}','checkin',this.value)">
+            <div class="tbs">${hasCheckin?'registrada':'toca para ingresar'}</div>
+          </div>
+          <div class="tb ${hasCheckout?'has':'empty'}">
+            <div class="tbl">🟢 Salida</div>
+            <input type="time" value="${rpt.checkout||''}" style="width:100%;background:transparent;border:none;border-bottom:1.5px solid ${hasCheckout?'var(--green)':'var(--border)'};color:${hasCheckout?'var(--text)':'var(--muted)'};font-size:18px;font-weight:700;font-family:'Barlow Condensed',sans-serif;text-align:center;padding:4px 0;outline:none;" onchange="suplenteUpdTime('${svc.id}','checkout',this.value)">
+            <div class="tbs">${hasCheckout?(dur||'—'):'toca para ingresar'}</div>
+          </div>
+        </div>
+        <textarea rows="2" placeholder="Notas…" style="width:100%;margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:8px;font-family:'Barlow',sans-serif;font-size:13px;resize:none;box-sizing:border-box;" onchange="suplenteUpdNote('${svc.id}',this.value)">${rpt.note||''}</textarea>
+        ` : `
+        <div class="tr2">
+          <div class="tb ${hasCheckin?'has':'empty'}">
+            <div class="tbl">🟡 Llegada</div>
+            <div class="tbv">${hasCheckin?fmt12(rpt.checkin):'—'}</div>
+            <div class="tbs">${hasCheckin?'registrada':'sin registrar'}</div>
+          </div>
+          <div class="tb ${hasCheckout?'has':'empty'}">
+            <div class="tbl">🟢 Salida</div>
+            <div class="tbv">${hasCheckout?fmt12(rpt.checkout):'—'}</div>
+            <div class="tbs">${hasCheckout?(dur||'—'):'sin registrar'}</div>
+          </div>
+        </div>
+        ${dur?`<div class="dur-row">⏱ Duración: <span>${dur}</span></div>`:''}
+        ${rpt.note?`<div style="font-size:12px;color:var(--muted);padding:6px 8px;background:var(--s2);border-radius:7px;margin-top:6px">📝 ${rpt.note}</div>`:''}
+        `}
+      </div>`;
+
+    bc.appendChild(blk);
+  });
+
+  grid.appendChild(tc); grid.appendChild(bc); el.appendChild(grid);
+}
+
+function tog(id){document.getElementById(`blk_${id}`)?.classList.toggle('open');}
+
+function suplenteGetReports(){
+  try{ return JSON.parse(localStorage.getItem(RPTS_KEY)||'{}'); }catch(e){ return {}; }
+}
+function suplenteUpdTime(id, field, val){
+  const allRpts = suplenteGetReports();
+  const date = S.selectedDate;
+  const group = S.group;
+  if(!allRpts[date]) allRpts[date]={};
+  if(!allRpts[date][group]) allRpts[date][group]={savedAt:new Date().toISOString(),group,date,services:[]};
+  let svc = allRpts[date][group].services.find(s=>String(s.id)===String(id));
+  if(!svc){
+    const orig = (S.servs||[]).find(s=>String(s.id)===String(id));
+    const cli = (S.clis||[]).find(c=>String(c.id)===String(orig?.cliId))||{};
+    svc = {id:String(id),clientName:cli.name||'',address:cli.city||'',checkin:'',checkout:'',status:'pending',note:''};
+    allRpts[date][group].services.push(svc);
+  }
+  svc[field]=val;
+  if(svc.checkin&&!svc.checkout) svc.status='active';
+  if(svc.checkin&&svc.checkout) svc.status='done';
+  allRpts[date][group].savedAt=new Date().toISOString();
+  localStorage.setItem(RPTS_KEY, JSON.stringify(allRpts));
+  S.reports[id]=svc;
+}
+function suplenteUpdNote(id, val){
+  suplenteUpdTime(id,'note',val);
+}
+
+/* ── WEEK VIEW ── */
+function renderWeek(){
+  const hd=document.getElementById('wgHead'), cl=document.getElementById('wgCells');
+  hd.innerHTML=cl.innerHTML=''; const td=today();
+  for(let i=0;i<7;i++){
+    const d=addDays(S.weekStart,i), dObj=new Date(d+'T12:00:00'), svcs=getSvcs(d);
+    const rpts=getReportsForDay(d);
+    const th=document.createElement('div'); th.className='wgdh'; th.textContent=DAYS[dObj.getDay()]; hd.appendChild(th);
+    const c=document.createElement('div'); c.className='wgc'+(d===td?' today':'')+(d===S.selectedDate?' sel':'');
+    let inner=`<div class="wgdn"></div><div class="wgdd">${dObj.getDate()}</div>`;
+    svcs.slice(0,3).forEach(s=>{
+      const r=rpts[s.id]||{};
+      const bg=r.status==='done'?'#14532d':r.status==='active'?'#451a03':'var(--s2)';
+      const col=r.status==='done'?'#22c55e':r.status==='active'?'#f59e0b':'var(--muted)';
+      inner+=`<div style="background:${bg};color:${col};border-radius:4px;padding:2px 4px;font-size:9px;margin-bottom:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${s.clientName.split(' ')[0]}</div>`;
+    });
+    if(svcs.length>3) inner+=`<div style="font-size:9px;color:var(--muted);text-align:center">+${svcs.length-3}</div>`;
+    c.innerHTML=inner;
+    c.onclick=()=>{S.selectedDate=d;S.view='day';saveSess();setView('day');buildStrip();};
+    cl.appendChild(c);
+  }
+}
+
+/* ── GET SERVICES ── */
+function getSvcs(date){
+  const members=(S.grupos[S.group]||[]).map(String);
+  return S.servs
+    .filter(s=>!s.cancelled && s.date===date && (s.empId===S.group||members.includes(String(s.empId))))
+    .sort((a,b)=>{
+      const ta=a.timeStart||'',tb=b.timeStart||'';
+      if(ta&&tb) return ta.localeCompare(tb);
+      if(ta&&!tb) return -1; if(!ta&&tb) return 1;
+      return (parseInt(a.priority)||999)-(parseInt(b.priority)||999);
+    })
+    .map(s=>{
+      const c=S.clis.find(x=>String(x.id)===String(s.cliId))||{};
+      const showProp=(c.type==='airbnb'||c.type==='unico');
+      const clientName=(showProp&&c.propId)?c.name+' / '+c.propId:c.name||`Cliente ${s.cliId}`;
+      return{id:String(s.id),clientName,address:c.city||c.address||'',phone:c.tel||c.phone||'',scheduledStart:s.timeStart||'',scheduledEnd:s.timeEnd||'',priority:s.priority||''};
+    });
+}
+
+function bts(svc,rpt){
+  const sc=svc.scheduledStart?`${fmt12(svc.scheduledStart)}${svc.scheduledEnd?' – '+fmt12(svc.scheduledEnd):''}`:' Sin horario';
+  if(rpt.checkin&&!rpt.checkout) return `Llegó ${fmt12(rpt.checkin)} · ${sc}`;
+  if(rpt.checkin&&rpt.checkout) return `${fmt12(rpt.checkin)} → ${fmt12(rpt.checkout)} · ${calcDur(rpt.checkin,rpt.checkout)}`;
+  return sc;
+}
+
+/* ── INFO SCREEN ── */
+function updateInfoScreen(){
+  document.getElementById('infoName').textContent=S.empName||'—';
+  document.getElementById('infoGrp').textContent=S.group?'👥 '+S.group:'—';
+  document.getElementById('settEmpName').textContent=S.empName||'—';
+  document.getElementById('settEmpGrp').textContent=S.group?'👥 '+S.group:'—';
+  // Team members
+  const members=(S.grupos[S.group]||[]).map(String);
+  const teammates=members
+    .filter(mid=>String(mid)!==String(S.empId))
+    .map(mid=>{
+      const emp=S.emps.find(e=>String(e.id)===String(mid));
+      return emp?(emp.name||(emp.firstName+' '+(emp.lastName||'')).trim()).trim():null;
+    }).filter(Boolean);
+  document.getElementById('infoTeam').textContent=teammates.length?teammates.join(', '):'Solo en tu grupo';
+}
+
+function showTab(t){
+  document.getElementById('scrAgenda').classList.toggle('active',t==='agenda');
+  document.getElementById('scrInfo').classList.toggle('active',t==='info');
+  document.getElementById('niAg').classList.toggle('active',t==='agenda');
+  document.getElementById('niInfo').classList.toggle('active',t==='info');
+}
+
+function changeEmpFromInfo(){showTab('agenda');goSetup();}
+function changeEmpFromSett(){closeSett();goSetup();}
+
+function goSetup(){
+  ['scrAgenda','scrInfo'].forEach(id=>document.getElementById(id).classList.remove('active'));
+  document.getElementById('scrSetup').classList.add('active');
+  document.getElementById('bnav').style.display='none';
+  if(allEmpsList.length) showEmpSection();
+}
+
+/* ── SETTINGS ── */
+function openSett(){document.getElementById('sp').classList.add('open');}
+function closeSett(){document.getElementById('sp').classList.remove('open');}
+
+function disconnectDrive(){
+  localStorage.removeItem('brazos_drive_token');
+  localStorage.removeItem('brazos_drive_token_expiry');
+  S.driveToken=null; S.folderId=null; S.reportsFileId=null;
+  closeSett();
+  toast('🔌 Drive desconectado — reconecta para cambiar cuenta');
+  setTimeout(()=>goSetup(), 1200);
+}
+
+/* ── REFRESH ── */
+async function refreshData(){
+  const btn=document.getElementById('btnRefresh');
+  if(btn){btn.innerHTML='<span class="spinning">🔄</span>';btn.style.pointerEvents='none';}
+  try{
+    if(S.driveToken && S.folderId){
+      sdot('spin','Actualizando…');
+      document.getElementById('syncLbl').textContent='Actualizando…';
+      // Reload sync file
+      const sr=await dGet(`https://www.googleapis.com/drive/v3/files?q=name='${FILE}'+and+'${S.folderId}'+in+parents+and+trashed=false&fields=files(id,modifiedTime)`);
+      if(sr.files&&sr.files.length){
+        const data=await dGet(`https://www.googleapis.com/drive/v3/files/${sr.files[0].id}?alt=media`);
+        if(data&&data.exportType==='anaCS_sync'){
+          S.servs=data.servs||[]; S.clis=data.clis||[]; S.grupos=data.grupos||{}; S.emps=data.emps||[];
+        }
+      }
+      // Reload reports
+      if(S.reportsFileId){
+        try{const rdata=await dGet(`https://www.googleapis.com/drive/v3/files/${S.reportsFileId}?alt=media`);S.reports=rdata||{};}catch(e){}
+      }
+      const mod=new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+      sdot('ok','Actualizado '+mod);
+      document.getElementById('syncLbl').textContent='Actualizado '+mod;
+      toast('✅ Datos actualizados');
+    } else {
+      // localStorage fallback
+      const g=localStorage.getItem('v35_grupos');
+      const sv=localStorage.getItem('v35_servs');
+      const c=localStorage.getItem('v35_clis');
+      const e=localStorage.getItem('v35_emps');
+      if(g) S.grupos=JSON.parse(g);
+      if(sv) S.servs=JSON.parse(sv);
+      if(c) S.clis=JSON.parse(c);
+      if(e) S.emps=JSON.parse(e);
+      // Also read reports from localStorage
+      try{
+        const rpts=JSON.parse(localStorage.getItem('qt_bra_reports')||'{}');
+        S.reports=rpts;
+      }catch(ex){}
+      sdot('ok','Datos locales');
+      document.getElementById('syncLbl').textContent='Datos locales actualizados';
+      toast('✅ Actualizado desde Scheduler');
+    }
+    saveSess(); buildStrip(); renderView(); updateInfoScreen(); try{checkNotesBadge();}catch(e2){} try{checkBtnSuplente();}catch(e3){}
+  }catch(e){
+    sdot('err','Error al actualizar');
+    toast('⚠ Error: '+e.message);
+  } finally {
+    if(btn){btn.innerHTML='🔄';btn.style.pointerEvents='auto';}
+  }
+}
+
+/* ── LOAD FROM LOCALSTORAGE ── */
+function loadLocal(){
+  try{
+    const g=JSON.parse(localStorage.getItem('v35_grupos')||'null');
+    if(!g||!Object.keys(g).length){toast('⚠ Abre el Scheduler primero');return;}
+    S.grupos=g;
+    S.servs=JSON.parse(localStorage.getItem('v35_servs')||'[]');
+    S.clis=JSON.parse(localStorage.getItem('v35_clis')||'[]');
+    S.emps=JSON.parse(localStorage.getItem('v35_emps')||'[]');
+    // Read reports too
+    try{S.reports=JSON.parse(localStorage.getItem('qt_bra_reports')||'{}');}catch(e){}
+    setDS('ok',`📱 ${S.servs.length} servicios cargados`);
+    buildEmpsList(); showEmpSection();
+    toast('✅ Datos del Scheduler cargados');
+  }catch(e){toast('⚠ Error leyendo localStorage');}
+}
+
+/* ── MODO SUPLENTE ── */
+function checkSuplenteActivo(){
+  const data = JSON.parse(localStorage.getItem('brazos_suplente_activo')||'null');
+  if(!data) return false;
+  // Verificar que sea del día actual y no haya pasado medianoche
+  if(data.fecha !== today()) {
+    localStorage.removeItem('brazos_suplente_activo');
+    return false;
+  }
+  return true;
+}
+
+function checkBtnSuplente(){
+  const btn = document.getElementById('btnSuplente');
+  if(!btn) return;
+  const claves = S.clavesSuplente || [];
+  const tieneClaves = claves.some(c => c.estado === 'activa');
+  // Mostrar botón solo si hay claves activas disponibles o ya está activo el modo
+  if(tieneClaves || checkSuplenteActivo()){
+    btn.style.display = 'flex';
+    if(checkSuplenteActivo()){
+      btn.style.background = '#e67e22';
+      btn.style.color = 'white';
+      btn.title = '✅ Modo Suplente Activo';
+    }
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+function openSuplenteModal(){
+  if(checkSuplenteActivo()){
+    if(confirm('✅ Modo Suplente está activo para hoy.\n\n¿Deseas desactivarlo?')){
+      localStorage.removeItem('brazos_suplente_activo');
+      checkBtnSuplente();
+      renderView();
+      toast('🔑 Modo Suplente desactivado');
+    }
+    return;
+  }
+  document.getElementById('suplentePin').value='';
+  document.getElementById('suplenteError').textContent='';
+  document.getElementById('suplenteModal').style.display='flex';
+  setTimeout(()=>document.getElementById('suplentePin').focus(),100);
+}
+
+function closeSuplenteModal(){
+  document.getElementById('suplenteModal').style.display='none';
+}
+
+function activarModoSuplente(){
+  const pin = document.getElementById('suplentePin').value.trim();
+  const err = document.getElementById('suplenteError');
+  if(pin.length !== 4){ err.textContent='⚠️ Ingresa 4 dígitos.'; return; }
+  const claves = S.clavesSuplente || [];
+  const idx = claves.findIndex(c => c.clave === pin && c.estado === 'activa');
+  if(idx === -1){ err.textContent='❌ Clave incorrecta o ya utilizada.'; document.getElementById('suplentePin').value=''; return; }
+  // Marcar clave como usada
+  claves[idx].estado = 'usada';
+  claves[idx].usada = today();
+  S.clavesSuplente = claves;
+  localStorage.setItem('brazos_suplente_activo', JSON.stringify({ fecha: today(), activadaA: new Date().toLocaleTimeString('es-MX') }));
+  closeSuplenteModal();
+  checkBtnSuplente();
+  renderView();
+  toast('✅ Modo Suplente activado para hoy');
+}
+
+/* ── NOTAS SUPERVISOR ── */
+function getNotesForGroup(group, date){
+  const notes = S.cellNotes || {};
+  const result = [];
+  const ws = S.weekStart || date;
+  for(let i=0;i<7;i++){
+    const d=new Date(ws+'T12:00:00'); d.setDate(d.getDate()+i);
+    const dStr=d.toLocaleDateString('en-CA');
+    const key=dStr+'__'+group;
+    if(notes[key]&&notes[key].length) result.push({date:dStr,notes:notes[key]});
+  }
+  return result;
+}
+
+function checkNotesBadge(){
+  const group=S.group||''; const date=S.selectedDate||'';
+  const weekNotes=getNotesForGroup(group,date);
+  const btn=document.getElementById('btnNotes');
+  const badge=document.getElementById('notesBadge');
+  if(!btn) return;
+  const total=weekNotes.reduce((s,d)=>s+d.notes.length,0);
+  if(total>0){ btn.style.display='flex'; badge.textContent=total>9?'9+':total; }
+  else { btn.style.display='none'; }
+}
+
+function openNotesPanel(){
+  const group=S.group||''; const date=S.selectedDate||'';
+  const weekNotes=getNotesForGroup(group,date);
+  const content=document.getElementById('notesPanelContent');
+  const dias=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const meses=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  if(!weekNotes.length){
+    content.innerHTML='<p style="color:#888;text-align:center;padding:20px;">Sin notas para esta semana.</p>';
+  } else {
+    content.innerHTML=weekNotes.map(d=>{
+      const dObj=new Date(d.date+'T12:00:00');
+      const label=`${dias[dObj.getDay()]} ${dObj.getDate()} de ${meses[dObj.getMonth()]}`;
+      const isToday=d.date===date;
+      return `<div style="margin-bottom:14px;">
+        <div style="font-size:0.82rem;font-weight:700;color:${isToday?'#e74c3c':'#0ea5e9'};margin-bottom:6px;">${isToday?'📅 HOY — ':''}${label}</div>
+        ${d.notes.map(n=>`<div style="background:#fff8e1;border-left:3px solid #f39c12;padding:8px 12px;border-radius:0 8px 8px 0;margin-bottom:4px;font-size:0.88rem;color:#333;">${n}</div>`).join('')}
+      </div>`;
+    }).join('');
+  }
+  document.getElementById('notesPanel').style.display='flex';
+}
+
+function closeNotesPanel(){ document.getElementById('notesPanel').style.display='none'; }
+
+/* ── SESSION ── */
+function saveSess(){
+  try{
+    localStorage.setItem(SESS, JSON.stringify({
+      empId:S.empId, empName:S.empName, group:S.group,
+      selectedDate:S.selectedDate, weekStart:S.weekStart, view:S.view,
+      grupos:S.grupos, servs:S.servs, clis:S.clis, emps:S.emps,
+      reports:S.reports
+    }));
+  }catch(e){}
+}
+
+/* ── UTILS ── */
+function today(){return new Date().toISOString().split('T')[0];}
+function mondayOf(d){const dt=new Date(d+'T12:00:00'),day=dt.getDay();dt.setDate(dt.getDate()+(day===0?-6:1-day));return dt.toISOString().split('T')[0];}
+function addDays(d,n){const dt=new Date(d+'T12:00:00');dt.setDate(dt.getDate()+n);return dt.toISOString().split('T')[0];}
+function toMins(t){if(!t)return 0;const[h,m]=t.split(':').map(Number);return h*60+m;}
+function fmt12(t){if(!t)return'';const[h24,m]=t.split(':').map(Number),am=h24>=12?'PM':'AM',h=h24%12||12;return`${h}:${m.toString().padStart(2,'0')} ${am}`;}
+function fmt12s(t){if(!t)return'';const[h24]=t.split(':').map(Number),am=h24>=12?'pm':'am',h=h24%12||12;return`${h}${am}`;}
+function calcDur(s,e){const m=toMins(e)-toMins(s);if(m<=0)return'—';return Math.floor(m/60)>0?`${Math.floor(m/60)}h ${m%60}min`:`${m}min`;}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
+</script>
+</body>
+</html>
