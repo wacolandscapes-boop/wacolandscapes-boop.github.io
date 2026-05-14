@@ -25,7 +25,7 @@ const _blob=new Blob([JSON.stringify(_manifest)],{type:'application/json'});
 document.getElementById('pwaManifest').href=URL.createObjectURL(_blob);
 
 
-const APP_VERSION = '2.0.6';
+const APP_VERSION = '2.0.9';
 const APP_URL = 'https://wacolandscapes-boop.github.io/brazos-cleaning/BrazosCalendar_V1_PWA.html';
 
 async function checkForUpdate() {
@@ -262,6 +262,7 @@ select:focus,input:focus{outline:none;border-color:var(--brand)}
       <button class="hdr-btn" onclick="refreshData()" id="btnRefresh" title="Actualizar">🔄</button>
       <button class="hdr-btn" id="btnNotes" onclick="openNotesPanel()" title="Notas del supervisor" style="display:none;position:relative;">📝<span id="notesBadge" style="position:absolute;top:-4px;right:-4px;background:#e74c3c;color:white;border-radius:50%;width:14px;height:14px;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:700;"></span></button>
       <button class="hdr-btn" id="btnSuplente" onclick="openSuplenteModal()" title="Modo Suplente" style="display:none;">🔑</button>
+      <button class="hdr-btn" id="btnSupervisor" onclick="openSupervisorModal()" title="Modo Supervisor" style="display:none;">🔐</button>
       <button class="hdr-btn" onclick="openSett()">⚙</button>
     </div>
   </div>
@@ -334,6 +335,22 @@ select:focus,input:focus{outline:none;border-color:var(--brand)}
     <div style="display:flex;gap:8px;">
       <button onclick="closeSuplenteModal()" style="flex:1;padding:12px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px;cursor:pointer;font-weight:700;">Cancelar</button>
       <button onclick="activarModoSuplente()" style="flex:2;padding:12px;background:#e67e22;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:0.95rem;">✅ Activar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Modo Supervisor -->
+<div id="supervisorModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:3000;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:16px;width:90%;max-width:340px;padding:24px;">
+    <h3 style="margin:0 0 6px;color:#6c3483;">🔐 Modo Supervisor</h3>
+    <p style="font-size:0.83rem;color:#666;margin:0 0 16px;">Ingresa el PIN del supervisor para activar la edición del calendario.</p>
+    <input type="password" id="supervisorPinInput" maxlength="8" placeholder="••••"
+      style="width:100%;padding:14px;border:2px solid #6c3483;border-radius:8px;font-size:1.8rem;text-align:center;letter-spacing:8px;box-sizing:border-box;margin-bottom:10px;"
+      oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+    <div id="supervisorPinError" style="color:#e74c3c;font-size:0.82rem;min-height:18px;margin-bottom:10px;text-align:center;"></div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="closeSupervisorModal()" style="flex:1;padding:12px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px;cursor:pointer;font-weight:700;">Cancelar</button>
+      <button onclick="activarModoSupervisor()" style="flex:2;padding:12px;background:#6c3483;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:0.95rem;">✅ Activar</button>
     </div>
   </div>
 </div>
@@ -419,7 +436,7 @@ function tryRestoreSession(){
       // Si hay token válido, refrescar desde Drive automáticamente
       const tok=localStorage.getItem(TKEY);
       const exp=parseInt(localStorage.getItem(TEXP)||'0');
-      if(tok && Date.now() < exp){ setTimeout(()=>refreshData(), 1500); } try{checkBtnSuplente();}catch(e){}
+      if(tok && Date.now() < exp){ setTimeout(()=>refreshData(), 1500); } try{checkBtnSuplente();}catch(e){} try{checkBtnSupervisor();}catch(e2){}
       return;
     }
   }catch(e){}
@@ -455,7 +472,7 @@ async function loadSyncFile(){
     if(!sr.files||!sr.files.length){setDS('err',`⚠ ${FILE} no encontrado`);return;}
     const data=await dGet(`https://www.googleapis.com/drive/v3/files/${sr.files[0].id}?alt=media`);
     if(!data||data.exportType!=='anaCS_sync'){setDS('err','⚠ Archivo inválido');return;}
-    S.grupos=data.grupos||{}; S.servs=data.servs||[]; S.clis=data.clis||[]; S.emps=data.emps||[]; S.cellNotes=data.cellNotes||{}; if(data.clavesSuplente) S.clavesSuplente=data.clavesSuplente;
+    S.grupos=data.grupos||{}; S.servs=data.servs||[]; S.clis=data.clis||[]; S.emps=data.emps||[]; S.cellNotes=data.cellNotes||{}; if(data.clavesSuplente) S.clavesSuplente=data.clavesSuplente; if(data.supervisorPin) S.supervisorPin=data.supervisorPin;
     const mod=new Date(sr.files[0].modifiedTime).toLocaleString('es-MX',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     setDS('ok',`✅ ${S.servs.length} servicios · ${mod}`);
     // also try to load reports
@@ -476,6 +493,63 @@ async function dGet(url){
   const r=await fetch(url,{headers:{Authorization:`Bearer ${S.driveToken}`}});
   if(!r.ok){const e=new Error(await r.text());e.status=r.status;throw e;}
   return r.json();
+}
+
+async function saveReportsToDrive(){
+  if(!S.driveToken || !S.folderId) return;
+  try {
+    const allRpts = suplenteGetReports();
+    const sr = await dGet(`https://www.googleapis.com/drive/v3/files?q=name='quiktrack_reports.json'+and+'${S.folderId}'+in+parents+and+trashed=false&fields=files(id)`);
+    const blob = new Blob([JSON.stringify(allRpts)], {type:'application/json'});
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify({name:'quiktrack_reports.json'})], {type:'application/json'}));
+    form.append('file', blob);
+    let url, method;
+    if(sr.files && sr.files.length){
+      url = `https://www.googleapis.com/upload/drive/v3/files/${sr.files[0].id}?uploadType=multipart`;
+      method = 'PATCH';
+    } else {
+      url = `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
+      method = 'POST';
+      form.set('metadata', new Blob([JSON.stringify({name:'quiktrack_reports.json', parents:[S.folderId]})], {type:'application/json'}));
+    }
+    await fetch(url, {method, headers:{Authorization:`Bearer ${S.driveToken}`}, body:form});
+    toast('✅ Reporte guardado en Drive');
+  } catch(e) {
+    toast('⚠️ Error guardando reporte: ' + e.message);
+  }
+}
+
+async function saveSyncToDrive(){
+  if(!S.driveToken || !S.folderId) { toast('⚠️ Conecta Drive primero'); return false; }
+  try {
+    // Buscar el archivo en Drive
+    const sr = await dGet(`https://www.googleapis.com/drive/v3/files?q=name='brazosCS_sync.json'+and+'${S.folderId}'+in+parents+and+trashed=false&fields=files(id)`);
+    if(!sr.files||!sr.files.length){ toast('⚠️ No se encontró brazosCS_sync.json'); return false; }
+    const fileId = sr.files[0].id;
+    // Construir el JSON actualizado
+    const data = {
+      exportType: 'anaCS_sync',
+      exportDate: new Date().toISOString(),
+      lastSavedAt: new Date().toISOString(),
+      emps: S.emps, clis: S.clis, servs: S.servs,
+      grupos: S.grupos, cellNotes: S.cellNotes||{},
+      supervisorPin: S.supervisorPin||'1234',
+      clavesSuplente: S.clavesSuplente||[]
+    };
+    const blob = new Blob([JSON.stringify(data)], {type:'application/json'});
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify({name:'brazosCS_sync.json'})], {type:'application/json'}));
+    form.append('file', blob);
+    const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`,
+      {method:'PATCH', headers:{Authorization:`Bearer ${S.driveToken}`}, body:form});
+    if(!res.ok) throw new Error(await res.text());
+    toast('✅ Cambios guardados en Drive');
+    return true;
+  } catch(e) {
+    toast('❌ Error al guardar: ' + e.message);
+    return false;
+  }
 }
 function setDS(t,m){
   const el=document.getElementById('driveStatus');
@@ -683,7 +757,13 @@ function renderAgenda(){
         </div>
       </div>
       <div class="sp">
-        ${checkSuplenteActivo()?`
+        ${checkSupervisorActivo()?`
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+          <button onclick="supvMoveGroup('${svc.id}')" style="flex:1;padding:6px;background:#6c3483;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.75rem;font-weight:700;">👥 Cambiar Grupo</button>
+          <button onclick="supvMoveDate('${svc.id}')" style="flex:1;padding:6px;background:#0ea5e9;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.75rem;font-weight:700;">📅 Cambiar Fecha</button>
+        </div>
+      `:''}
+      ${checkSuplenteActivo()?`
         <div class="tr2">
           <div class="tb ${hasCheckin?'has':'empty'}">
             <div class="tbl">🟡 Llegada</div>
@@ -744,7 +824,9 @@ function suplenteUpdTime(id, field, val){
   if(svc.checkin&&svc.checkout) svc.status='done';
   allRpts[date][group].savedAt=new Date().toISOString();
   localStorage.setItem(RPTS_KEY, JSON.stringify(allRpts));
-  S.reports[id]=svc;
+  S.reports[String(id)]=svc;
+  // Subir a Drive en segundo plano
+  setTimeout(()=>{ try{ saveReportsToDrive(); }catch(e){} }, 500);
 }
 function suplenteUpdNote(id, val){
   suplenteUpdTime(id,'note',val);
@@ -883,13 +965,19 @@ async function refreshData(){
       // Also read reports from localStorage
       try{
         const rpts=JSON.parse(localStorage.getItem('qt_bra_reports')||'{}');
-        S.reports=rpts;
+        // Convertir estructura fecha->grupo->services[] a id->reporte para render
+        S.reports={};
+        Object.values(rpts).forEach(dayData=>{
+          Object.values(dayData).forEach(grpData=>{
+            if(grpData.services) grpData.services.forEach(s=>{ S.reports[String(s.id)]=s; });
+          });
+        });
       }catch(ex){}
       sdot('ok','Datos locales');
       document.getElementById('syncLbl').textContent='Datos locales actualizados';
       toast('✅ Actualizado desde Scheduler');
     }
-    saveSess(); buildStrip(); renderView(); updateInfoScreen(); try{checkNotesBadge();}catch(e2){} try{checkBtnSuplente();}catch(e3){}
+    saveSess(); buildStrip(); renderView(); updateInfoScreen(); try{checkNotesBadge();}catch(e2){} try{checkBtnSuplente();}catch(e3){} try{checkBtnSupervisor();}catch(e4){}
   }catch(e){
     sdot('err','Error al actualizar');
     toast('⚠ Error: '+e.message);
@@ -908,11 +996,106 @@ function loadLocal(){
     S.clis=JSON.parse(localStorage.getItem('v35_clis')||'[]');
     S.emps=JSON.parse(localStorage.getItem('v35_emps')||'[]');
     // Read reports too
-    try{S.reports=JSON.parse(localStorage.getItem('qt_bra_reports')||'{}');}catch(e){}
+    try{
+      const rpts2=JSON.parse(localStorage.getItem('qt_bra_reports')||'{}');
+      S.reports={};
+      Object.values(rpts2).forEach(dayData=>{
+        Object.values(dayData).forEach(grpData=>{
+          if(grpData.services) grpData.services.forEach(s=>{ S.reports[String(s.id)]=s; });
+        });
+      });
+    }catch(e){}
     setDS('ok',`📱 ${S.servs.length} servicios cargados`);
     buildEmpsList(); showEmpSection();
     toast('✅ Datos del Scheduler cargados');
   }catch(e){toast('⚠ Error leyendo localStorage');}
+}
+
+/* ── MODO SUPERVISOR ── */
+function checkSupervisorActivo(){
+  const data=JSON.parse(localStorage.getItem('brazos_supervisor_activo')||'null');
+  if(!data) return false;
+  if(data.fecha !== today()){ localStorage.removeItem('brazos_supervisor_activo'); return false; }
+  return true;
+}
+
+function checkBtnSupervisor(){
+  const btn=document.getElementById('btnSupervisor');
+  if(!btn) return;
+  const pin = S.supervisorPin || localStorage.getItem('brazos_supervisorPin');
+  if(pin){
+    btn.style.display='flex';
+    if(checkSupervisorActivo()){
+      btn.style.background='#6c3483';
+      btn.style.color='white';
+      btn.title='✅ Modo Supervisor Activo';
+    } else {
+      btn.style.background='';
+      btn.style.color='';
+    }
+  } else {
+    btn.style.display='none';
+  }
+}
+
+function openSupervisorModal(){
+  if(checkSupervisorActivo()){
+    if(confirm('✅ Modo Supervisor está activo para hoy.\n\n¿Deseas desactivarlo?')){
+      localStorage.removeItem('brazos_supervisor_activo');
+      checkBtnSupervisor();
+      renderView();
+      toast('🔐 Modo Supervisor desactivado');
+    }
+    return;
+  }
+  document.getElementById('supervisorPinInput').value='';
+  document.getElementById('supervisorPinError').textContent='';
+  document.getElementById('supervisorModal').style.display='flex';
+  setTimeout(()=>document.getElementById('supervisorPinInput').focus(),100);
+}
+
+function closeSupervisorModal(){
+  document.getElementById('supervisorModal').style.display='none';
+}
+
+function activarModoSupervisor(){
+  const pin=document.getElementById('supervisorPinInput').value.trim();
+  const err=document.getElementById('supervisorPinError');
+  const correctPin = S.supervisorPin || localStorage.getItem('brazos_supervisorPin') || '1234';
+  if(!pin){ err.textContent='⚠️ Ingresa el PIN.'; return; }
+  if(pin !== correctPin){ err.textContent='❌ PIN incorrecto.'; document.getElementById('supervisorPinInput').value=''; return; }
+  localStorage.setItem('brazos_supervisor_activo', JSON.stringify({fecha:today(), activadaA:new Date().toLocaleTimeString('es-MX')}));
+  closeSupervisorModal();
+  checkBtnSupervisor();
+  renderView();
+  toast('✅ Modo Supervisor activado para hoy');
+}
+
+function supvMoveGroup(svcId){
+  const grupos = Object.keys(S.grupos||{});
+  const opciones = grupos.join('\n');
+  const nuevo = prompt(`Mover servicio a qué grupo?\n\n${opciones}\n\nEscribe el nombre del grupo:`);
+  if(!nuevo || !grupos.includes(nuevo)) { toast('⚠️ Grupo inválido'); return; }
+  const svc = (S.servs||[]).find(s=>String(s.id)===String(svcId));
+  if(!svc) return;
+  svc.empId = nuevo;
+  svc.grupo = nuevo;
+  renderView();
+  saveSyncToDrive();
+}
+
+function supvMoveDate(svcId){
+  const svc = (S.servs||[]).find(s=>String(s.id)===String(svcId));
+  if(!svc) return;
+  const nueva = prompt(`Nueva fecha para el servicio:\n(Formato: YYYY-MM-DD)\nFecha actual: ${svc.date}`);
+  if(!nueva) return;
+  // Validar formato fecha
+  const dateRegex = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+  if(!dateRegex.test(nueva)) { toast('⚠️ Formato inválido. Usa YYYY-MM-DD'); return; }
+  svc.date = nueva;
+  S.selectedDate = nueva;
+  renderView();
+  saveSyncToDrive();
 }
 
 /* ── MODO SUPLENTE ── */
