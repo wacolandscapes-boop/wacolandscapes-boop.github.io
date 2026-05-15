@@ -25,7 +25,7 @@ const _blob=new Blob([JSON.stringify(_manifest)],{type:'application/json'});
 document.getElementById('pwaManifest').href=URL.createObjectURL(_blob);
 
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.1.1';
 const APP_URL = 'https://wacolandscapes-boop.github.io/brazos-cleaning/BrazosCalendar_V1_PWA.html';
 
 async function checkForUpdate() {
@@ -516,8 +516,32 @@ async function dGet(url){
 async function saveReportsToDrive(){
   if(!S.driveToken || !S.folderId) return;
   try {
-    const allRpts = suplenteGetReports();
+    const localRpts = suplenteGetReports();
+    // Solo subir si hay datos locales para guardar
+    if(!localRpts || Object.keys(localRpts).length === 0) return;
+    // Mezclar con lo que ya está en Drive para no sobreescribir
     const sr = await dGet(`https://www.googleapis.com/drive/v3/files?q=name='quiktrack_reports.json'+and+'${S.folderId}'+in+parents+and+trashed=false&fields=files(id)`);
+    let allRpts = localRpts;
+    if(sr.files && sr.files.length){
+      try {
+        const driveRpts = await dGet(`https://www.googleapis.com/drive/v3/files/${sr.files[0].id}?alt=media`);
+        // Mezclar Drive + local (local tiene prioridad)
+        allRpts = {...(driveRpts||{})};
+        Object.keys(localRpts).forEach(date=>{
+          if(!allRpts[date]) allRpts[date]={};
+          Object.keys(localRpts[date]).forEach(group=>{
+            if(!allRpts[date][group]) allRpts[date][group]=localRpts[date][group];
+            else {
+              localRpts[date][group].services.forEach(ls=>{
+                const idx=allRpts[date][group].services.findIndex(s=>String(s.id)===String(ls.id));
+                if(idx>=0) allRpts[date][group].services[idx]=ls;
+                else allRpts[date][group].services.push(ls);
+              });
+            }
+          });
+        });
+      } catch(e2){}
+    }
     const blob = new Blob([JSON.stringify(allRpts)], {type:'application/json'});
     const form = new FormData();
     form.append('metadata', new Blob([JSON.stringify({name:'quiktrack_reports.json'})], {type:'application/json'}));
