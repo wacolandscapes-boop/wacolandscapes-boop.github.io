@@ -25,7 +25,7 @@ const _blob=new Blob([JSON.stringify(_manifest)],{type:'application/json'});
 document.getElementById('pwaManifest').href=URL.createObjectURL(_blob);
 
 
-const APP_VERSION = '2.0.9';
+const APP_VERSION = '2.1.0';
 const APP_URL = 'https://wacolandscapes-boop.github.io/brazos-cleaning/BrazosCalendar_V1_PWA.html';
 
 async function checkForUpdate() {
@@ -481,7 +481,24 @@ async function loadSyncFile(){
       if(rr.files&&rr.files.length){
         S.reportsFileId=rr.files[0].id;
         const rdata=await dGet(`https://www.googleapis.com/drive/v3/files/${rr.files[0].id}?alt=media`);
-        S.reports=rdata||{};
+        // Mezclar reportes de Drive con reportes locales (modo suplente)
+        const localRpts = suplenteGetReports();
+        const merged = rdata||{};
+        Object.keys(localRpts).forEach(date=>{
+          Object.keys(localRpts[date]).forEach(group=>{
+            if(!merged[date]) merged[date]={};
+            if(!merged[date][group]) merged[date][group]=localRpts[date][group];
+            else {
+              // Mezclar servicios
+              localRpts[date][group].services.forEach(ls=>{
+                const idx=merged[date][group].services.findIndex(s=>String(s.id)===String(ls.id));
+                if(idx>=0) merged[date][group].services[idx]=ls;
+                else merged[date][group].services.push(ls);
+              });
+            }
+          });
+        });
+        S.reports=merged;
       }
     }catch(e){}
     buildEmpsList();
@@ -824,8 +841,14 @@ function suplenteUpdTime(id, field, val){
   if(svc.checkin&&svc.checkout) svc.status='done';
   allRpts[date][group].savedAt=new Date().toISOString();
   localStorage.setItem(RPTS_KEY, JSON.stringify(allRpts));
-  S.reports[String(id)]=svc;
-  // Subir a Drive en segundo plano
+  // Actualizar S.reports con la estructura correcta [date][group]
+  if(!S.reports) S.reports={};
+  if(!S.reports[date]) S.reports[date]={};
+  if(!S.reports[date][group]) S.reports[date][group]={savedAt:new Date().toISOString(),group,date,services:[]};
+  const idx = S.reports[date][group].services.findIndex(s=>String(s.id)===String(id));
+  if(idx>=0) S.reports[date][group].services[idx]=svc;
+  else S.reports[date][group].services.push(svc);
+  // Subir a Drive en segundo plano sin re-renderizar
   setTimeout(()=>{ try{ saveReportsToDrive(); }catch(e){} }, 500);
 }
 function suplenteUpdNote(id, val){
