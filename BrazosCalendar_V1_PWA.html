@@ -310,6 +310,7 @@ select:focus,input:focus{outline:none;border-color:var(--brand)}
 <div id="sp" onclick="if(event.target.id==='sp')closeSett()">
   <div class="ssh">
     <h3>⚙ Configuración <button class="xb" onclick="closeSett()">✕</button></h3>
+  <div style="font-size:0.75rem;color:#888;margin-bottom:10px;">Versión: <strong id="appVerLabel"></strong></div>
     <div class="sett-emp">
       <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:.5px">EMPLEADO ACTIVO</div>
       <div class="sett-emp-name" id="settEmpName">—</div>
@@ -939,7 +940,11 @@ function goSetup(){
 }
 
 /* ── SETTINGS ── */
-function openSett(){document.getElementById('sp').classList.add('open');}
+function openSett(){
+  document.getElementById('sp').classList.add('open');
+  const lbl=document.getElementById('appVerLabel');
+  if(lbl) lbl.textContent=APP_VERSION;
+}
 function closeSett(){document.getElementById('sp').classList.remove('open');}
 
 function disconnectDrive(){
