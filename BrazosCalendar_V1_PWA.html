@@ -25,7 +25,7 @@ const _blob=new Blob([JSON.stringify(_manifest)],{type:'application/json'});
 document.getElementById('pwaManifest').href=URL.createObjectURL(_blob);
 
 
-const APP_VERSION = '2.1.1';
+const APP_VERSION = '2.1.2';
 const APP_URL = 'https://wacolandscapes-boop.github.io/brazos-cleaning/BrazosCalendar_V1_PWA.html';
 
 async function checkForUpdate() {
@@ -369,7 +369,7 @@ select:focus,input:focus{outline:none;border-color:var(--brand)}
 
 <script>
 const CLIENT_ID='1032764332702-uvnqg0ccaer5gp2hr12gmniqe38ria1t.apps.googleusercontent.com';
-const SCOPES='https://www.googleapis.com/auth/drive.readonly';
+const SCOPES='https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
 const FOLDER='BrazosCleaningApp', FILE='brazosCS_sync.json', RFILE='quiktrack_bra_reports.json';
 const RPTS_KEY='qt_bra_reports';
 const SESS='ac_bra_sess', TKEY='brazos_drive_token', TEXP='brazos_drive_token_expiry';
