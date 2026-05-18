@@ -3042,6 +3042,11 @@ class Scheduler {
             document.getElementById('mUntil').value = '';
             document.getElementById('mCancelled').checked = false;
             document.getElementById('btnDel').style.display = 'none';
+            // Limpiar campos Airbnb
+            if(document.getElementById('mAirbnbNote')) document.getElementById('mAirbnbNote').value = '';
+            if(document.getElementById('mAirbnbNoteCustom')) document.getElementById('mAirbnbNoteCustom').value = '';
+            const _airbnbWrapN = document.getElementById('airbnbNoteWrap');
+            if(_airbnbWrapN) _airbnbWrapN.style.display = 'none';
             // Ocultar Repetición Automática en edición
             const _repBlock = document.getElementById('repBlock');
             if (_repBlock) _repBlock.style.display = this.editing ? 'none' : 'block';
@@ -10250,7 +10255,7 @@ class Scheduler {
             document.getElementById('driveSyncLabel').textContent = 'Sync ' + t;
             document.getElementById('driveSyncBtn').style.background = '#27ae60';
         } else {
-            alert('⚠️ No se encontraron archivos de horarios en Drive.\nVerifica que Calendar subió el archivo brazos_horarios_grupo_a.json');
+            console.log('Sin archivos de horarios en Drive todavía.');
         }
     }
 
