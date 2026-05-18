@@ -2321,32 +2321,34 @@ class Scheduler {
                 const textMode4 = this.getTextMode(typeKey4);
                 div.style.color = textMode4 === 'auto' ? getTextColor(bgColor4) : (textMode4 === 'white' ? '#fff' : '#000');
                 const propPart = showPropId && c.propId ? ` - ${c.propId}` : '';
-                const mainLine = `${prioPrefix}${c.name}${propPart}${c.city ? ' - ' + c.city : ''}`;
+                const mainLine = `${prioPrefix}${c.name}${propPart}${[c.address, c.city].filter(Boolean).join(', ') ? ' - ' + [c.address, c.city].filter(Boolean).join(', ') : ''}`;
                 const timeLine = (s.timeStart || s.timeEnd)
                     ? `<div class="ev-time">${this.fmt12(s.timeStart)}${s.timeEnd ? ' - ' + this.fmt12(s.timeEnd) : ''}</div>`
                     : '';
-                // Leer check-in/check-out desde horarios de grupo (brazos_horarios_grupo_*)
+                // Leer check-in/check-out — primero _prodReports (memoria), luego localStorage
                 let checkLine = '';
                 try {
                     let svcRpt = null;
-                    // Buscar en todos los grupos disponibles
-                    Object.keys(this.grupos).forEach(grp => {
-                        if (svcRpt) return;
-                        const key = 'brazos_horarios_' + grp.toLowerCase().replace(/\s+/g,'_');
-                        const grpData = JSON.parse(localStorage.getItem(key) || '{}');
-                        const dayData = grpData[dStr];
-                        if (dayData && dayData.services) {
-                            const found = dayData.services.find(r => String(r.id) === String(s.id));
-                            if (found) svcRpt = found;
-                        }
-                    });
-                    // También revisar _prodReports si ya están cargados
-                    if (!svcRpt && this._prodReports) {
+                    // 1. Buscar en _prodReports (en memoria — no afectado por Tracking Prevention)
+                    if (this._prodReports) {
                         const dayRpts = this._prodReports[dStr] || {};
                         Object.values(dayRpts).forEach(grpData => {
                             if (svcRpt) return;
                             if (grpData.services) {
                                 const found = grpData.services.find(r => String(r.id) === String(s.id));
+                                if (found) svcRpt = found;
+                            }
+                        });
+                    }
+                    // 2. Fallback: localStorage
+                    if (!svcRpt) {
+                        Object.keys(this.grupos).forEach(grp => {
+                            if (svcRpt) return;
+                            const key = 'brazos_horarios_' + grp.toLowerCase().replace(/\s+/g,'_');
+                            const grpData = JSON.parse(localStorage.getItem(key) || '{}');
+                            const dayData = grpData[dStr];
+                            if (dayData && dayData.services) {
+                                const found = dayData.services.find(r => String(r.id) === String(s.id));
                                 if (found) svcRpt = found;
                             }
                         });
@@ -9719,8 +9721,11 @@ class Scheduler {
         Object.keys(this.grupos).forEach(g => {
             const o = document.createElement('option'); o.value = g; o.textContent = g; sel.appendChild(o);
         });
-        if (this._prodReports) { this.renderProductionReport(); }
-        else { this.loadProductionFromDrive(); }
+        // Siempre recargar horarios frescos desde localStorage y Drive
+        this._prodReports = null;
+        localStorage.removeItem('qt_bra_reports');
+        if (this.driveConnected) { this.loadProductionFromDrive(); }
+        else { this.loadProductionLocal(); }
     }
 
     closeProductionReport() {
@@ -10229,14 +10234,6 @@ class Scheduler {
                     { headers: { Authorization: `Bearer ${this.driveToken}` } }
                 );
                 const grpData = await fr.json();
-                console.log('✅ Descargado:', fname, JSON.stringify(grpData).slice(0,200));
-                // Diagnóstico de IDs
-                Object.keys(grpData).forEach(date => {
-                    (grpData[date].services||[]).forEach(s => {
-                        const match = this.servs.find(sv => String(sv.id) === String(s.id));
-                        console.log('ID Calendar:', s.id, '| Match Scheduler:', match ? '✅ '+match.id : '❌ NO MATCH');
-                    });
-                });
                 localStorage.setItem(key, JSON.stringify(grpData));
                 if (!this._prodReports) this._prodReports = {};
                 Object.keys(grpData).forEach(date => {
