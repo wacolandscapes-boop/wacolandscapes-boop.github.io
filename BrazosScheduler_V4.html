@@ -10220,12 +10220,16 @@ class Scheduler {
                     { headers: { Authorization: `Bearer ${this.driveToken}` } }
                 );
                 const sd = await sr.json();
-                if (!sd.files || !sd.files.length) return;
+                if (!sd.files || !sd.files.length) {
+                    console.log('❌ No encontrado en Drive:', fname);
+                    return;
+                }
                 const fr = await fetch(
                     `https://www.googleapis.com/drive/v3/files/${sd.files[0].id}?alt=media`,
                     { headers: { Authorization: `Bearer ${this.driveToken}` } }
                 );
                 const grpData = await fr.json();
+                console.log('✅ Descargado:', fname, JSON.stringify(grpData).slice(0,200));
                 localStorage.setItem(key, JSON.stringify(grpData));
                 if (!this._prodReports) this._prodReports = {};
                 Object.keys(grpData).forEach(date => {
@@ -10233,7 +10237,7 @@ class Scheduler {
                     this._prodReports[date][grp] = grpData[date];
                 });
                 updated = true;
-            } catch(e) {}
+            } catch(e) { console.log('❌ Error:', grp, e.message); }
         }));
         if (updated) {
             this.render();
@@ -10241,6 +10245,8 @@ class Scheduler {
             const t = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
             document.getElementById('driveSyncLabel').textContent = 'Sync ' + t;
             document.getElementById('driveSyncBtn').style.background = '#27ae60';
+        } else {
+            alert('⚠️ No se encontraron archivos de horarios en Drive.\nVerifica que Calendar subió el archivo brazos_horarios_grupo_a.json');
         }
     }
 
