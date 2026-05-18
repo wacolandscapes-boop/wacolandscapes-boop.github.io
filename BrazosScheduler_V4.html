@@ -2961,8 +2961,10 @@ class Scheduler {
         document.getElementById('serviceModal').style.display='block'; 
         
         if(s) { 
-            // EDITAR servicio existente
-            // Si el cliId no está en mCli (propiedad 2da, 3ra...), buscar por nombre
+            // EDITAR servicio existente — ocultar bloque de repetición
+            const _repBlockEdit = document.getElementById('repBlock');
+            if(_repBlockEdit) _repBlockEdit.style.display = 'none';
+            document.getElementById('mRep').value = 'no';
             const _mCli = document.getElementById('mCli');
             _mCli.value = s.cliId;
             if (!_mCli.value || _mCli.value !== String(s.cliId)) {
@@ -3323,7 +3325,7 @@ class Scheduler {
             }
             this.servs.push(data); 
             const c = this.clis.find(x=>x.id==data.cliId); 
-            if(document.getElementById('mRep').value==='yes' && c) {
+            if(!this.editing && document.getElementById('mRep').value==='yes' && c) {
                 let days2x = null;
                 if(c.type === '2xsemana') {
                     days2x = [parseInt(document.getElementById('day1').value), parseInt(document.getElementById('day2').value)];
