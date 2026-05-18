@@ -10230,6 +10230,13 @@ class Scheduler {
                 );
                 const grpData = await fr.json();
                 console.log('✅ Descargado:', fname, JSON.stringify(grpData).slice(0,200));
+                // Diagnóstico de IDs
+                Object.keys(grpData).forEach(date => {
+                    (grpData[date].services||[]).forEach(s => {
+                        const match = this.servs.find(sv => String(sv.id) === String(s.id));
+                        console.log('ID Calendar:', s.id, '| Match Scheduler:', match ? '✅ '+match.id : '❌ NO MATCH');
+                    });
+                });
                 localStorage.setItem(key, JSON.stringify(grpData));
                 if (!this._prodReports) this._prodReports = {};
                 Object.keys(grpData).forEach(date => {
