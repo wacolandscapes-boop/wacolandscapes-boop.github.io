@@ -10200,10 +10200,47 @@ class Scheduler {
         if (this.driveConnected) {
             document.getElementById('driveSyncLabel').textContent = 'Guardando...';
             document.getElementById('driveSyncBtn').style.background = '#f39c12';
-            this.isSyncing = false; // Forzar sync aunque haya uno en progreso
-            this.driveSyncNow();
+            this.isSyncing = false;
+            this.driveSyncNow().then(() => this.descargarHorariosGrupos());
         } else {
             this.driveConnect();
+        }
+    }
+
+    async descargarHorariosGrupos() {
+        if (!this.driveConnected || !this.driveFolderId) return;
+        const grupoNames = Object.keys(this.grupos);
+        let updated = false;
+        await Promise.all(grupoNames.map(async grp => {
+            const fname = 'brazos_horarios_' + grp.toLowerCase().replace(/\s+/g,'_') + '.json';
+            const key   = 'brazos_horarios_' + grp.toLowerCase().replace(/\s+/g,'_');
+            try {
+                const sr = await fetch(
+                    `https://www.googleapis.com/drive/v3/files?q=name='${fname}'+and+'${this.driveFolderId}'+in+parents+and+trashed=false&fields=files(id)`,
+                    { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                );
+                const sd = await sr.json();
+                if (!sd.files || !sd.files.length) return;
+                const fr = await fetch(
+                    `https://www.googleapis.com/drive/v3/files/${sd.files[0].id}?alt=media`,
+                    { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                );
+                const grpData = await fr.json();
+                localStorage.setItem(key, JSON.stringify(grpData));
+                if (!this._prodReports) this._prodReports = {};
+                Object.keys(grpData).forEach(date => {
+                    if (!this._prodReports[date]) this._prodReports[date] = {};
+                    this._prodReports[date][grp] = grpData[date];
+                });
+                updated = true;
+            } catch(e) {}
+        }));
+        if (updated) {
+            this.render();
+            const now = new Date();
+            const t = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
+            document.getElementById('driveSyncLabel').textContent = 'Sync ' + t;
+            document.getElementById('driveSyncBtn').style.background = '#27ae60';
         }
     }
 
