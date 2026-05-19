@@ -915,7 +915,7 @@
                     </div>
                     <div id="airbnbNoteWrap" style="display:none; margin-top:6px; background:#fff8e1; border:1px solid #ffca28; border-radius:6px; padding:8px;">
                         <label style="font-size:0.8rem; font-weight:700; color:#e65100;">🏠 Nota del Servicio</label>
-                        <textarea id="mAirbnbNote" rows="3" placeholder="Escribe las instrucciones o notas para este servicio..." style="width:100%;margin-top:4px;padding:8px;border:1px solid #ffca28;border-radius:4px;font-size:0.85rem;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
+                        <textarea id="mAirbnbNote" name="airbnbNote" rows="3" placeholder="Escribe las instrucciones o notas para este servicio..." style="width:100%;margin-top:4px;padding:8px;border:1px solid #ffca28;border-radius:4px;font-size:0.85rem;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
                     </div>
                     <div id="clientType" style="display:none; margin-top:8px; padding:8px; background:#e8f5e9; border-left:3px solid #4caf50; border-radius:4px">
                         <span style="font-size:0.85rem; color:#2e7d32">
@@ -3269,7 +3269,8 @@ class Scheduler {
             serieId: this.editing ? (this.editing.serieId || null) : null
         };
         if(this.editing) {
-            this.servs[this.servs.findIndex(x=>x.id==this.editing.id)] = data;
+            const _editIdx = this.servs.findIndex(x=>String(x.id)===String(this.editing.id));
+            if(_editIdx >= 0) this.servs[_editIdx] = data;
             // Aplicar prioridad a toda la serie futura si se seleccionó
             const prioApply = document.querySelector('input[name="priorityApply"]:checked');
             if(prioApply && prioApply.value === 'serie' && data.priority) {
