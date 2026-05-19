@@ -914,16 +914,8 @@
                         <select id="mPropId" onchange="app.onPropChange();" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:6px; margin-top:3px;"></select>
                     </div>
                     <div id="airbnbNoteWrap" style="display:none; margin-top:6px; background:#fff8e1; border:1px solid #ffca28; border-radius:6px; padding:8px;">
-                        <label style="font-size:0.8rem; font-weight:700; color:#e65100;">🏠 Nota Huéspedes AirBnB</label>
-                        <select id="mAirbnbNote" style="width:100%; padding:6px; border:1px solid #ffca28; border-radius:4px; margin-top:4px; font-size:0.85rem;">
-                            <option value="">— Sin nota especial —</option>
-                            <option value="checkout">🧳 Solo Checkout (huéspedes salen hoy)</option>
-                            <option value="checkin">🔑 Solo Checkin (huéspedes llegan hoy)</option>
-                            <option value="same_day">🔄 Checkout + Checkin mismo día</option>
-                            <option value="checkout_later">📅 Checkout hoy, Checkin fecha posterior</option>
-                            <option value="checkin_later">📅 Checkout fecha anterior, Checkin hoy</option>
-                        </select>
-                        <input type="text" id="mAirbnbNoteCustom" placeholder="Nota adicional (opcional)..." style="width:100%;margin-top:4px;padding:6px;border:1px solid #ffca28;border-radius:4px;font-size:0.82rem;box-sizing:border-box;">
+                        <label style="font-size:0.8rem; font-weight:700; color:#e65100;">🏠 Nota del Servicio</label>
+                        <textarea id="mAirbnbNote" rows="3" placeholder="Escribe las instrucciones o notas para este servicio..." style="width:100%;margin-top:4px;padding:8px;border:1px solid #ffca28;border-radius:4px;font-size:0.85rem;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
                     </div>
                     <div id="clientType" style="display:none; margin-top:8px; padding:8px; background:#e8f5e9; border-left:3px solid #4caf50; border-radius:4px">
                         <span style="font-size:0.85rem; color:#2e7d32">
@@ -2361,15 +2353,11 @@ class Scheduler {
                 } catch(e) {}
                 div.innerHTML = `<div class="ev-prop">${mainLine}</div>${timeLine}${checkLine}`;
             }
-            // Mostrar nota AirBnb si existe
+            // Mostrar nota si existe
             if(s.airbnbNote) {
-                const noteLabels = {
-                    'checkout':'🧳 Checkout','checkin':'🔑 Checkin',
-                    'same_day':'🔄 C+C mismo día','checkout_later':'📅 Checkin posterior','checkin_later':'📅 Checkout anterior'
-                };
                 const noteDiv = document.createElement('div');
                 noteDiv.style.cssText = 'font-size:0.65rem;background:rgba(0,0,0,0.15);border-radius:3px;padding:1px 4px;margin-top:2px;';
-                noteDiv.textContent = (noteLabels[s.airbnbNote] || s.airbnbNote) + (s.airbnbNoteCustom ? ' · ' + s.airbnbNoteCustom : '');
+                noteDiv.textContent = '📝 ' + s.airbnbNote;
                 div.appendChild(noteDiv);
             }
             div.onclick = (e) => { e.stopPropagation(); this.openModal(s); };
@@ -3012,7 +3000,6 @@ class Scheduler {
             }
             // Cargar nota AirBnb
             if(document.getElementById('mAirbnbNote')) document.getElementById('mAirbnbNote').value = s.airbnbNote || '';
-            if(document.getElementById('mAirbnbNoteCustom')) document.getElementById('mAirbnbNoteCustom').value = s.airbnbNoteCustom || '';
             // Mostrar panel AirBnb si el cliente es tipo airbnb/unico
             const _sCli = this.clis.find(c => c.id == s.cliId);
             const _airbnbWrap = document.getElementById('airbnbNoteWrap');
@@ -3046,7 +3033,6 @@ class Scheduler {
             document.getElementById('btnDel').style.display = 'none';
             // Limpiar campos Airbnb
             if(document.getElementById('mAirbnbNote')) document.getElementById('mAirbnbNote').value = '';
-            if(document.getElementById('mAirbnbNoteCustom')) document.getElementById('mAirbnbNoteCustom').value = '';
             const _airbnbWrapN = document.getElementById('airbnbNoteWrap');
             if(_airbnbWrapN) _airbnbWrapN.style.display = 'none';
             // Ocultar Repetición Automática en edición
@@ -3279,8 +3265,8 @@ class Scheduler {
             priority: document.getElementById('mPriority')?.value || '',
             customColor: (document.getElementById('mCustomColorActive')?.checked && document.getElementById('mCustomColor')?.value !== '#ffffff') ? document.getElementById('mCustomColor')?.value : null,
             airbnbNote: document.getElementById('mAirbnbNote')?.value || '',
-            airbnbNoteCustom: document.getElementById('mAirbnbNoteCustom')?.value || '',
-            cancelled: isCancelled
+            cancelled: isCancelled,
+            serieId: this.editing ? (this.editing.serieId || null) : null
         };
         if(this.editing) {
             this.servs[this.servs.findIndex(x=>x.id==this.editing.id)] = data;
