@@ -2355,9 +2355,10 @@ class Scheduler {
             }
             // Mostrar nota si existe
             if(s.airbnbNote) {
+                const _noteMap = {'checkout':'🧳 Checkout','checkin':'🔑 Checkin','same_day':'🔄 C+C mismo día','checkout_later':'📅 Checkin posterior','checkin_later':'📅 Checkout anterior'};
                 const noteDiv = document.createElement('div');
                 noteDiv.style.cssText = 'font-size:0.65rem;background:rgba(0,0,0,0.15);border-radius:3px;padding:1px 4px;margin-top:2px;';
-                noteDiv.textContent = '📝 ' + s.airbnbNote;
+                noteDiv.textContent = '📝 ' + (_noteMap[s.airbnbNote] || s.airbnbNote);
                 div.appendChild(noteDiv);
             }
             div.onclick = (e) => { e.stopPropagation(); this.openModal(s); };
