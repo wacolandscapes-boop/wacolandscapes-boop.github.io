@@ -939,7 +939,7 @@
                     </select>
                     <div id="groupSuggestion" style="display:none; margin-top:5px; padding:6px 10px; border-radius:6px; font-size:0.78rem; border:1px solid #a5d6a7;"></div>
                 </div>
-                <div style="grid-column: span 2"><label>Concepto Factura <span style="font-size:0.75rem;color:#999;">(opcional - reemplaza el concepto automático)</span></label><input type="text" id="taskName" placeholder="Ej: Deep Cleaning, Move-out..."></div>
+                <div style="grid-column: span 2"><label>Tarea Específica</label><input type="text" id="taskName"></div>
                 <div>
                     <label>Color del Servicio <span style="color:#999;font-weight:400;font-size:0.78rem;">— opcional, sobreescribe el color de la serie</span></label>
                     <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
@@ -2298,10 +2298,14 @@ class Scheduler {
             const prioPrefix = prioNum ? `<b>${prioNum}.</b> ` : '';
             const showPropId = (c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion');
             if (s.cancelled) {
-                div.style.backgroundColor = '#ffffff';
-                div.style.color = '#bbb';
-                div.style.border = '1px solid #ddd';
+                const typeKeyCan = c.type.toLowerCase().replace(/ /g,'');
+                const bgColorCan = s.customColor || this.getColor(typeKeyCan);
+                div.style.backgroundColor = bgColorCan;
+                div.style.color = '#fff';
+                div.style.opacity = '0.75';
                 div.style.textDecoration = 'line-through';
+                div.style.textDecorationColor = 'white';
+                div.style.textDecorationThickness = '2px';
                 const cancelLabel = `❌ ${prioPrefix}${c.name}${c.city ? ' - ' + c.city : ''}`;
                 const cancelProp  = showPropId && c.propId ? `<div class="ev-propid">${c.propId}</div>` : '';
                 div.innerHTML = `<div class="ev-prop">${cancelLabel}</div>${cancelProp}`;
