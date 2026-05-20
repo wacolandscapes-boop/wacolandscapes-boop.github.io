@@ -939,7 +939,7 @@
                     </select>
                     <div id="groupSuggestion" style="display:none; margin-top:5px; padding:6px 10px; border-radius:6px; font-size:0.78rem; border:1px solid #a5d6a7;"></div>
                 </div>
-                <div style="grid-column: span 2"><label>Tarea Específica</label><input type="text" id="taskName"></div>
+                <div style="grid-column: span 2"><label>Concepto Factura <span style="font-size:0.75rem;color:#999;">(opcional - reemplaza el concepto automático)</span></label><input type="text" id="taskName" placeholder="Ej: Deep Cleaning, Move-out..."></div>
                 <div>
                     <label>Color del Servicio <span style="color:#999;font-weight:400;font-size:0.78rem;">— opcional, sobreescribe el color de la serie</span></label>
                     <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
@@ -6835,6 +6835,7 @@ class Scheduler {
         const listCEl = document.getElementById('listC');
         listCEl._delegated = false;
 
+        window._cliMap = window._cliMap||{};
         document.getElementById('listC').innerHTML = Object.entries(cliGroups).map(([name, props]) => {
             const first = props[0];
             const isMulti = first.type === 'airbnb' || first.type === 'unico' || first.type === 'construccion';
@@ -6844,14 +6845,21 @@ class Scheduler {
             const propsHTML = hasMultiple ? props.map(p => {
                 const hasProp = p.propId && p.propId.trim() && p.propId.trim().toLowerCase() !== p.name.trim().toLowerCase();
                 const propLabel = hasProp ? p.propId : (p.address || p.name);
+                const ek = 'e_'+String(p.id).replace(/[^a-zA-Z0-9]/g,'_');
+                const dk = 'd_'+String(p.id).replace(/[^a-zA-Z0-9]/g,'_');
+                window._cliMap[ek]=p.id; window._cliMap[dk]=p.id;
                 return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px 4px 24px;border-left:3px solid #0e7490;margin:3px 0;background:#f0f9ff;border-radius:0 4px 4px 0;">
                     <span style="font-size:0.85rem;"><b style="color:#0e7490;">${propLabel}</b>
                     <small style="color:#888;"> · ${p.city||''} · $${p.price||0}</small></span>
                     <div>
-                        <button onclick="event.stopPropagation();app.editCli(${JSON.stringify(p.id)})" style="background:none;border:none;cursor:pointer;font-size:1rem;" title="Editar">✏️</button>
-                        <button onclick="event.stopPropagation();app.delCli(${JSON.stringify(p.id)})" style="background:none;border:none;cursor:pointer;font-size:1rem;" title="Eliminar">❌</button>
+                        <button onclick="event.stopPropagation();app.editCli(window._cliMap['${ek}'])" style="background:none;border:none;cursor:pointer;font-size:1rem;" title="Editar">✏️</button>
+                        <button onclick="event.stopPropagation();app.delCli(window._cliMap['${dk}'])" style="background:none;border:none;cursor:pointer;font-size:1rem;" title="Eliminar">❌</button>
                     </div></div>`;
             }).join('') : '';
+
+            const fek = 'e_'+String(first.id).replace(/[^a-zA-Z0-9]/g,'_');
+            const fdk = 'd_'+String(first.id).replace(/[^a-zA-Z0-9]/g,'_');
+            window._cliMap[fek]=first.id; window._cliMap[fdk]=first.id;
 
             return `<div class="list-item" style="flex-direction:column;align-items:stretch;padding:8px 10px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -6861,8 +6869,8 @@ class Scheduler {
                     </span>
                     <div style="display:flex;gap:4px;align-items:center;">
                         ${isMulti ? `<button onclick="event.stopPropagation();app.quickAddProp(${JSON.stringify(name)},${JSON.stringify(first.type)})" style="background:#27ae60;color:white;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:0.75rem;">+ Prop</button>` : ''}
-                        <button onclick="event.stopPropagation();app.editCli(${JSON.stringify(first.id)})" style="background:none;border:none;cursor:pointer;font-size:1.2rem;" title="Editar">✏️</button>
-                        ${!hasMultiple ? `<button onclick="event.stopPropagation();app.delCli(${JSON.stringify(first.id)})" style="background:none;border:none;cursor:pointer;font-size:1.2rem;" title="Eliminar">❌</button>` : ''}
+                        <button onclick="event.stopPropagation();app.editCli(window._cliMap['${fek}'])" style="background:none;border:none;cursor:pointer;font-size:1.2rem;" title="Editar">✏️</button>
+                        ${!hasMultiple ? `<button onclick="event.stopPropagation();app.delCli(window._cliMap['${fdk}'])" style="background:none;border:none;cursor:pointer;font-size:1.2rem;" title="Eliminar">❌</button>` : ''}
                     </div>
                 </div>
                 <div id="${expandId}" style="display:none;">${propsHTML}</div>
