@@ -4188,11 +4188,23 @@
 
                     // Merge inteligente — nunca sobreescribir arrays completos
                     const OLD_IDS = ['emp1772918357157', 'emp1772918413597'];
-                    const CORRECT_IDS = ['emp1772913505187','emp1772913619812','emp1773325160598','emp1773325209111','emp1773429584911'];
+
+                    // FIX: Actualizar lista de eliminados desde Drive (merge — nunca perder IDs eliminados)
+                    if (data.deletedEmployees && data.deletedEmployees.length > 0) {
+                        const remoteDeleted = data.deletedEmployees.map(String);
+                        remoteDeleted.forEach(id => {
+                            if (!this.deletedEmployees.includes(id)) this.deletedEmployees.push(id);
+                        });
+                        localStorage.setItem('waco_deletedEmployees', JSON.stringify(this.deletedEmployees));
+                    }
+                    const deletedIds = this.deletedEmployees.map(String);
+
                     if (data.employees) {
                         data.employees.forEach(remote => {
                             // Ignorar IDs viejos que causan duplicados
                             if (OLD_IDS.includes(remote.id)) return;
+                            // FIX: No resucitar empleados eliminados
+                            if (deletedIds.includes(String(remote.id))) return;
                             const idx = this.employees.findIndex(e => e.id === remote.id);
                             if (idx < 0) this.employees.push(remote);
                             else {
@@ -4202,8 +4214,10 @@
                             }
                         });
                     }
-                    // Eliminar IDs viejos si llegaron
-                    this.employees = this.employees.filter(e => !OLD_IDS.includes(e.id));
+                    // Eliminar IDs viejos y eliminados del array local
+                    this.employees = this.employees.filter(e =>
+                        !OLD_IDS.includes(e.id) && !deletedIds.includes(String(e.id))
+                    );
                     // Asegurar que Ranulfo siempre esté
                     if (!this.employees.find(e => e.id === 'emp1773429584911')) {
                         this.employees.push({ id: 'emp1773429584911', name: 'Ranulfo Castaneda', pin: '1581', rate: 0, updatedAt: new Date().toISOString() });
@@ -4229,6 +4243,7 @@
 
                     // Save to localStorage
                     localStorage.setItem('waco_employees', JSON.stringify(this.employees));
+                    localStorage.setItem('waco_deletedEmployees', JSON.stringify(this.deletedEmployees));
                     localStorage.setItem('waco_attendances', JSON.stringify(this.attendances));
                     localStorage.setItem('waco_payroll', JSON.stringify(this.payrollRecords));
                     localStorage.setItem('waco_payroll_periods', JSON.stringify(this.savedPayrollPeriods));
