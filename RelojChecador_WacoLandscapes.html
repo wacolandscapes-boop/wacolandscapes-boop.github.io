@@ -1382,9 +1382,8 @@
                 try {
                     this.updateSyncStatus('syncing');
                     await this.driveDownloadFromNomina();
-                    this.renderEmployees();
                     this.updateSyncStatus('connected', new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
-                    alert('✅ Empleados importados desde Drive: ' + this.employees.map(e => e.name).join(', '));
+                    alert('✅ Empleados importados: ' + this.employees.map(e => e.name).join(', '));
                 } catch(err) {
                     alert('❌ Error al importar: ' + err.message);
                     this.updateSyncStatus('error');
