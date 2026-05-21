@@ -4144,10 +4144,6 @@
                             mergedEmployees = mergedEmployees.filter(e =>
                                 !OLD_IDS_SYNC.includes(e.id) && !deletedIds.includes(String(e.id))
                             );
-                            // Asegurar Ranulfo
-                            if (!mergedEmployees.find(e => e.id === 'emp1773429584911')) {
-                                mergedEmployees.push({ id: 'emp1773429584911', name: 'Ranulfo Castaneda', pin: '1581', rate: 0, updatedAt: new Date().toISOString() });
-                            }
                         }
                     } catch(e) { /* si falla el merge, subir lo que tenemos */ }
 
@@ -4218,10 +4214,6 @@
                     this.employees = this.employees.filter(e =>
                         !OLD_IDS.includes(e.id) && !deletedIds.includes(String(e.id))
                     );
-                    // Asegurar que Ranulfo siempre esté
-                    if (!this.employees.find(e => e.id === 'emp1773429584911')) {
-                        this.employees.push({ id: 'emp1773429584911', name: 'Ranulfo Castaneda', pin: '1581', rate: 0, updatedAt: new Date().toISOString() });
-                    }
                     if (data.attendances) {
                         data.attendances.forEach(remote => {
                             const idx = this.attendances.findIndex(a =>
