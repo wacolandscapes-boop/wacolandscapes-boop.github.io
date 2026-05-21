@@ -35,7 +35,7 @@
             min-height: 100vh;
             height: 100vh;
             overflow-y: auto;
-            padding: 10px 10px;
+            padding: 14px 12px;
         }
         
         .header {
@@ -44,7 +44,7 @@
         }
         
         .logo {
-            font-size: 2.6rem;
+            font-size: 3rem;
             margin-bottom: 4px;
         }
         
@@ -61,7 +61,7 @@
         
         .clock {
             text-align: center;
-            font-size: 2.6rem;
+            font-size: 3rem;
             font-weight: bold;
             color: #2d5016;
             margin-bottom: 6px;
@@ -71,8 +71,8 @@
         .date {
             text-align: center;
             color: #7f8c8d;
-            margin-bottom: 18px;
-            font-size: 0.9rem;
+            margin-bottom: 22px;
+            font-size: 0.95rem;
         }
         
         /* LOGIN SCREEN */
@@ -92,7 +92,7 @@
             font-size: 1.5rem;
             letter-spacing: 8px;
             color: #2c3e50;
-            min-height: 70px;
+            min-height: 82px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -101,8 +101,8 @@
         .keypad {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            margin-bottom: 16px;
+            gap: 12px;
+            margin-bottom: 20px;
         }
         
         .key {
@@ -111,11 +111,11 @@
             border: none;
             border-radius: 10px;
             padding: 0;
-            font-size: 1.4rem;
+            font-size: 1.6rem;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.15s;
-            height: 80px;
+            height: 95px;
             -webkit-tap-highlight-color: transparent;
             touch-action: manipulation;
             user-select: none;
@@ -504,8 +504,9 @@
         
         <!-- ADMIN SCREEN -->
         <div class="employee-screen" id="adminScreen" style="display: none;">
-            <div class="welcome" style="background: linear-gradient(135deg, #6b4423 0%, #54381c 100%);">
-                <h2>⚙️ Panel de Administrador</h2>
+            <div class="welcome" style="background: linear-gradient(135deg, #6b4423 0%, #54381c 100%); display:flex; justify-content:space-between; align-items:center; padding:10px 14px;">
+                <h2 style="margin:0; font-size:1rem;">⚙️ Admin</h2>
+                <button onclick="app.logout()" style="background:rgba(255,255,255,0.2); border:none; color:white; border-radius:8px; padding:6px 12px; font-size:0.8rem; font-weight:700; cursor:pointer;">🔙 Salir</button>
             </div>
             
             <div class="hours-card">
