@@ -4050,12 +4050,9 @@
                         document.getElementById('driveSyncBtn').style.background = '#27ae60';
                         await this.driveGetOrCreateFolder();
                         this.startAutoSync();
-                        // Siempre bajar del Reloj y sincronizar al conectar
-                        if (this.employees.length === 0) {
-                            await this.driveDownloadNomina();
-                        } else {
-                            await this.driveSyncNow(); // Subir datos locales
-                        }
+                        // FIX: Siempre bajar de Drive primero para no perder empleados nuevos
+                        await this.driveDownloadNomina(); // Bajar primero — Drive es fuente de verdad
+                        await this.driveSyncNow();        // Luego subir estado local ya mergeado
                         await this.driveDownloadClock(); // Bajar asistencias del Reloj inmediatamente
                         // Show toast instead of blocking alert
                         const toast = document.createElement('div');
