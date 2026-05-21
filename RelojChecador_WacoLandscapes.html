@@ -448,11 +448,11 @@
         </div>
 
         <!-- BARRA INFERIOR COLAPSABLE -->
-        <div style="margin:10px 16px 0; display:flex; gap:8px; justify-content:center;">
-            <!-- Botón Drive/Sync — Verde=conectado, Rojo=reconectar -->
-            <button id="syncMainBtn" onclick="app.handleSyncBtn()" style="background:#e74c3c; border:none; border-radius:12px; padding:7px 14px; font-size:0.78rem; font-weight:700; color:white; box-shadow:0 2px 8px rgba(0,0,0,0.18); cursor:pointer; display:flex; align-items:center; gap:6px; -webkit-tap-highlight-color:transparent; transition:background 0.3s;">
-                <span id="syncBtnIcon" style="font-size:0.9rem;">☁️</span>
-                <span id="syncStatusText" style="font-size:0.75rem;">Sin conectar</span>
+        <div style="margin:10px 0 0; display:flex; gap:8px; justify-content:center; align-items:center;">
+            <!-- Botón Drive/Sync circular — Verde=sync, Rojo=reconectar automático -->
+            <button id="syncMainBtn" onclick="app.handleSyncBtn()" style="background:#e74c3c; border:none; border-radius:50%; width:64px; height:64px; font-size:1.6rem; color:white; box-shadow:0 3px 10px rgba(0,0,0,0.25); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; -webkit-tap-highlight-color:transparent; transition:background 0.3s; flex-shrink:0;">
+                <span id="syncBtnIcon">☁️</span>
+                <span id="syncStatusText" style="font-size:0.5rem; font-weight:700; line-height:1;">Sin conectar</span>
             </button>
             <!-- Botón Historial -->
             <button onclick="app.toggleTodayPanel()" style="background:white; border:none; border-radius:12px; padding:8px 14px; font-size:0.78rem; font-weight:700; color:#2c3e50; box-shadow:0 2px 8px rgba(0,0,0,0.12); cursor:pointer; -webkit-tap-highlight-color:transparent;">
@@ -1013,11 +1013,12 @@
             },
 
             handleSyncBtn() {
-                // Si está conectado → sync inmediato; si no → abrir panel para reconectar
+                // Verde (conectado) → sync inmediato
+                // Rojo (desconectado/expirado) → reconectar directo sin panel
                 if (this.driveConnected && this.driveToken && Date.now() < this.tokenExpiry) {
                     this.syncWithDrive();
                 } else {
-                    this.toggleSyncPanel();
+                    this.driveConnect(); // reconecta automáticamente sin preguntar
                 }
             },
 
