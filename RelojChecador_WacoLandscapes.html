@@ -1374,42 +1374,21 @@
                 input.click();
             },
 
-            importConfig() {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.json';
-                
-                input.onchange = (e) => {
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                        try {
-                            const data = JSON.parse(event.target.result);
-                            
-                            if (data.employees) {
-                                this.employees = data.employees;
-                            }
-                            
-                            if (data.adminPin) {
-                                this.adminPin = data.adminPin;
-                            }
-                            
-                            if (data.workConfig) {
-                                this.workConfig = data.workConfig;
-                            }
-                            
-                            this.save();
-                            alert('✅ Configuración importada correctamente\n\n' +
-                                  `Empleados: ${this.employees.length}\n` +
-                                  `PIN Admin: ${this.adminPin}\n` +
-                                  `Hora entrada: ${this.workConfig.startTime}`);
-                        } catch (err) {
-                            alert('❌ Error al importar: ' + err.message);
-                        }
-                    };
-                    reader.readAsText(e.target.files[0]);
-                };
-                
-                input.click();
+            async importConfig() {
+                if (!this.driveConnected || !this.driveToken) {
+                    alert('⚠️ Conecta Drive primero para importar empleados.');
+                    return;
+                }
+                try {
+                    this.updateSyncStatus('syncing');
+                    await this.driveDownloadFromNomina();
+                    this.renderEmployees();
+                    this.updateSyncStatus('connected', new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+                    alert('✅ Empleados importados desde Drive: ' + this.employees.map(e => e.name).join(', '));
+                } catch(err) {
+                    alert('❌ Error al importar: ' + err.message);
+                    this.updateSyncStatus('error');
+                }
             },
             
             save() {
