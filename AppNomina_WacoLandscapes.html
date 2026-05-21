@@ -4489,6 +4489,17 @@
                 // Limpiar IDs viejos al cargar — siempre
                 const BOOT_OLD_IDS = ['emp1772918357157', 'emp1772918413597'];
                 this.employees = this.employees.filter(e => !BOOT_OLD_IDS.includes(e.id));
+                // Filtrar eliminados
+                const bootDeleted = this.deletedEmployees.map(String);
+                this.employees = this.employees.filter(e => !bootDeleted.includes(String(e.id)));
+                // Si no hay empleados, agregar Fidel y Jesus por defecto
+                if (this.employees.length === 0) {
+                    this.employees = [
+                        { id: 'emp1772913505187', name: 'Fidel De LA Cruz', address: '2512 N. 20th St, Waco TX 76708', pin: '4059', rate: 18, deduction: 0 },
+                        { id: 'emp1772913619812', name: 'Jesus Perez', address: '', pin: '6741', rate: 17, deduction: 0 }
+                    ];
+                    localStorage.setItem('waco_employees', JSON.stringify(this.employees));
+                }
 
 
                 this.attendances = JSON.parse(localStorage.getItem('waco_attendances') || localStorage.getItem('anas_attendances') || '[]');
