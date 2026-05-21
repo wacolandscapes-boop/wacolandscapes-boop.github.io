@@ -467,14 +467,7 @@
         </div>
             </div>
 
-        <!-- ASISTENCIA DEL DÍA (colapsado por defecto) -->
-        <div id="todayPanel" style="margin:8px 16px 0; background:white; border-radius:14px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.1); display:none;">
-            <div style="background:#2c3e50; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
-                <span style="color:white; font-weight:800; font-size:0.85rem; letter-spacing:1px;">📋 ASISTENCIA HOY</span>
-                <span id="todayDate" style="color:rgba(255,255,255,0.7); font-size:0.75rem;"></span>
-            </div>
-            <div id="todayList" style="padding:8px;"></div>
-        </div>
+
         
         <!-- EMPLOYEE SCREEN -->
         <div class="employee-screen" id="employeeScreen">
@@ -526,9 +519,18 @@
                 <div id="adminWeekTable" style="margin-top: 15px;"></div>
             </div>
             
-            <button class="btn" style="width: 100%; background: #2c3e50; color: white !important; margin-bottom: 15px; -webkit-text-fill-color: white;" onclick="app.logout(); app.toggleTodayPanel()">
+            <button class="btn" style="width: 100%; background: #2c3e50; color: white !important; margin-bottom: 15px; -webkit-text-fill-color: white;" onclick="app.toggleTodayPanel()">
                 📋 Ver Historial
             </button>
+
+            <!-- HISTORIAL DENTRO DEL ADMIN -->
+            <div id="todayPanel" style="margin:8px 0; background:#f8f9fa; border-radius:10px; overflow:hidden; display:none;">
+                <div style="background:#2c3e50; padding:8px 12px; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="color:white; font-weight:800; font-size:0.85rem;">📋 ASISTENCIA HOY</span>
+                    <span id="todayDate" style="color:rgba(255,255,255,0.7); font-size:0.75rem;"></span>
+                </div>
+                <div id="todayList" style="padding:8px;"></div>
+            </div>
 
             <button class="btn" style="width: 100%; background: #27ae60; color: white !important; margin-bottom: 15px; -webkit-text-fill-color: white;" onclick="app.adminExportWeek()">
                 📤 Exportar Esta Semana
