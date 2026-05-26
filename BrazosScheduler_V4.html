@@ -6365,9 +6365,12 @@ class Scheduler {
     toggleCliForm() {
         const form = document.getElementById('cliFormContainer');
         const btn = document.getElementById('btnToggleCliForm');
-        if (form.style.display === 'none') {
+        const listC = document.getElementById('listC');
+        const isEditing = document.getElementById('editCliId').value !== '';
+        if (form.style.display === 'none' || isEditing) {
             // Abrir para nuevo cliente
             form.style.display = 'block';
+            if(listC) listC.style.display = 'none';
             document.getElementById('cliFormTitle').textContent = '➕ Nuevo Cliente';
             btn.textContent = '✕ Cerrar';
             document.getElementById('editCliId').value = '';
@@ -6381,6 +6384,10 @@ class Scheduler {
             document.getElementById('ntype').value = 'semanal';
             document.getElementById('cliServiceType').value = 'residencial';
             document.getElementById('cliBillingPeriod').value = 'weekly';
+            this.togglePropIdWrap('semanal');
+            // Limpiar propiedades
+            const pl = document.getElementById('propFieldsList');
+            if(pl) pl.innerHTML = '';
             document.getElementById('nc').focus();
         } else {
             this.cancelCliForm();
@@ -6440,6 +6447,9 @@ class Scheduler {
     cancelCliForm() {
         document.getElementById('cliFormContainer').style.display = 'none';
         document.getElementById('btnToggleCliForm').textContent = '➕ Nuevo Cliente';
+        // Mostrar lista de clientes de nuevo
+        const listC = document.getElementById('listC');
+        if(listC) listC.style.display = 'block';
         // Limpiar todos los campos
         ['nc','np','pc','tc','dc','dci','dzip'].forEach(id => {
             const el = document.getElementById(id); if(el) el.value = '';
@@ -6527,7 +6537,6 @@ class Scheduler {
                     };
                 }
                 if (oldType !== type) {
-                    console.log(`Tipo cambiado: ${oldType} → ${type}`);
                 }
             }
             
@@ -6629,10 +6638,10 @@ class Scheduler {
 
     editCli(id) {
         const cli = this.clis.find(c => String(c.id) === String(id)); if(!cli) { console.error('editCli: no encontró cliente con id:', id); return; }
-        console.log('editCli encontró:', {id: cli.id, name: cli.name, propId: cli.propId, type: cli.type});
-        console.log('nc antes del timeout:', document.getElementById('nc').value);
         // Asegurar que la sección de clientes esté visible
         this.showSec('secCli');
+        const listC = document.getElementById('listC');
+        if(listC) listC.style.display = 'none';
         const form = document.getElementById('cliFormContainer');
         form.style.display = 'block';
         document.getElementById('cliFormTitle').textContent = '✏️ Editar Cliente';
@@ -6640,28 +6649,11 @@ class Scheduler {
         // Scroll al formulario
         setTimeout(() => form.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
         
-        // ✅ Si el cliente no tiene propId, usar el nombre
-        if(!cli.propId || cli.propId === '') {            cli.propId = cli.name || 'PROP-' + cli.id;
-        }
-        
-        console.log('Llenando campos con:', {
-            name: cli.name,
-            propId: cli.propId,
-            price: cli.price,
-            tel: cli.tel,
-            address: cli.address,
-            city: cli.city || '',
-            zip: cli.zip || '',
-            type: cli.type
-        });
-        
         // Llenar todos los campos dentro del setTimeout para garantizar que el DOM esté listo
         const _today = new Date().toLocaleDateString('en-CA');
         const _endYear = new Date(new Date().getFullYear(), 11, 31).toLocaleDateString('en-CA');
         setTimeout(() => {
-            console.log('dentro del timeout, cli.name=', cli.name);
             document.getElementById('nc').value = cli.name || '';
-            console.log('nc después de asignar:', document.getElementById('nc').value);
             document.getElementById('np').value = cli.propId || '';
             document.getElementById('pc').value = cli.price || '';
             document.getElementById('tc').value = cli.tel || '';
@@ -6700,12 +6692,6 @@ class Scheduler {
         const btn = document.querySelector('button[onclick="app.saveCli()"]');
         btn.textContent = '💾 ACTUALIZAR CLIENTE';
         btn.style.background = '#f39c12';
-        
-        console.log('Valores en campos después de llenar:', {
-            nc: document.getElementById('nc').value,
-            np: document.getElementById('np').value,
-            pc: document.getElementById('pc').value
-        });
     }
     delCli(id) {
         const cli = this.clis.find(c => c.id == id);
