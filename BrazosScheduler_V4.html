@@ -6833,7 +6833,7 @@ class Scheduler {
         window._cliMap = window._cliMap||{};
         document.getElementById('listC').innerHTML = Object.entries(cliGroups).map(([name, props]) => {
             const first = props[0];
-            const isMulti = first.type === 'airbnb' || first.type === 'unico' || first.type === 'construccion';
+            const isMulti = first.type === 'airbnb' || first.type === 'construccion';
             const hasMultiple = props.length > 1;
             const expandId = 'exp_' + name.replace(/[^a-z0-9]/gi,'_');
 
