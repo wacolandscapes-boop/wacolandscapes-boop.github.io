@@ -6431,7 +6431,7 @@ class Scheduler {
     togglePropIdWrap(type) {
         const wrap = document.getElementById('propIdWrap');
         if (!wrap) return;
-        const isMulti = type === 'airbnb' || type === 'unico' || type === 'construccion';
+        const isMulti = type === 'airbnb' || type === 'construccion';
         wrap.style.display = isMulti ? 'block' : 'none';
         if (isMulti && document.getElementById('propFieldsList').children.length === 0) {
             this.addPropField();
@@ -6473,11 +6473,11 @@ class Scheduler {
         const editId = document.getElementById('editCliId').value;
         const name = document.getElementById('nc').value.trim();
         const type = document.getElementById('ntype').value;
-        const isMulti = type === 'airbnb' || type === 'unico' || type === 'construccion';
-        // Para multi-propiedad, leer del propFieldsList; para otros, del campo np
+        const isMulti = type === 'airbnb' || type === 'construccion'; // unico ya no es multi-propiedad
+        // Para multi-propiedad, leer del propFieldsList; para unico/otros, del campo dirección
         const propId = isMulti
             ? (this.getPropsFromFields()[0] || document.getElementById('np').value.trim())
-            : document.getElementById('np').value.trim();
+            : (type === 'unico' ? (document.getElementById('np').value.trim() || document.getElementById('dc').value.trim()) : document.getElementById('np').value.trim());
         const price = document.getElementById('pc').value;
         const tel = document.getElementById('tc').value || '';
         const address = document.getElementById('dc').value || '';
