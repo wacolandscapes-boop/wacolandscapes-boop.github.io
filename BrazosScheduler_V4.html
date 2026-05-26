@@ -6499,7 +6499,7 @@ class Scheduler {
                 if(isMulti) {
                     // Para multi-propiedad: actualizar datos base y agregar/quitar propiedades
                     const existingProps = this.clis.filter(c => c.name === this.clis[idx].name &&
-                        (c.type==='airbnb'||c.type==='unico'||c.type==='construccion'));
+                        (c.type==='airbnb'||c.type==='construccion'));
                     const existingPropIds = existingProps.map(c => c.propId);
                     const fieldProps = this.getPropsFromFields();
 
@@ -6525,7 +6525,7 @@ class Scheduler {
                     // Eliminar propiedades removidas en el formulario
                     this.clis = this.clis.filter(c => {
                         if(c.name !== name) return true;
-                        if(c.type!=='airbnb'&&c.type!=='unico'&&c.type!=='construccion') return true;
+                        if(c.type!=='airbnb'&&c.type!=='construccion') return true;
                         return fieldProps.includes(c.propId);
                     });
 
@@ -6677,7 +6677,7 @@ class Scheduler {
             const _editPropList = document.getElementById('propFieldsList');
             if (_editPropList) {
                 _editPropList.innerHTML = '';
-                const isMulti = cli.type==='airbnb'||cli.type==='unico'||cli.type==='construccion';
+                const isMulti = cli.type==='airbnb'||cli.type==='construccion';
                 if(isMulti) {
                     const allProps = this.clis.filter(c => c.name.trim().toLowerCase() === cli.name.trim().toLowerCase() && (c.type==='airbnb'||c.type==='unico'||c.type==='construccion'));
                     if(allProps.length > 0) {
