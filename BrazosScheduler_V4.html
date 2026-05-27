@@ -2042,7 +2042,7 @@ class Scheduler {
                             if(s.empId === g) return true;
                             return this.grupos[g].includes(s.empId.toString());
                         });
-                        if(fCli !== 'all') daily = daily.filter(s => s.cliId == fCli);
+                        if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
                         daily.forEach(s => { if(!seen.has(s.id)) { seen.add(s.id); allServs.push({...s, grupo: g}); } });
                     });
 
@@ -2292,7 +2292,7 @@ class Scheduler {
             if(s.empId === nombreGrupo) return true;
             return this.grupos[nombreGrupo].includes(s.empId.toString());
         });
-        if(fCli !== 'all') daily = daily.filter(s => s.cliId == fCli);
+        if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
         daily.sort((a,b) => {
             // Ordenar por hora si tienen hora, sino por prioridad
             const aTime = a.timeStart || '';
@@ -2684,7 +2684,11 @@ class Scheduler {
             hiddenSelect.value = 'all';
         } else {
             input.value = name;
-            hiddenSelect.value = id;
+            // Buscar todos los IDs del mismo cliente (múltiples propiedades)
+            const allIds = this.clis
+                .filter(c => c.name.trim().toLowerCase() === name.trim().toLowerCase())
+                .map(c => String(c.id));
+            hiddenSelect.value = allIds.length > 1 ? allIds.join(',') : id;
         }
         dropdown.style.display = 'none';
         this.render();
