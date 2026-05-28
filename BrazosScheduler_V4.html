@@ -783,6 +783,7 @@
                     🚨 Emergency
                 </button>
                         <button class="btn-action" onclick="app.openProductionReport()" style="background:#0e7490; color:white; padding:6px 12px; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">📊 Producción</button>
+                        <button class="btn-action" onclick="app.openNominaMaria()" style="background:#7c3aed; color:white; padding:6px 12px; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">💰 Nómina María</button>
             </div>
         </div>
         
@@ -827,7 +828,6 @@
                 <select id="searchCli" onchange="app.render()" class="filter-select-final" style="display:none;">
                     <option value="all">TODOS LOS CLIENTES</option>
                 </select>
-                <input type="hidden" id="searchCliIds" value="all">
             </div>
         </div>
         
@@ -1924,7 +1924,7 @@ class Scheduler {
             daysHeader.classList.remove('sidebar-collapsed');
         }
 
-        const fCli = document.getElementById('searchCliIds')?.value||'all';
+        const fCli = document.getElementById('searchCli').value;
         const selectedGrps = this.selectedGroups || ['all'];
 
         Object.keys(this.grupos).forEach(nombreGrupo => {
@@ -1976,7 +1976,7 @@ class Scheduler {
 
         const yr = this.curDate.getFullYear();
         const mo = this.curDate.getMonth();
-        const fCli = document.getElementById('searchCliIds')?.value||'all';
+        const fCli = document.getElementById('searchCli').value;
         const selectedGrps = this.selectedGroups || ['all'];
 
         // Wrapper
@@ -2043,7 +2043,7 @@ class Scheduler {
                             if(s.empId === g) return true;
                             return this.grupos[g].includes(s.empId.toString());
                         });
-                        if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
+                        if(fCli !== 'all') daily = daily.filter(s => s.cliId == fCli);
                         daily.forEach(s => { if(!seen.has(s.id)) { seen.add(s.id); allServs.push({...s, grupo: g}); } });
                     });
 
@@ -2293,7 +2293,7 @@ class Scheduler {
             if(s.empId === nombreGrupo) return true;
             return this.grupos[nombreGrupo].includes(s.empId.toString());
         });
-        if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
+        if(fCli !== 'all') daily = daily.filter(s => s.cliId == fCli);
         daily.sort((a,b) => {
             // Ordenar por hora si tienen hora, sino por prioridad
             const aTime = a.timeStart || '';
@@ -2642,11 +2642,9 @@ class Scheduler {
     filterCalendarSearch(val) {
         const dropdown = document.getElementById('searchCliDropdown');
         const hiddenSelect = document.getElementById('searchCli');
-        const hiddenIds = document.getElementById('searchCliIds');
         if (!val.trim()) {
             dropdown.style.display = 'none';
             hiddenSelect.value = 'all';
-            if(hiddenIds) hiddenIds.value = 'all';
             this.render();
             return;
         }
@@ -2680,17 +2678,14 @@ class Scheduler {
 
     _selectCalendarCli(id, name, searchVal) {
         const input = document.getElementById('searchCliText');
-        const hiddenIds = document.getElementById('searchCliIds');
+        const hiddenSelect = document.getElementById('searchCli');
         const dropdown = document.getElementById('searchCliDropdown');
         if (id === 'all') {
             input.value = '';
-            hiddenIds.value = 'all';
+            hiddenSelect.value = 'all';
         } else {
             input.value = name;
-            const allIds = this.clis
-                .filter(c => c.name.trim().toLowerCase() === name.trim().toLowerCase())
-                .map(c => String(c.id));
-            hiddenIds.value = allIds.join(',');
+            hiddenSelect.value = id;
         }
         dropdown.style.display = 'none';
         this.render();
@@ -10574,6 +10569,219 @@ class Scheduler {
 
     }
 
+    // ── NÓMINA MARÍA ──
+    openNominaMaria() {
+        document.getElementById('nominaMariaModal').style.display = 'block';
+        // Setear semana actual por defecto
+        const mon = new Date();
+        mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7)); // lunes
+        const monStr = mon.getFullYear() + '-' + String(mon.getMonth()+1).padStart(2,'0') + '-' + String(mon.getDate()).padStart(2,'0');
+        document.getElementById('nmWeekStart').value = monStr;
+        this.calcNominaMaria();
+    }
+
+    closeNominaMaria() {
+        document.getElementById('nominaMariaModal').style.display = 'none';
+    }
+
+    nmPrevWeek() {
+        const d = new Date(document.getElementById('nmWeekStart').value + 'T12:00:00');
+        d.setDate(d.getDate() - 7);
+        document.getElementById('nmWeekStart').value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        this.calcNominaMaria();
+    }
+
+    nmNextWeek() {
+        const d = new Date(document.getElementById('nmWeekStart').value + 'T12:00:00');
+        d.setDate(d.getDate() + 7);
+        document.getElementById('nmWeekStart').value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        this.calcNominaMaria();
+    }
+
+    calcNominaMaria() {
+        const monStr = document.getElementById('nmWeekStart').value;
+        if (!monStr) return;
+        const mon = new Date(monStr + 'T12:00:00');
+        const DAYS = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+
+        // Generar 7 días de la semana
+        const weekDates = [];
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(mon); d.setDate(d.getDate() + i);
+            weekDates.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'));
+        }
+
+        // Obtener empleado María (Grupo A)
+        const mariaGroup = 'Grupo A';
+        const mariaIds = (this.grupos[mariaGroup] || []).map(String);
+
+        // Obtener servicios de la semana del Grupo A
+        const weekServs = this.servs.filter(s =>
+            !s.cancelled &&
+            weekDates.includes(s.date) &&
+            (s.empId === mariaGroup || mariaIds.includes(String(s.empId)))
+        ).sort((a, b) => a.date.localeCompare(b.date));
+
+        const pct = parseFloat(document.getElementById('nmPct').value) / 100 || 0.60;
+
+        // Tabla de servicios
+        const tbl = document.getElementById('nmServicesTable');
+        if (weekServs.length === 0) {
+            tbl.innerHTML = '<div style="color:#94a3b8;padding:12px;">Sin servicios registrados esta semana para el Grupo A.</div>';
+        } else {
+            let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                <thead><tr style="background:#374151;color:#a78bfa;">
+                    <th style="padding:8px;text-align:left;">Día</th>
+                    <th style="padding:8px;text-align:left;">Cliente</th>
+                    <th style="padding:8px;text-align:right;">Precio</th>
+                    <th style="padding:8px;text-align:right;">${Math.round(pct*100)}% Pago</th>
+                </tr></thead><tbody>`;
+            let totalPct = 0;
+            weekServs.forEach(s => {
+                const cli = this.clis.find(c => String(c.id) === String(s.cliId)) || {};
+                const precio = parseFloat(cli.price || 0);
+                const pago = precio * pct;
+                totalPct += pago;
+                const dayIdx = weekDates.indexOf(s.date);
+                const dayLabel = DAYS[dayIdx] + ' ' + s.date.slice(8);
+                const propLabel = (cli.type==='airbnb'||cli.type==='unico'||cli.type==='construccion') && cli.propId ? cli.name + ' / ' + cli.propId : cli.name || s.cliId;
+                html += `<tr style="border-bottom:1px solid #374151;">
+                    <td style="padding:8px;color:#94a3b8;">${dayLabel}</td>
+                    <td style="padding:8px;">${propLabel}</td>
+                    <td style="padding:8px;text-align:right;">$${precio.toFixed(2)}</td>
+                    <td style="padding:8px;text-align:right;color:#86efac;">$${pago.toFixed(2)}</td>
+                </tr>`;
+            });
+            html += `<tr style="background:#374151;font-weight:700;">
+                <td colspan="3" style="padding:8px;color:#a78bfa;">Total servicios (${weekServs.length})</td>
+                <td style="padding:8px;text-align:right;color:#86efac;">$${totalPct.toFixed(2)}</td>
+            </tr></tbody></table>`;
+            tbl.innerHTML = html;
+            tbl.dataset.totalPct = totalPct.toFixed(2);
+        }
+
+        // Horas directas por día
+        const dhDiv = document.getElementById('nmDirectHours');
+        dhDiv.innerHTML = weekDates.map((d, i) => {
+            const dayObj = new Date(d + 'T12:00:00');
+            const dayN = dayObj.getDate();
+            return `<div style="text-align:center;">
+                <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:4px;">${DAYS[i]}<br><b>${dayN}</b></div>
+                <input type="number" min="0" max="24" step="0.25" value="0"
+                    id="nmHrs_${i}"
+                    style="width:100%;padding:6px;border:1px solid #4a5568;border-radius:6px;background:#1a1a2e;color:#e2e8f0;text-align:center;font-size:0.9rem;"
+                    oninput="app.updateNomina()">
+            </div>`;
+        }).join('');
+
+        this.updateNomina();
+    }
+
+    updateNomina() {
+        const rate = parseFloat(document.getElementById('nmRate').value) || 15;
+        const otRate = rate * 1.5;
+        const bonus = parseFloat(document.getElementById('nmBonus').value) || 0;
+        const pct = parseFloat(document.getElementById('nmPct').value) / 100 || 0.60;
+        const totalPct = parseFloat(document.getElementById('nmServicesTable').dataset.totalPct || 0);
+
+        // Horas directas
+        let directHrs = 0;
+        for (let i = 0; i < 7; i++) {
+            const inp = document.getElementById('nmHrs_' + i);
+            if (inp) directHrs += parseFloat(inp.value) || 0;
+        }
+        const directPay = directHrs * rate;
+
+        // Total horas equivalentes (servicios % convertidos a horas)
+        const hrsFromPct = totalPct / rate;
+        const totalHrs = hrsFromPct + directHrs;
+
+        // Overtime (>40 hrs)
+        const regularHrs = Math.min(totalHrs, 40);
+        const otHrs = Math.max(0, totalHrs - 40);
+
+        // Recalcular pago regular vs OT
+        let regularPay, otPay;
+        if (otHrs > 0) {
+            regularPay = regularHrs * rate;
+            otPay = otHrs * otRate;
+        } else {
+            regularPay = totalPct + directPay;
+            otPay = 0;
+        }
+
+        const subtotal = regularPay + otPay;
+        const total = subtotal + bonus;
+
+        const fmt = n => '$' + n.toFixed(2);
+        document.getElementById('nmSummary').innerHTML = `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div>
+                    <div style="color:#94a3b8;font-size:0.8rem;margin-bottom:8px;">RESUMEN SEMANA</div>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
+                        <span>Pago por servicios (${Math.round(pct*100)}%)</span><span style="color:#86efac;">${fmt(totalPct)}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
+                        <span>Horas directas (${directHrs.toFixed(2)} hrs × ${fmt(rate)})</span><span style="color:#86efac;">${fmt(directPay)}</span>
+                    </div>
+                    ${otHrs > 0 ? `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
+                        <span>Overtime (${otHrs.toFixed(2)} hrs × ${fmt(otRate)})</span><span style="color:#fbbf24;">${fmt(otPay)}</span>
+                    </div>` : ''}
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
+                        <span>Bonus</span><span style="color:#86efac;">${fmt(bonus)}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:700;font-size:1.1rem;">
+                        <span style="color:#a78bfa;">TOTAL A PAGAR</span><span style="color:#a78bfa;">${fmt(total)}</span>
+                    </div>
+                </div>
+                <div>
+                    <div style="color:#94a3b8;font-size:0.8rem;margin-bottom:8px;">HORAS PARA QUICKBOOKS</div>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
+                        <span>Horas regulares</span><span style="color:#86efac;">${regularHrs.toFixed(2)}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
+                        <span>Horas overtime</span><span style="color:#fbbf24;">${otHrs.toFixed(2)}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
+                        <span>Total horas</span><span>${totalHrs.toFixed(2)}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
+                        <span>Tarifa hora</span><span>${fmt(rate)}</span>
+                    </div>
+                    <div style="background:#1a1a2e;border-radius:8px;padding:12px;margin-top:8px;border:1px solid #7c3aed;">
+                        <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:4px;">INGRESAR EN QUICKBOOKS PAYROLL:</div>
+                        <div style="font-size:1.1rem;font-weight:700;color:#a78bfa;">Reg: ${regularHrs.toFixed(2)} hrs &nbsp;|&nbsp; OT: ${otHrs.toFixed(2)} hrs</div>
+                        <div style="font-size:1rem;color:#86efac;margin-top:4px;">Total: ${fmt(total)}</div>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    printNominaMaria() {
+        const monStr = document.getElementById('nmWeekStart').value;
+        const mon = new Date(monStr + 'T12:00:00');
+        const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
+        const fmt2 = d => d.toLocaleDateString('es-MX',{month:'short',day:'numeric',year:'numeric'});
+        const summaryHTML = document.getElementById('nmSummary').innerHTML;
+        const tableHTML = document.getElementById('nmServicesTable').innerHTML;
+        const win = window.open('','_blank');
+        win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+        <title>Nómina María ${monStr}</title>
+        <style>body{font-family:Arial,sans-serif;padding:20px;color:#222;}
+        h1{color:#7c3aed;}table{width:100%;border-collapse:collapse;}
+        td,th{padding:8px;border:1px solid #ddd;}th{background:#f3f4f6;}
+        .summary{background:#f9fafb;padding:16px;border-radius:8px;margin-top:16px;}
+        @media print{button{display:none}}</style></head>
+        <body>
+        <h1>💰 Nómina — María A. Duarte Ramírez</h1>
+        <h3>Semana: ${fmt2(mon)} — ${fmt2(sun)}</h3>
+        <div>${tableHTML}</div>
+        <div class="summary">${summaryHTML}</div>
+        <button onclick="window.print()" style="margin-top:16px;padding:10px 20px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;">🖨️ Imprimir</button>
+        </body></html>`);
+        win.document.close();
+    }
+
 }
 const app = new Scheduler();
 
@@ -11499,6 +11707,39 @@ document.addEventListener('click', function(e) {
             <button onclick="app.createEmergencyService()" style="background:#e74c3c; color:white; border:none; padding:11px 22px; border-radius:8px; cursor:pointer; font-weight:bold;">🚨 Crear Servicio</button>
         </div>
     </div>
+</div>
+
+<!-- MODAL NÓMINA MARÍA -->
+<div id="nominaMariaModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9000;overflow-y:auto;">
+  <div style="background:#1a1a2e;color:#e2e8f0;max-width:900px;margin:20px auto;border-radius:12px;padding:24px;font-family:'Barlow',sans-serif;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h2 style="margin:0;color:#a78bfa;font-size:1.4rem;">💰 Nómina — María A. Duarte Ramírez</h2>
+      <button onclick="app.closeNominaMaria()" style="background:none;border:none;color:#94a3b8;font-size:1.5rem;cursor:pointer;">✕</button>
+    </div>
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap;">
+      <div>
+        <label style="font-size:0.8rem;color:#94a3b8;">Semana del</label>
+        <input type="date" id="nmWeekStart" style="padding:6px 10px;border:1px solid #4a5568;border-radius:6px;background:#2d3748;color:#e2e8f0;margin-left:8px;">
+      </div>
+      <button onclick="app.calcNominaMaria()" style="background:#7c3aed;color:white;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;font-weight:700;">🔄 Calcular</button>
+      <button onclick="app.nmPrevWeek()" style="background:#374151;color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;">◀</button>
+      <button onclick="app.nmNextWeek()" style="background:#374151;color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;">▶</button>
+    </div>
+    <div id="nmServicesTable" style="margin-bottom:20px;"></div>
+    <div style="background:#2d3748;border-radius:8px;padding:16px;margin-bottom:20px;">
+      <h3 style="margin:0 0 12px;color:#a78bfa;font-size:1rem;">⏱ Horas por Tiempo</h3>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;" id="nmDirectHours"></div>
+    </div>
+    <div style="display:flex;gap:16px;align-items:center;margin-bottom:20px;flex-wrap:wrap;">
+      <div><label style="font-size:0.85rem;color:#94a3b8;">Bonus $</label><input type="number" id="nmBonus" value="0" min="0" step="0.01" style="padding:6px 10px;border:1px solid #4a5568;border-radius:6px;background:#2d3748;color:#e2e8f0;width:100px;margin-left:8px;" oninput="app.updateNomina()"></div>
+      <div><label style="font-size:0.85rem;color:#94a3b8;">Tarifa hora $</label><input type="number" id="nmRate" value="15" min="1" step="0.50" style="padding:6px 10px;border:1px solid #4a5568;border-radius:6px;background:#2d3748;color:#e2e8f0;width:90px;margin-left:8px;" oninput="app.updateNomina()"></div>
+      <div><label style="font-size:0.85rem;color:#94a3b8;">% pago</label><input type="number" id="nmPct" value="60" min="1" max="100" step="1" style="padding:6px 10px;border:1px solid #4a5568;border-radius:6px;background:#2d3748;color:#e2e8f0;width:80px;margin-left:8px;" oninput="app.updateNomina()"></div>
+    </div>
+    <div id="nmSummary" style="background:#2d3748;border-radius:8px;padding:16px;"></div>
+    <div style="display:flex;gap:12px;margin-top:16px;">
+      <button onclick="app.printNominaMaria()" style="background:#059669;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:700;">🖨️ Imprimir / PDF</button>
+    </div>
+  </div>
 </div>
 
 </body>
