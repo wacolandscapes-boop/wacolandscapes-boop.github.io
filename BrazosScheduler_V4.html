@@ -10624,7 +10624,7 @@ class Scheduler {
 
         const pct = parseFloat(document.getElementById('nmPct').value) / 100 || 0.60;
 
-        // Tabla de servicios
+        // Tabla de servicios con precio editable
         const tbl = document.getElementById('nmServicesTable');
         if (weekServs.length === 0) {
             tbl.innerHTML = '<div style="color:#94a3b8;padding:12px;">Sin servicios registrados esta semana para el Grupo A.</div>';
@@ -10633,44 +10633,56 @@ class Scheduler {
                 <thead><tr style="background:#374151;color:#a78bfa;">
                     <th style="padding:8px;text-align:left;">Día</th>
                     <th style="padding:8px;text-align:left;">Cliente</th>
-                    <th style="padding:8px;text-align:right;">Precio</th>
+                    <th style="padding:8px;text-align:right;">Precio $</th>
                     <th style="padding:8px;text-align:right;">${Math.round(pct*100)}% Pago</th>
+                    <th style="padding:8px;text-align:center;">Solo hrs</th>
                 </tr></thead><tbody>`;
-            let totalPct = 0;
-            weekServs.forEach(s => {
+            weekServs.forEach((s, idx) => {
                 const cli = this.clis.find(c => String(c.id) === String(s.cliId)) || {};
                 const precio = parseFloat(cli.price || 0);
-                const pago = precio * pct;
-                totalPct += pago;
                 const dayIdx = weekDates.indexOf(s.date);
                 const dayLabel = DAYS[dayIdx] + ' ' + s.date.slice(8);
                 const propLabel = (cli.type==='airbnb'||cli.type==='unico'||cli.type==='construccion') && cli.propId ? cli.name + ' / ' + cli.propId : cli.name || s.cliId;
-                html += `<tr style="border-bottom:1px solid #374151;">
+                html += `<tr style="border-bottom:1px solid #374151;" data-day="${dayIdx}">
                     <td style="padding:8px;color:#94a3b8;">${dayLabel}</td>
                     <td style="padding:8px;">${propLabel}</td>
-                    <td style="padding:8px;text-align:right;">$${precio.toFixed(2)}</td>
-                    <td style="padding:8px;text-align:right;color:#86efac;">$${pago.toFixed(2)}</td>
+                    <td style="padding:8px;text-align:right;">
+                        <input type="number" id="nmPrice_${idx}" value="${precio.toFixed(2)}" min="0" step="0.01"
+                            style="width:80px;padding:4px;border:1px solid #4a5568;border-radius:4px;background:#1a1a2e;color:#e2e8f0;text-align:right;"
+                            oninput="app.updateNomina()" data-dayidx="${dayIdx}">
+                    </td>
+                    <td style="padding:8px;text-align:right;color:#86efac;" id="nmPctPay_${idx}">$0.00</td>
+                    <td style="padding:8px;text-align:center;">
+                        <input type="checkbox" id="nmSoloHrs_${idx}" title="Este servicio se paga por horas (ignorar %)" 
+                            onchange="app.updateNomina()" style="width:16px;height:16px;cursor:pointer;">
+                    </td>
                 </tr>`;
             });
             html += `<tr style="background:#374151;font-weight:700;">
                 <td colspan="3" style="padding:8px;color:#a78bfa;">Total servicios (${weekServs.length})</td>
-                <td style="padding:8px;text-align:right;color:#86efac;">$${totalPct.toFixed(2)}</td>
+                <td style="padding:8px;text-align:right;color:#86efac;" id="nmTotalPctRow">$0.00</td>
+                <td></td>
             </tr></tbody></table>`;
             tbl.innerHTML = html;
-            tbl.dataset.totalPct = totalPct.toFixed(2);
+            tbl.dataset.svcCount = weekServs.length;
+            // Guardar dayIdx por servicio
+            weekServs.forEach((s, idx) => {
+                tbl.dataset['day_' + idx] = weekDates.indexOf(s.date);
+            });
         }
 
-        // Horas directas por día
+        // Horas directas por día con checkbox "Solo horas ese día"
         const dhDiv = document.getElementById('nmDirectHours');
         dhDiv.innerHTML = weekDates.map((d, i) => {
             const dayObj = new Date(d + 'T12:00:00');
-            const dayN = dayObj.getDate();
-            return `<div style="text-align:center;">
-                <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:4px;">${DAYS[i]}<br><b>${dayN}</b></div>
+            return `<div style="text-align:center;background:#1a1a2e;border-radius:6px;padding:6px;">
+                <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:2px;">${DAYS[i]}</div>
+                <div style="font-weight:700;margin-bottom:4px;">${dayObj.getDate()}</div>
                 <input type="number" min="0" max="24" step="0.25" value="0"
                     id="nmHrs_${i}"
-                    style="width:100%;padding:6px;border:1px solid #4a5568;border-radius:6px;background:#1a1a2e;color:#e2e8f0;text-align:center;font-size:0.9rem;"
-                    oninput="app.updateNomina()">
+                    style="width:100%;padding:4px;border:1px solid #4a5568;border-radius:4px;background:#2d3748;color:#e2e8f0;text-align:center;font-size:0.85rem;"
+                    oninput="app.updateNomina()" placeholder="hrs">
+                <div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">hrs extra</div>
             </div>`;
         }).join('');
 
@@ -10682,9 +10694,29 @@ class Scheduler {
         const otRate = rate * 1.5;
         const bonus = parseFloat(document.getElementById('nmBonus').value) || 0;
         const pct = parseFloat(document.getElementById('nmPct').value) / 100 || 0.60;
-        const totalPct = parseFloat(document.getElementById('nmServicesTable').dataset.totalPct || 0);
+        const tbl = document.getElementById('nmServicesTable');
+        const svcCount = parseInt(tbl.dataset.svcCount || 0);
 
-        // Horas directas
+        // Calcular pago por servicios — respetando checkbox "Solo hrs"
+        let totalPct = 0;
+        for (let i = 0; i < svcCount; i++) {
+            const priceInp = document.getElementById('nmPrice_' + i);
+            const soloHrs = document.getElementById('nmSoloHrs_' + i);
+            const pctPayEl = document.getElementById('nmPctPay_' + i);
+            if (!priceInp) continue;
+            const precio = parseFloat(priceInp.value) || 0;
+            const isSoloHrs = soloHrs && soloHrs.checked;
+            const pago = isSoloHrs ? 0 : precio * pct;
+            totalPct += pago;
+            if (pctPayEl) {
+                pctPayEl.textContent = isSoloHrs ? '(hrs)' : '$' + pago.toFixed(2);
+                pctPayEl.style.color = isSoloHrs ? '#94a3b8' : '#86efac';
+            }
+        }
+        const totalRow = document.getElementById('nmTotalPctRow');
+        if (totalRow) totalRow.textContent = '$' + totalPct.toFixed(2);
+
+        // Horas directas (extra o días completos por hora)
         let directHrs = 0;
         for (let i = 0; i < 7; i++) {
             const inp = document.getElementById('nmHrs_' + i);
@@ -10692,15 +10724,14 @@ class Scheduler {
         }
         const directPay = directHrs * rate;
 
-        // Total horas equivalentes (servicios % convertidos a horas)
-        const hrsFromPct = totalPct / rate;
+        // Total horas equivalentes
+        const hrsFromPct = rate > 0 ? totalPct / rate : 0;
         const totalHrs = hrsFromPct + directHrs;
 
         // Overtime (>40 hrs)
         const regularHrs = Math.min(totalHrs, 40);
         const otHrs = Math.max(0, totalHrs - 40);
 
-        // Recalcular pago regular vs OT
         let regularPay, otPay;
         if (otHrs > 0) {
             regularPay = regularHrs * rate;
@@ -10744,9 +10775,6 @@ class Scheduler {
                     </div>
                     <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
                         <span>Total horas</span><span>${totalHrs.toFixed(2)}</span>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
-                        <span>Tarifa hora</span><span>${fmt(rate)}</span>
                     </div>
                     <div style="background:#1a1a2e;border-radius:8px;padding:12px;margin-top:8px;border:1px solid #7c3aed;">
                         <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:4px;">INGRESAR EN QUICKBOOKS PAYROLL:</div>
