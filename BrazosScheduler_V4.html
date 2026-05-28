@@ -10573,6 +10573,8 @@ class Scheduler {
     openNominaMaria() {
         const modal = document.getElementById('nominaMariaModal');
         modal.style.display = 'block';
+        modal.style.pointerEvents = 'auto';
+        modal.style.background = 'rgba(0,0,0,0.7)';
         modal.dataset.minimized = 'false';
         document.getElementById('nominaMariaContent').style.display = 'block';
         document.getElementById('nmMinBar').style.display = 'none';
@@ -10606,24 +10608,25 @@ class Scheduler {
         const modal = document.getElementById('nominaMariaModal');
         const content = document.getElementById('nominaMariaContent');
         const btn = document.getElementById('nmMinBtn');
+        const minBar = document.getElementById('nmMinBar');
         const isMin = modal.dataset.minimized === 'true';
         if (isMin) {
-            // Expandir
             modal.dataset.minimized = 'false';
             modal.style.background = 'rgba(0,0,0,0.7)';
+            modal.style.pointerEvents = 'auto';
             content.style.display = 'block';
+            minBar.style.display = 'none';
             btn.textContent = '─';
             btn.title = 'Minimizar';
         } else {
-            // Minimizar
             modal.dataset.minimized = 'true';
             modal.style.background = 'transparent';
             modal.style.pointerEvents = 'none';
             content.style.display = 'none';
+            minBar.style.display = 'flex';
+            minBar.style.pointerEvents = 'auto';
             btn.textContent = '□';
             btn.title = 'Expandir';
-            // Mostrar barra minimizada
-            document.getElementById('nmMinBar').style.display = 'flex';
         }
     }
 
