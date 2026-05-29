@@ -828,6 +828,7 @@
                 <select id="searchCli" onchange="app.render()" class="filter-select-final" style="display:none;">
                     <option value="all">TODOS LOS CLIENTES</option>
                 </select>
+                <input type="hidden" id="searchCliIds" value="all">
             </div>
         </div>
         
@@ -1924,7 +1925,7 @@ class Scheduler {
             daysHeader.classList.remove('sidebar-collapsed');
         }
 
-        const fCli = document.getElementById('searchCli').value;
+        const fCli = document.getElementById('searchCliIds')?.value||'all';
         const selectedGrps = this.selectedGroups || ['all'];
 
         Object.keys(this.grupos).forEach(nombreGrupo => {
@@ -1976,7 +1977,7 @@ class Scheduler {
 
         const yr = this.curDate.getFullYear();
         const mo = this.curDate.getMonth();
-        const fCli = document.getElementById('searchCli').value;
+        const fCli = document.getElementById('searchCliIds')?.value||'all';
         const selectedGrps = this.selectedGroups || ['all'];
 
         // Wrapper
@@ -2642,9 +2643,11 @@ class Scheduler {
     filterCalendarSearch(val) {
         const dropdown = document.getElementById('searchCliDropdown');
         const hiddenSelect = document.getElementById('searchCli');
+        const hiddenIds = document.getElementById('searchCliIds');
         if (!val.trim()) {
             dropdown.style.display = 'none';
             hiddenSelect.value = 'all';
+            if(hiddenIds) hiddenIds.value = 'all';
             this.render();
             return;
         }
@@ -2678,14 +2681,18 @@ class Scheduler {
 
     _selectCalendarCli(id, name, searchVal) {
         const input = document.getElementById('searchCliText');
-        const hiddenSelect = document.getElementById('searchCli');
+        const hiddenIds = document.getElementById('searchCliIds');
         const dropdown = document.getElementById('searchCliDropdown');
         if (id === 'all') {
             input.value = '';
-            hiddenSelect.value = 'all';
+            if(hiddenIds) hiddenIds.value = 'all';
         } else {
             input.value = name;
-            hiddenSelect.value = id;
+            // Buscar todos los IDs del mismo cliente (múltiples propiedades)
+            const allIds = this.clis
+                .filter(c => c.name.trim().toLowerCase() === name.trim().toLowerCase())
+                .map(c => String(c.id));
+            if(hiddenIds) hiddenIds.value = allIds.length > 0 ? allIds.join(',') : id;
         }
         dropdown.style.display = 'none';
         this.render();
