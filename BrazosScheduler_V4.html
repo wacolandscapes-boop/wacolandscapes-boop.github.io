@@ -4009,11 +4009,8 @@ class Scheduler {
                     });
                     
                     if (monthlyServices.length > 0) {
-                        let total = 0;
-                        monthlyServices.forEach(s => {
-                            const client = this.clis.find(c => c.id == s.cliId);
-                            if (client) total += parseFloat(client.price || 0);
-                        });
+                        // Pago fijo mensual — usar precio del cliente, NO multiplicar por servicios
+                        const total = parseFloat(mainClient.price || 0);
                         
                         this.pendingInvoices.push({
                             id: Date.now() + Math.random(),
@@ -4050,11 +4047,8 @@ class Scheduler {
                         });
                         
                         if (firstHalfServices.length > 0) {
-                            let total = 0;
-                            firstHalfServices.forEach(s => {
-                                const client = this.clis.find(c => c.id == s.cliId);
-                                if (client) total += parseFloat(client.price || 0);
-                            });
+                            // Precio fijo quincenal = precio mensual / 2
+                            const total = parseFloat(mainClient.price || 0) / 2;
                             
                             this.pendingInvoices.push({
                                 id: Date.now() + Math.random(),
@@ -4089,11 +4083,8 @@ class Scheduler {
                         });
                         
                         if (secondHalfServices.length > 0) {
-                            let total = 0;
-                            secondHalfServices.forEach(s => {
-                                const client = this.clis.find(c => c.id == s.cliId);
-                                if (client) total += parseFloat(client.price || 0);
-                            });
+                            // Precio fijo quincenal = precio mensual / 2
+                            const total = parseFloat(mainClient.price || 0) / 2;
                             
                             this.pendingInvoices.push({
                                 id: Date.now() + Math.random(),
@@ -4753,7 +4744,7 @@ class Scheduler {
             const c = this.clis.find(x => x.id == s.cliId);
             if(!c) return;
             
-            const price = parseFloat(c.price || 0);
+            const price = this.pricePerService(c);
             total += price;
             
             const [year, month, day] = s.date.split('-');
@@ -4878,7 +4869,7 @@ class Scheduler {
             const c = this.clis.find(x => x.id == s.cliId);
             if(!c) return;
             
-            const price = parseFloat(c.price || 0);
+            const price = this.pricePerService(c);
             total += price;
             
             const [year, month, day] = s.date.split('-');
@@ -5017,7 +5008,7 @@ class Scheduler {
         filtered.forEach(s => {
             const cliente = this.clis.find(c => c.id == s.cliId);
             if (cliente) {
-                const price = parseFloat(cliente.price) || 0;
+                const price = this.pricePerService(cliente);
                 totalIngresos += price;
             }
         });
@@ -5899,11 +5890,8 @@ class Scheduler {
         
         const servicesWithClient = filtered.map(s => {
             const c = this.clis.find(x => x.id == s.cliId);
-            return {
-                service: s,
-                client: c,
-                price: parseFloat(c && c.price ? c.price : 0)
-            };
+            const price = c ? this.pricePerService(c) : 0;
+            return { service: s, client: c, price };
         }).filter(item => item.client);
         
         let csv = '';
@@ -6948,6 +6936,22 @@ class Scheduler {
         document.getElementById('mCli').innerHTML = mCliHTML;
         document.getElementById('searchCli').innerHTML = filterHTML;
         document.getElementById('finCli').innerHTML = filterHTML;
+    }
+
+    // Calcular precio por servicio según recurrencia del cliente
+    pricePerService(cli) {
+        const p = parseFloat(cli.price || 0);
+        switch(cli.type || 'semanal') {
+            case 'diario':        return p * 12 / 52 / 5;
+            case '2xsemana':      return p * 12 / 52 / 2;
+            case 'semanal':       return p * 12 / 52 / 1;
+            case 'quincenal':     return p * 12 / 26 / 1;
+            case 'mensual':       return p;
+            case 'airbnb':
+            case 'unico':
+            case 'construccion':  return p;
+            default:              return p * 12 / 52 / 1;
+        }
     }
 
     refreshFinance() {
