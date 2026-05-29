@@ -6938,18 +6938,19 @@ class Scheduler {
         document.getElementById('finCli').innerHTML = filterHTML;
     }
 
-    // Calcular precio por servicio según recurrencia del cliente
+    // Calcular precio por servicio según tipo de facturación y recurrencia
     pricePerService(cli) {
         const p = parseFloat(cli.price || 0);
+        // Solo aplicar fórmula si el precio es fijo mensual
+        if (cli.invoicingType !== 'fixed_monthly') return p;
+        // Precio mensual fijo → convertir a precio por servicio según recurrencia
         switch(cli.type || 'semanal') {
             case 'diario':        return p * 12 / 52 / 5;
             case '2xsemana':      return p * 12 / 52 / 2;
+            case '3xsemana':      return p * 12 / 52 / 3;
             case 'semanal':       return p * 12 / 52 / 1;
             case 'quincenal':     return p * 12 / 26 / 1;
             case 'mensual':       return p;
-            case 'airbnb':
-            case 'unico':
-            case 'construccion':  return p;
             default:              return p * 12 / 52 / 1;
         }
     }
