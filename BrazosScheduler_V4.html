@@ -2044,7 +2044,7 @@ class Scheduler {
                             if(s.empId === g) return true;
                             return this.grupos[g].includes(s.empId.toString());
                         });
-                        if(fCli !== 'all') daily = daily.filter(s => s.cliId == fCli);
+                        if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
                         daily.forEach(s => { if(!seen.has(s.id)) { seen.add(s.id); allServs.push({...s, grupo: g}); } });
                     });
 
@@ -2294,7 +2294,7 @@ class Scheduler {
             if(s.empId === nombreGrupo) return true;
             return this.grupos[nombreGrupo].includes(s.empId.toString());
         });
-        if(fCli !== 'all') daily = daily.filter(s => s.cliId == fCli);
+        if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
         daily.sort((a,b) => {
             // Ordenar por hora si tienen hora, sino por prioridad
             const aTime = a.timeStart || '';
