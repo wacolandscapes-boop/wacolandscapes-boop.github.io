@@ -5789,7 +5789,7 @@ class Scheduler {
             filteredServs.forEach(s => {
                 const cliente = this.clis.find(c => c.id == s.cliId);
                 if (cliente) {
-                    totalIngresos += parseFloat(cliente.price) || 0;
+                    totalIngresos += this.pricePerService(cliente);
                 }
             });
             
@@ -7033,11 +7033,8 @@ class Scheduler {
         // Crear array de servicios con datos del cliente para ordenar
         const servicesWithClient = filtered.map(s => {
             const c = this.clis.find(x => x.id == s.cliId);
-            return {
-                service: s,
-                client: c,
-               price: parseFloat(c && c.price ? c.price : 0)
-            };
+            const price = c ? this.pricePerService(c) : 0;
+            return { service: s, client: c, price };
         }).filter(item => item.client); // Filtrar servicios sin cliente
         
         // Aplicar ordenamiento
