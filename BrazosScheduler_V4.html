@@ -1162,6 +1162,7 @@
                         <input type="hidden" id="np">
                         <input type="number" id="pc" placeholder="Precio $">
                         <input type="tel" id="tc" placeholder="Teléfono">
+                        <input type="email" id="ec" placeholder="Email" style="grid-column:span 1">
                         <input type="text" id="dc" placeholder="Dirección" style="grid-column:span 2">
                         <input type="text" id="dci" placeholder="Ciudad">
                         <input type="text" id="dzip" placeholder="ZIP / Código Postal">
@@ -4023,6 +4024,7 @@ class Scheduler {
                             id: Date.now() + Math.random(),
                             periodKey: monthlyKey,
                             clientName: clientName,
+                            clientEmail: mainClient.email || '',
                             clientIds: clients.map(c => c.id),
                             type: mainClient.type,
                             serviceType: mainClient.serviceType,
@@ -4143,6 +4145,7 @@ class Scheduler {
                             id: Date.now() + Math.random(),
                             periodKey: weeklyKey,
                             clientName: clientName,
+                            clientEmail: mainClient.email || '',
                             clientIds: clients.map(c => c.id),
                             type: mainClient.type,
                             serviceType: mainClient.serviceType,
@@ -4575,6 +4578,7 @@ class Scheduler {
                 <td style="padding:8px; text-align:center; font-size:0.8rem; color:#555;">${inv.paidAmount ? '$'+parseFloat(inv.paidAmount).toLocaleString('en-US',{minimumFractionDigits:2}) : paidFmt}</td>
                 <td style="padding:8px; text-align:center;">
                     <button onclick="app.openCobroDetalle('${inv.id}')" style="background:#16a085; color:white; border:none; border-radius:5px; padding:5px 10px; cursor:pointer; font-size:0.8rem;">✏️ Actualizar</button>
+                    ${inv.clientEmail ? `<a href="mailto:${inv.clientEmail}?subject=Invoice%20%23${num}%20-%20Brazos%20Cleaning%20Services&body=Dear%20${encodeURIComponent(inv.clientName)}%2C%0A%0APlease%20find%20attached%20your%20invoice%20%23${num}%20for%20the%20period%20${encodeURIComponent(period)}.%0A%0ATotal%3A%20%24${inv.total.toFixed(2)}%0A%0APlease%20remit%20payment%20by%20check%20or%20ACH.%0A%0AThank%20you%2C%0ABrazos%20Cleaning%20Services" style="background:#2563eb; color:white; border:none; border-radius:5px; padding:5px 10px; cursor:pointer; font-size:0.8rem; text-decoration:none; display:inline-block; margin-top:3px;">📧 Email</a>` : '<small style="color:#999;">Sin email</small>'}
                 </td>
             </tr>`;
         }).join('');
@@ -6373,7 +6377,7 @@ class Scheduler {
             document.getElementById('nc').value = '';
             document.getElementById('np').value = '';
             document.getElementById('pc').value = '';
-            document.getElementById('tc').value = '';
+            document.getElementById('tc').value = ''; if(document.getElementById('ec')) document.getElementById('ec').value = '';
             document.getElementById('dc').value = '';
             document.getElementById('dci').value = '';
             document.getElementById('dzip').value = '';
@@ -6476,6 +6480,7 @@ class Scheduler {
             : (type === 'unico' ? (document.getElementById('np').value.trim() || document.getElementById('dc').value.trim()) : document.getElementById('np').value.trim());
         const price = document.getElementById('pc').value;
         const tel = document.getElementById('tc').value || '';
+        const email = document.getElementById('ec').value || '';
         const address = document.getElementById('dc').value || '';
         const city    = document.getElementById('dci').value || '';
         const zip     = document.getElementById('dzip').value || '';
@@ -6501,7 +6506,7 @@ class Scheduler {
 
                     // Actualizar datos base en todos los registros existentes
                     existingProps.forEach(c => {
-                        c.name = name; c.price = price; c.tel = tel;
+                        c.name = name; c.price = price; c.tel = tel; c.email = email;
                         c.address = address; c.city = city; c.zip = zip;
                         c.type = type; c.serviceType = serviceType;
                         c.billingPeriod = billingPeriod; c.invoicingType = invoicingType;
@@ -6570,7 +6575,7 @@ class Scheduler {
             document.getElementById('nc').value = '';
             document.getElementById('np').value = '';
             document.getElementById('pc').value = '';
-            document.getElementById('tc').value = '';
+            document.getElementById('tc').value = ''; if(document.getElementById('ec')) document.getElementById('ec').value = '';
             document.getElementById('dc').value = '';
             document.getElementById('dci').value = '';
             document.getElementById('dzip').value = '';
@@ -6618,6 +6623,7 @@ class Scheduler {
                 propId: propId,
                 price: price,
                 tel: tel,
+                email: email,
                 address: address,
                 city: city,
                 zip: zip,
@@ -6653,6 +6659,7 @@ class Scheduler {
             document.getElementById('np').value = cli.propId || '';
             document.getElementById('pc').value = cli.price || '';
             document.getElementById('tc').value = cli.tel || '';
+            if(document.getElementById('ec')) document.getElementById('ec').value = cli.email || '';
             document.getElementById('dc').value = cli.address || '';
             document.getElementById('dci').value = cli.city || '';
             document.getElementById('dzip').value = cli.zip || '';
