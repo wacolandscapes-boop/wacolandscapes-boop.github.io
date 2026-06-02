@@ -1546,7 +1546,7 @@ class Scheduler {
         this.isSyncing = false;
         this.pendingSync = false;
         this.CLIENT_ID = '1032764332702-uvnqg0ccaer5gp2hr12gmniqe38ria1t.apps.googleusercontent.com';
-        this.SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
+        this.SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/gmail.send';
         this.FOLDER_NAME = 'BrazosCleaningApp';
         // Convertir grupos (objeto) a groups (array) para el filtro
         this.groups = Object.keys(this.grupos).map((name, idx) => ({
@@ -8226,13 +8226,16 @@ class Scheduler {
                 
                 <iframe src="${pdfUrl}" style="flex: 1; border: none; margin: 0; padding: 0;"></iframe>
                 
-                <div style="padding: 20px; border-top: 2px solid #ddd; display: flex; gap: 15px; justify-content: center;">
+                <div style="padding: 20px; border-top: 2px solid #ddd; display: flex; gap: 15px; justify-content: center; flex-wrap:wrap;">
                     <button onclick="app.printPDF('${pdfUrl}')" class="btn" style="background: #1A4FCC; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         🖨️ Imprimir
                     </button>
                     <button onclick="app.savePDF(${pdfData.invoiceNumber}, '${client.name}', '${startDate}')" class="btn" style="background: #27ae60; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         💾 Guardar
                     </button>
+                    ${client.email ? `<button onclick="app.sendInvoiceByGmail(window.currentPDFData.blob, window.currentPDFData.client, window.currentPDFData.invoiceNumber, window.currentPDFData.total || 0, '${startDate}', '${endDate}')" class="btn" style="background: #ea4335; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                        📧 Enviar por Gmail
+                    </button>` : ''}
                     <button onclick="document.getElementById('pdfPreviewModal').remove();" class="btn" style="background: #95a5a6; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         ❌ Cancelar
                     </button>
@@ -8242,8 +8245,9 @@ class Scheduler {
         
         document.body.appendChild(previewModal);
         
-        // Guardar datos para usar en savePDF
+        // Guardar datos para usar en savePDF y sendGmail
         window.currentPDFData = pdfData;
+        window.currentPDFData.endDate = endDate;
     }
     
     printPDF(pdfUrl) {
@@ -8251,6 +8255,71 @@ class Scheduler {
         printWindow.onload = function() {
             printWindow.print();
         };
+    }
+
+    async sendInvoiceByGmail(pdfBlob, client, invoiceNumber, total, startDate, endDate) {
+        if (!this.driveToken) {
+            alert('Conecta Drive/Gmail primero (botón ☁️)');
+            return;
+        }
+        try {
+            const toEmail = client.email;
+            if (!toEmail) { alert('Este cliente no tiene email registrado.'); return; }
+
+            const subject = `Invoice #${invoiceNumber.toString().padStart(4,'0')} - Brazos Cleaning Services`;
+            const body = `Dear ${client.name},\n\nPlease find attached your invoice #${invoiceNumber.toString().padStart(4,'0')} for the period ${startDate} to ${endDate}.\n\nTotal: $${total.toFixed(2)}\n\nPlease remit payment by check or ACH.\n\nPayment Instructions:\n- Check payable to: Brazos Cleaning Services\n- ACH/Transfer: Please contact us for banking details\n\nThank you for your business!\n\nBrazos Cleaning Services\nbrazoscleaningservices@gmail.com\n(254) 412-4508`;
+
+            // Convertir PDF blob a base64
+            const arrayBuffer = await pdfBlob.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+            let binary = '';
+            uint8Array.forEach(b => binary += String.fromCharCode(b));
+            const base64PDF = btoa(binary);
+
+            // Construir email en formato RFC 2822
+            const boundary = 'brazos_boundary_' + Date.now();
+            const emailLines = [
+                `To: ${toEmail}`,
+                `From: Brazos Cleaning Services <brazoscleaningservices@gmail.com>`,
+                `Subject: ${subject}`,
+                `MIME-Version: 1.0`,
+                `Content-Type: multipart/mixed; boundary="${boundary}"`,
+                ``,
+                `--${boundary}`,
+                `Content-Type: text/plain; charset="UTF-8"`,
+                ``,
+                body,
+                ``,
+                `--${boundary}`,
+                `Content-Type: application/pdf; name="Invoice_${invoiceNumber.toString().padStart(4,'0')}_${client.name.replace(/[^a-zA-Z0-9]/g,'_')}.pdf"`,
+                `Content-Transfer-Encoding: base64`,
+                `Content-Disposition: attachment; filename="Invoice_${invoiceNumber.toString().padStart(4,'0')}_${client.name.replace(/[^a-zA-Z0-9]/g,'_')}.pdf"`,
+                ``,
+                base64PDF,
+                `--${boundary}--`
+            ];
+            const rawEmail = emailLines.join('\r\n');
+            const base64Email = btoa(unescape(encodeURIComponent(rawEmail)))
+                .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+            const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.driveToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ raw: base64Email })
+            });
+
+            if (res.ok) {
+                alert(`✅ Factura enviada exitosamente a ${toEmail}`);
+            } else {
+                const err = await res.json();
+                alert(`❌ Error al enviar: ${err.error?.message || 'Error desconocido'}`);
+            }
+        } catch(e) {
+            alert('❌ Error: ' + e.message);
+        }
     }
     
     async savePDF(invoiceNumber, clientName, startDate) {
