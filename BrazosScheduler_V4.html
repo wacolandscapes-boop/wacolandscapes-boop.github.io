@@ -4578,7 +4578,7 @@ class Scheduler {
                 <td style="padding:8px; text-align:center; font-size:0.8rem; color:#555;">${inv.paidAmount ? '$'+parseFloat(inv.paidAmount).toLocaleString('en-US',{minimumFractionDigits:2}) : paidFmt}</td>
                 <td style="padding:8px; text-align:center;">
                     <button onclick="app.openCobroDetalle('${inv.id}')" style="background:#16a085; color:white; border:none; border-radius:5px; padding:5px 10px; cursor:pointer; font-size:0.8rem;">✏️ Actualizar</button>
-                    ${inv.clientEmail ? `<a href="mailto:${inv.clientEmail}?subject=Invoice%20%23${num}%20-%20Brazos%20Cleaning%20Services&body=Dear%20${encodeURIComponent(inv.clientName)}%2C%0A%0APlease%20find%20attached%20your%20invoice%20%23${num}%20for%20the%20period%20${encodeURIComponent(period)}.%0A%0ATotal%3A%20%24${inv.total.toFixed(2)}%0A%0APlease%20remit%20payment%20by%20check%20or%20ACH.%0A%0AThank%20you%2C%0ABrazos%20Cleaning%20Services" style="background:#2563eb; color:white; border:none; border-radius:5px; padding:5px 10px; cursor:pointer; font-size:0.8rem; text-decoration:none; display:inline-block; margin-top:3px;">📧 Email</a>` : '<small style="color:#999;">Sin email</small>'}
+                    ${inv.clientEmail ? `<button onclick="app.sendPendingInvoiceByGmail('${inv.id}')" style="background:#ea4335; color:white; border:none; border-radius:5px; padding:5px 10px; cursor:pointer; font-size:0.8rem; margin-top:3px;">📧 Gmail</button>` : '<small style="color:#999;">Sin email</small>'}
                 </td>
             </tr>`;
         }).join('');
@@ -8217,7 +8217,7 @@ class Scheduler {
                 <div style="padding: 20px; border-bottom: 2px solid #ddd; display: flex; justify-content: space-between; align-items: center;">
                     <div>
                         <h2 style="margin: 0; color: #2c3e50;">📄 Vista Previa - Factura No. ${pdfData.invoiceNumber.toString().padStart(4, '0')}</h2>
-                        ${client.email ? `<div style="margin-top:6px;font-size:0.9rem;color:#555;">📧 <a href="mailto:${client.email}?subject=Invoice%20%23${pdfData.invoiceNumber.toString().padStart(4,'0')}%20-%20Brazos%20Cleaning%20Services&body=Dear%20${encodeURIComponent(client.name)}%2C%0A%0APlease%20find%20attached%20your%20invoice%20for%20services%20rendered.%0A%0ATotal%3A%20%24${pdfData.total ? pdfData.total.toFixed(2) : ''}%0A%0APlease%20remit%20payment%20by%20check%20or%20ACH.%0A%0AThank%20you%2C%0ABrazos%20Cleaning%20Services" style="color:#2563eb;font-weight:700;text-decoration:none;">${client.email}</a></div>` : '<div style="margin-top:6px;font-size:0.85rem;color:#e74c3c;">⚠ Sin email registrado</div>'}
+                        ${client.email ? `<div style="margin-top:6px;font-size:0.9rem;color:#555;">📧 <span style="color:#2563eb;font-weight:700;">${client.email}</span></div>` : '<div style="margin-top:6px;font-size:0.85rem;color:#e74c3c;">⚠ Sin email registrado</div>'}
                     </div>
                     <button onclick="document.getElementById('pdfPreviewModal').remove();" style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">
                         ✕ Cerrar
@@ -8250,6 +8250,30 @@ class Scheduler {
         window.currentPDFData.endDate = endDate;
     }
     
+    async sendPendingInvoiceByGmail(invId) {
+        const inv = this.pendingInvoices.find(p => String(p.id) === String(invId));
+        if (!inv) { alert('Factura no encontrada'); return; }
+        const clientIds = inv.clientIds || [];
+        const client = this.clis.find(c => clientIds.includes(String(c.id)) || clientIds.includes(c.id)) || 
+                       this.clis.find(c => c.name === inv.clientName);
+        if (!client) { alert('Cliente no encontrado'); return; }
+        if (!client.email && !inv.clientEmail) { alert('Sin email registrado'); return; }
+        
+        // Generar PDF
+        const services = this.servs.filter(s => 
+            clientIds.some(id => String(s.cliId) === String(id)) &&
+            s.date >= inv.startDate && s.date <= inv.endDate && !s.cancelled
+        );
+        try {
+            const pdfData = this.createPDFBlob(client, services, inv.startDate, inv.endDate, 'standard', '', false, false, 0);
+            if (!pdfData || !pdfData.blob) { alert('Error al generar PDF'); return; }
+            client.email = client.email || inv.clientEmail;
+            await this.sendInvoiceByGmail(pdfData.blob, client, inv.invoiceNumber || pdfData.invoiceNumber, inv.total || 0, inv.startDate, inv.endDate);
+        } catch(e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
     printPDF(pdfUrl) {
         const printWindow = window.open(pdfUrl);
         printWindow.onload = function() {
@@ -10367,6 +10391,7 @@ class Scheduler {
             client_id: this.CLIENT_ID,
             scope: this.SCOPES,
             prompt: '',
+            login_hint: 'brazoscleaningservices@gmail.com',
             callback: async (response) => {
                 if (response.error) { alert('❌ Error: ' + response.error); return; }
                 this.driveToken = response.access_token;
