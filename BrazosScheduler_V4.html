@@ -8215,7 +8215,10 @@ class Scheduler {
         previewModal.innerHTML = `
             <div style="background: white; width: 90%; height: 90%; border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
                 <div style="padding: 20px; border-bottom: 2px solid #ddd; display: flex; justify-content: space-between; align-items: center;">
-                    <h2 style="margin: 0; color: #2c3e50;">📄 Vista Previa - Factura No. ${pdfData.invoiceNumber.toString().padStart(4, '0')}</h2>
+                    <div>
+                        <h2 style="margin: 0; color: #2c3e50;">📄 Vista Previa - Factura No. ${pdfData.invoiceNumber.toString().padStart(4, '0')}</h2>
+                        ${client.email ? `<div style="margin-top:6px;font-size:0.9rem;color:#555;">📧 <a href="mailto:${client.email}?subject=Invoice%20%23${pdfData.invoiceNumber.toString().padStart(4,'0')}%20-%20Brazos%20Cleaning%20Services&body=Dear%20${encodeURIComponent(client.name)}%2C%0A%0APlease%20find%20attached%20your%20invoice%20for%20services%20rendered.%0A%0ATotal%3A%20%24${pdfData.total ? pdfData.total.toFixed(2) : ''}%0A%0APlease%20remit%20payment%20by%20check%20or%20ACH.%0A%0AThank%20you%2C%0ABrazos%20Cleaning%20Services" style="color:#2563eb;font-weight:700;text-decoration:none;">${client.email}</a></div>` : '<div style="margin-top:6px;font-size:0.85rem;color:#e74c3c;">⚠ Sin email registrado</div>'}
+                    </div>
                     <button onclick="document.getElementById('pdfPreviewModal').remove();" style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">
                         ✕ Cerrar
                     </button>
@@ -8786,7 +8789,8 @@ class Scheduler {
                 blob: doc.output('blob'),
                 invoiceNumber: invoiceNumber,
                 client: client,
-                startDate: startDate
+                startDate: startDate,
+                total: grandTotal_a
             };
         }
         
@@ -8953,7 +8957,8 @@ class Scheduler {
             blob: doc.output('blob'),
             invoiceNumber: invoiceNumber,
             client: client,
-            startDate: startDate
+            startDate: startDate,
+            total: typeof grandTotal !== 'undefined' ? grandTotal : total
         };
     }	
     
