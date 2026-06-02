@@ -4280,7 +4280,7 @@ class Scheduler {
             document.getElementById('btnBackToPending').style.display = 'block';
             
             // Forzar actualización de servicios
-            this.refreshInvServices();
+            try { this.openInvoice(); } catch(e) {}
         }, 200);
     }
     
@@ -8200,10 +8200,10 @@ class Scheduler {
             return;
         }
         // Mostrar preview
-        this.displayPDFPreview(pdfData, client, startDate);
+        this.displayPDFPreview(pdfData, client, startDate, endDate);
     }    
 
-   displayPDFPreview(pdfData, client, startDate) {
+   displayPDFPreview(pdfData, client, startDate, endDate) {
         // Crear URL del PDF
         const pdfUrl = URL.createObjectURL(pdfData.blob);
         
