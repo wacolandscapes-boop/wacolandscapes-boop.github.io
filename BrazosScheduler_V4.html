@@ -7870,6 +7870,10 @@ class Scheduler {
             document.getElementById('logoPreview').style.display = 'block';
             document.getElementById('logoPreviewImg').src = config.logo;
         }
+        if (config.logoSize) {
+            document.getElementById('logoSizeSlider').value = config.logoSize;
+            document.getElementById('logoSizeVal').textContent = config.logoSize + 'mm';
+        }
     }
     
     saveCompanyConfig() {
@@ -7881,7 +7885,8 @@ class Scheduler {
 	    website: document.getElementById('companyWebsite').value,
             logo: document.getElementById('logoPreviewImg').src || '',
             invoiceStartNumber: parseInt(document.getElementById('invoiceStartNumber').value) || 1,
-            taxPercentage: parseFloat(document.getElementById('taxPercentage').value) || 0
+            taxPercentage: parseFloat(document.getElementById('taxPercentage').value) || 0,
+            logoSize: parseInt(document.getElementById('logoSizeSlider').value) || 25
         };
         
         localStorage.setItem('companyConfig', JSON.stringify(config));
@@ -8450,7 +8455,7 @@ class Scheduler {
                     const img = new Image();
                     img.src = companyLogo;
                     const aspectRatio = img.width / img.height;
-                    const logoHeight = 25;
+                    const logoHeight = config.logoSize || 25;
                     const logoWidth = logoHeight * aspectRatio;
                     doc.addImage(companyLogo, 'PNG', 20, 5, logoWidth, logoHeight);
                 } catch (e) {}
@@ -8488,7 +8493,7 @@ class Scheduler {
                     const img = new Image();
                     img.src = companyLogo;
                     const aspectRatio = img.width / img.height;
-                    const logoHeight = 25;
+                    const logoHeight = config.logoSize || 25;
                     const logoWidth = logoHeight * aspectRatio;
                     doc.addImage(companyLogo, 'PNG', 20, 5, logoWidth, logoHeight);
                 } catch (e) {}
@@ -8538,7 +8543,7 @@ class Scheduler {
                     const img = new Image();
                     img.src = companyLogo;
                     const aspectRatio = img.width / img.height;
-                    const logoHeight = 25;
+                    const logoHeight = config.logoSize || 25;
                     const logoWidth = logoHeight * aspectRatio;
                     doc.addImage(companyLogo, 'PNG', 20, 5, logoWidth, logoHeight);
                 } catch (e) {}
@@ -8795,6 +8800,7 @@ class Scheduler {
         doc.text(client.name, 20, yStart + 7);
         if (client.address) doc.text(client.address, 20, yStart + 12);
         if (client.phone) doc.text('Tel: ' + client.phone, 20, yStart + 17);
+        if (client.email) doc.text('Email: ' + client.email, 20, yStart + 22);
         
         doc.setFont(undefined, 'bold');
         doc.setFontSize(10);
@@ -8873,9 +8879,11 @@ class Scheduler {
             doc.setFont(undefined, 'normal');
             doc.setFontSize(9);
             
-            // Calcular precio unitario
-            const unitPrice = parseFloat(client.price) || 0;
-            total = unitPrice * services.length;
+            // Calcular precio unitario según tipo de facturación
+            const rawPrice = parseFloat(client.price) || 0;
+            const isFixedMonthly = client.invoicingType === 'fixed_monthly';
+            const unitPrice = isFixedMonthly ? this.pricePerService(client) : rawPrice;
+            total = isFixedMonthly ? rawPrice : unitPrice * services.length;
             
             // Obtener nombre del mes
             const [startYear, startMonth, startDay] = startDate.split('-');
@@ -8894,8 +8902,8 @@ class Scheduler {
             serviceName += ' - ' + monthName + ' ' + startYear;
             
             doc.text(serviceName, 25, y);
-            doc.text(services.length.toString(), 110, y);
-            doc.text('$' + unitPrice.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), 135, y);
+            doc.text(isFixedMonthly ? '1' : services.length.toString(), 110, y);
+            doc.text('$' + total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), 135, y);
             doc.text('$' + total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), 165, y);
             
             y += 8;
@@ -8995,7 +9003,7 @@ class Scheduler {
                     const img = new Image();
                     img.src = companyLogo;
                     const aspectRatio = img.width / img.height;
-                    const logoHeight = 25;
+                    const logoHeight = config.logoSize || 25;
                     const logoWidth = logoHeight * aspectRatio;
                     doc.addImage(companyLogo, 'PNG', 20, 5, logoWidth, logoHeight);
                 } catch (e) {}
@@ -9036,7 +9044,7 @@ class Scheduler {
                     const img = new Image();
                     img.src = companyLogo;
                     const aspectRatio = img.width / img.height;
-                    const logoHeight = 25;
+                    const logoHeight = config.logoSize || 25;
                     const logoWidth = logoHeight * aspectRatio;
                     doc.addImage(companyLogo, 'PNG', 20, 5, logoWidth, logoHeight);
                 } catch (e) {}
@@ -9089,7 +9097,7 @@ class Scheduler {
                     const img = new Image();
                     img.src = companyLogo;
                     const aspectRatio = img.width / img.height;
-                    const logoHeight = 25;
+                    const logoHeight = config.logoSize || 25;
                     const logoWidth = logoHeight * aspectRatio;
                     doc.addImage(companyLogo, 'PNG', 20, 5, logoWidth, logoHeight);
                 } catch (e) {}
@@ -9275,6 +9283,7 @@ class Scheduler {
         doc.text(client.name, 20, yStart + 7);
         if (client.address) doc.text(client.address, 20, yStart + 12);
         if (client.phone) doc.text('Tel: ' + client.phone, 20, yStart + 17);
+        if (client.email) doc.text('Email: ' + client.email, 20, yStart + 22);
         
         doc.setFont(undefined, 'bold');
         doc.setFontSize(10);
@@ -11292,6 +11301,15 @@ document.addEventListener('click', function(e) {
                     </div>
                     <div id="logoPlaceholder" style="margin-top:12px; text-align:center; color:#ccc; font-size:0.8rem;">
                         Sin logo cargado
+                    </div>
+                    <!-- Control de tamaño del logo -->
+                    <div style="margin-top:12px;">
+                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">📐 Tamaño en factura (alto en mm)</label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input type="range" id="logoSizeSlider" min="10" max="50" value="25" step="1"
+                                style="flex:1;" oninput="document.getElementById('logoSizeVal').textContent=this.value+'mm'">
+                            <span id="logoSizeVal" style="font-size:0.85rem;font-weight:700;color:#27ae60;min-width:40px;">25mm</span>
+                        </div>
                     </div>
                 </div>
             </div>
