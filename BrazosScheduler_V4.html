@@ -1550,7 +1550,7 @@ class Scheduler {
         this.isSyncing = false;
         this.pendingSync = false;
         this.CLIENT_ID = '1032764332702-uvnqg0ccaer5gp2hr12gmniqe38ria1t.apps.googleusercontent.com';
-        this.SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/gmail.send';
+        this.SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
         this.FOLDER_NAME = 'BrazosCleaningApp';
         // Convertir grupos (objeto) a groups (array) para el filtro
         this.groups = Object.keys(this.grupos).map((name, idx) => ({
@@ -2844,6 +2844,7 @@ class Scheduler {
             // Eliminar el original y agregar copia desvinculada de la serie
             this.servs = this.servs.filter(s => String(s.id) !== String(svcId));
             const movedSvc = Object.assign({}, svc, {
+                id: 'svc_moved_' + Date.now(),
                 date: toDate,
                 empId: toGrupo,
                 grupo: toGrupo,
@@ -3197,7 +3198,7 @@ class Scheduler {
         }
         const opcion = confirm("¿Borrar SOLO este servicio?\n\n✅ Aceptar = Solo este\n❌ Cancelar = Ver más opciones");
         if (opcion) {
-            this.servs = this.servs.filter(s => s.id !== this.editing.id);
+            this.servs = this.servs.filter(s => String(s.id) !== String(this.editing.id));
             this.save();
             this.reorderPriorityByTime(document.getElementById('mEmp').value, document.getElementById('mDate').value);
             this.closeModal(); 
@@ -3209,7 +3210,14 @@ class Scheduler {
         } else {
             const borrarSerie = confirm("¿Borrar toda la serie FUTURA?\n(Desde " + dLimit + " en adelante)");
             if (borrarSerie) {
-                this.servs = this.servs.filter(s => !(s.cliId == cid && s.date >= dLimit));
+                const serieId = this.editing.serieId;
+                if (serieId) {
+                    // Borrar solo los de la misma serie
+                    this.servs = this.servs.filter(s => !(s.serieId === serieId && s.date >= dLimit));
+                } else {
+                    // Fallback: borrar por cliId + fecha
+                    this.servs = this.servs.filter(s => !(s.cliId == cid && s.date >= dLimit));
+                }
                 this.save(); 
                 this.closeModal(); 
                 this.render();
