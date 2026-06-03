@@ -2337,7 +2337,7 @@ class Scheduler {
                 const propPart = showPropId && c.propId ? ` - ${c.propId}` : '';
                 const mainLine = `${prioPrefix}${c.name}${propPart}${[c.address, c.city].filter(Boolean).join(', ') ? ' - ' + [c.address, c.city].filter(Boolean).join(', ') : ''}`;
                 const timeLine = (s.timeStart || s.timeEnd)
-                    ? `<div class="ev-time">${this.fmt12(s.timeStart)}${s.timeEnd ? ' - ' + this.fmt12(s.timeEnd) : ''}</div>`
+                    ? `<div class="ev-time">${this.fmt12(s.timeStart)}${s.timeEnd ? ' - ' + this.fmt12(s.timeEnd) : ''}${(() => { if(s.timeStart && s.timeEnd) { const [sh,sm]=s.timeStart.split(':').map(Number); const [eh,em]=s.timeEnd.split(':').map(Number); const d=(eh*60+em)-(sh*60+sm); if(d>0) return ` (${Math.floor(d/60)}h${d%60>0?' '+d%60+'m':''})`; } return ''; })()}</div>`
                     : '';
                 // Leer check-in/check-out — primero _prodReports (memoria), luego localStorage
                 let checkLine = '';
@@ -2368,7 +2368,14 @@ class Scheduler {
                     if (svcRpt && svcRpt.checkin) {
                         const cin = this.fmt12(svcRpt.checkin);
                         const cout = svcRpt.checkout ? this.fmt12(svcRpt.checkout) : '...';
-                        checkLine = `<div class="ev-checkin">▶ ${cin}${svcRpt.checkout ? ' ✓ ' + cout : ''}</div>`;
+                        let durStr = '';
+                        if (svcRpt.checkin && svcRpt.checkout) {
+                            const [sh,sm] = svcRpt.checkin.split(':').map(Number);
+                            const [eh,em] = svcRpt.checkout.split(':').map(Number);
+                            const d = (eh*60+em)-(sh*60+sm);
+                            if (d>0) durStr = ` (${Math.floor(d/60)}h${d%60>0?' '+d%60+'m':''})`;
+                        }
+                        checkLine = `<div class="ev-checkin">▶ ${cin}${svcRpt.checkout ? ' ✓ ' + cout + durStr : ''}</div>`;
                     }
                 } catch(e) {}
                 div.innerHTML = `<div class="ev-prop">${mainLine}</div>${timeLine}${checkLine}`;
@@ -7735,7 +7742,7 @@ class Scheduler {
                         const showPropId = (client.type === 'airbnb' || client.type === 'unico' || client.type === 'construccion');
                         
                         const timeStr = (s.timeStart || s.timeEnd)
-                            ? ` ${this.fmt12(s.timeStart)}${s.timeEnd ? ' - ' + this.fmt12(s.timeEnd) : ''}`
+                            ? ` ${this.fmt12(s.timeStart)}${s.timeEnd ? ' - ' + this.fmt12(s.timeEnd) : ''}${(() => { if(s.timeStart && s.timeEnd) { const [sh,sm]=s.timeStart.split(':').map(Number); const [eh,em]=s.timeEnd.split(':').map(Number); const d=(eh*60+em)-(sh*60+sm); if(d>0) return ` (${Math.floor(d/60)}h${d%60>0?' '+d%60+'m':''})`; } return ''; })()}`
                             : '';
                         if (showPropId) {
                             text += `   ${priority}${client.name}: ${client.propId}${timeStr}\n`;
