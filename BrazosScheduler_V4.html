@@ -7796,6 +7796,7 @@ class Scheduler {
         }
         
         modal.style.display = 'block';
+        modal.style.pointerEvents = 'all';
         
         // Llenar select de clientes
         const select = document.getElementById('invoiceClient');
@@ -8098,8 +8099,17 @@ class Scheduler {
     }
     
     closeInvoice() {
-        document.getElementById('invoiceModal').style.display = 'none';
-        this.fromPending = false; // Limpiar flag
+        const modal = document.getElementById('invoiceModal');
+        modal.style.display = 'none';
+        modal.style.pointerEvents = 'none';
+        const content = modal.querySelector('.modal-content');
+        if (content) {
+            content.dataset.minimized = 'false';
+            content.style.cssText = 'max-width: 800px;';
+        }
+        const btn = document.getElementById('btnMinimizeInvoice');
+        if (btn) btn.textContent = '—';
+        this.fromPending = false;
     }
 
     toggleMinimizeInvoice() {
