@@ -10,10 +10,6 @@
     <script>
         emailjs.init("6UBPmJpYjIucIeteX");
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-    <script>
-        emailjs.init("6UBPmJpYjIucIeteX");
-    </script>
     <style>
         :root { 
             --primary: #87CEEB; --accent: #2E8CE0; --success: #27ae60; --danger: #e74c3c; --bg: #F0F6FF; --border: #C5D8FF; 
@@ -2845,12 +2841,15 @@ class Scheduler {
         const fromGrupo = svc.empId;
 
         if (mode === 'one') {
-            // Eliminar original y re-insertar para evitar duplicados
+            // Eliminar el original y agregar copia desvinculada de la serie
             this.servs = this.servs.filter(s => String(s.id) !== String(svcId));
-            svc.date = toDate;
-            svc.empId = toGrupo;
-            svc.grupo = toGrupo;
-            this.servs.push(svc);
+            const movedSvc = Object.assign({}, svc, {
+                date: toDate,
+                empId: toGrupo,
+                grupo: toGrupo,
+                serieId: 'serie_moved_' + Date.now()
+            });
+            this.servs.push(movedSvc);
         } else if (mode === 'future') {
             // Mover este y todos los futuros — por serieId o por mismo cliente+grupo
             const diffDays = (new Date(toDate) - new Date(fromDate)) / 86400000;
