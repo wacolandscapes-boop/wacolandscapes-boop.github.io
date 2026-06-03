@@ -6,6 +6,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://accounts.google.com/gsi/client" async></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <script>
+        emailjs.init("6UBPmJpYjIucIeteX");
+    </script>
     <style>
         :root { 
             --primary: #87CEEB; --accent: #2E8CE0; --success: #27ae60; --danger: #e74c3c; --bg: #F0F6FF; --border: #C5D8FF; 
@@ -8282,16 +8286,9 @@ class Scheduler {
     }
 
     async sendInvoiceByGmail(pdfBlob, client, invoiceNumber, total, startDate, endDate) {
-        if (!this.driveToken) {
-            alert('Conecta Drive/Gmail primero (botón ☁️)');
-            return;
-        }
         try {
             const toEmail = client.email;
             if (!toEmail) { alert('Este cliente no tiene email registrado.'); return; }
-
-            const subject = `Invoice #${invoiceNumber.toString().padStart(4,'0')} - Brazos Cleaning Services`;
-            const body = `Dear ${client.name},\n\nPlease find attached your invoice #${invoiceNumber.toString().padStart(4,'0')} for the period ${startDate} to ${endDate}.\n\nTotal: $${total.toFixed(2)}\n\nPlease remit payment by check or ACH.\n\nPayment Instructions:\n- Check payable to: Brazos Cleaning Services\n- ACH/Transfer: Please contact us for banking details\n\nThank you for your business!\n\nBrazos Cleaning Services\nbrazoscleaningservices@gmail.com\n(254) 412-4508`;
 
             // Convertir PDF blob a base64
             const arrayBuffer = await pdfBlob.arrayBuffer();
@@ -8300,49 +8297,22 @@ class Scheduler {
             uint8Array.forEach(b => binary += String.fromCharCode(b));
             const base64PDF = btoa(binary);
 
-            // Construir email en formato RFC 2822
-            const boundary = 'brazos_boundary_' + Date.now();
-            const emailLines = [
-                `To: ${toEmail}`,
-                `From: Brazos Cleaning Services <brazoscleaningservices@gmail.com>`,
-                `Subject: ${subject}`,
-                `MIME-Version: 1.0`,
-                `Content-Type: multipart/mixed; boundary="${boundary}"`,
-                ``,
-                `--${boundary}`,
-                `Content-Type: text/plain; charset="UTF-8"`,
-                ``,
-                body,
-                ``,
-                `--${boundary}`,
-                `Content-Type: application/pdf; name="Invoice_${invoiceNumber.toString().padStart(4,'0')}_${client.name.replace(/[^a-zA-Z0-9]/g,'_')}.pdf"`,
-                `Content-Transfer-Encoding: base64`,
-                `Content-Disposition: attachment; filename="Invoice_${invoiceNumber.toString().padStart(4,'0')}_${client.name.replace(/[^a-zA-Z0-9]/g,'_')}.pdf"`,
-                ``,
-                base64PDF,
-                `--${boundary}--`
-            ];
-            const rawEmail = emailLines.join('\r\n');
-            const base64Email = btoa(unescape(encodeURIComponent(rawEmail)))
-                .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            const invoiceNum = invoiceNumber.toString().padStart(4,'0');
+            const fileName = `Invoice_${invoiceNum}_${client.name.replace(/[^a-zA-Z0-9]/g,'_')}.pdf`;
 
-            const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.driveToken}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ raw: base64Email })
-            });
+            const templateParams = {
+                client_name: client.name,
+                invoice_number: invoiceNum,
+                to_email: toEmail,
+                pdf_content: base64PDF,
+                pdf_name: fileName
+            };
 
-            if (res.ok) {
-                alert(`✅ Factura enviada exitosamente a ${toEmail}`);
-            } else {
-                const err = await res.json();
-                alert(`❌ Error al enviar: ${err.error?.message || 'Error desconocido'}`);
-            }
+            await emailjs.send('service_mamjtia', 'template_ygaa3xa', templateParams);
+            alert(`✅ Factura enviada exitosamente a ${toEmail}`);
+
         } catch(e) {
-            alert('❌ Error: ' + e.message);
+            alert('❌ Error al enviar: ' + (e?.text || e.message || 'Error desconocido'));
         }
     }
     
