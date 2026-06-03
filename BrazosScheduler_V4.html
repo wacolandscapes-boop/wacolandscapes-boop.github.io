@@ -4501,7 +4501,11 @@ class Scheduler {
                 <td style="text-align: right;"><b>$${inv.total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</b></td>
                 <td><span style="background:${statusColor}; color:white; padding:3px 8px; border-radius:4px; font-size:0.7rem; white-space:nowrap;">${statusLabel}</span></td>
                 <td>
-                    ${!isCancelled ? `<button onclick="app.regenerateInvoice(${index})" class="btn" style="background: #1A4FCC; color: white; padding: 5px 10px; font-size: 0.8rem;">🔄 Regenerar</button>` : '<span style="color:#95a5a6;font-size:0.8rem">—</span>'}
+                    ${!isCancelled ? `
+                        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                            <button onclick="app.regenerateInvoice(${index})" class="btn" style="background: #1A4FCC; color: white; padding: 5px 8px; font-size: 0.75rem;">🔄 Regenerar</button>
+                            <button onclick="app.returnInvoiceToPending(${index})" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">↩ Pendientes</button>
+                        </div>` : '<span style="color:#95a5a6;font-size:0.8rem">—</span>'}
                 </td>
             </tr>`;
         });
@@ -4669,6 +4673,51 @@ class Scheduler {
         a.href = URL.createObjectURL(blob);
         a.download = `cobros_${new Date().toISOString().split('T')[0]}.csv`;
         a.click();
+    }
+
+    returnInvoiceToPending(index) {
+        const start = document.getElementById('genInvStart').value;
+        const end = document.getElementById('genInvEnd').value;
+        const clientFilter = document.getElementById('genInvClient').value;
+
+        const filtered = this.generatedInvoices.filter(inv => {
+            if (start && inv.generatedDate < start) return false;
+            if (end && inv.generatedDate > end) return false;
+            if (clientFilter !== 'all' && inv.clientName !== clientFilter) return false;
+            if (inv.status === 'cancelada') return false;
+            return true;
+        }).sort((a, b) => b.generatedDate.localeCompare(a.generatedDate));
+
+        const invoice = filtered[index];
+        if (!invoice) return;
+
+        if (!confirm(`¿Regresar la factura #${invoice.invoiceNumber.toString().padStart(4,'0')} de ${invoice.clientName} a Pendientes?`)) return;
+
+        // Remover de generadas
+        const realIdx = this.generatedInvoices.findIndex(i => i.id === invoice.id);
+        if (realIdx >= 0) this.generatedInvoices.splice(realIdx, 1);
+
+        // Agregar a pendingInvoices si no existe ya
+        if (!this.pendingInvoices) this.pendingInvoices = [];
+        const alreadyPending = this.pendingInvoices.some(p => p.clientName === invoice.clientName && p.startDate === invoice.startDate);
+        if (!alreadyPending) {
+            this.pendingInvoices.push({
+                id: Date.now(),
+                clientName: invoice.clientName,
+                clientIds: invoice.clientIds || [],
+                type: invoice.type,
+                serviceType: invoice.serviceType || '',
+                startDate: invoice.startDate,
+                endDate: invoice.endDate,
+                serviceCount: invoice.serviceCount,
+                total: invoice.total,
+                periodKey: invoice.periodKey || ''
+            });
+        }
+
+        this.save();
+        this.closeGeneratedInvoices();
+        alert(`✅ Factura de ${invoice.clientName} regresada a Pendientes`);
     }
 
     regenerateInvoice(index) {
