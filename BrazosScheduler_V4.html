@@ -10627,7 +10627,7 @@ class Scheduler {
                 { headers: { Authorization: `Bearer ${this.driveToken}` } }
             );
             const data = await fileRes.json();
-            if (data.exportType !== 'anaCS_sync') return;
+            if (data.exportType !== 'anaCS_sync' && data.exportType !== 'brazosCS_sync') return;
 
             // Comparar timestamps — gana el más reciente
             const driveTime  = data.lastSavedAt ? new Date(data.lastSavedAt).getTime() : 0;
