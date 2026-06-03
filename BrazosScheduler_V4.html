@@ -4504,7 +4504,7 @@ class Scheduler {
                     ${!isCancelled ? `
                         <div style="display:flex;gap:4px;flex-wrap:wrap;">
                             <button onclick="app.regenerateInvoice(${index})" class="btn" style="background: #1A4FCC; color: white; padding: 5px 8px; font-size: 0.75rem;">🔄 Regenerar</button>
-                            <button onclick="app.returnInvoiceToPending(${index})" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">↩ Pendientes</button>
+                            <button onclick="app.openInvoiceForEdit(${index})" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
                         </div>` : '<span style="color:#95a5a6;font-size:0.8rem">—</span>'}
                 </td>
             </tr>`;
@@ -4673,6 +4673,44 @@ class Scheduler {
         a.href = URL.createObjectURL(blob);
         a.download = `cobros_${new Date().toISOString().split('T')[0]}.csv`;
         a.click();
+    }
+
+    openInvoiceForEdit(index) {
+        const start = document.getElementById('genInvStart').value;
+        const end = document.getElementById('genInvEnd').value;
+        const clientFilter = document.getElementById('genInvClient').value;
+
+        const filtered = this.generatedInvoices.filter(inv => {
+            if (start && inv.generatedDate < start) return false;
+            if (end && inv.generatedDate > end) return false;
+            if (clientFilter !== 'all' && inv.clientName !== clientFilter) return false;
+            if (inv.status === 'cancelada') return false;
+            return true;
+        }).sort((a, b) => b.generatedDate.localeCompare(a.generatedDate));
+
+        const invoice = filtered[index];
+        if (!invoice) return;
+
+        // Cerrar modal de generadas
+        this.closeGeneratedInvoices();
+
+        // Abrir modal de Facturación
+        this.openInvoice();
+
+        // Cargar datos de la factura
+        setTimeout(() => {
+            const clientSel = document.getElementById('invoiceClient');
+            if (clientSel) {
+                // Buscar el cliente por nombre
+                const client = this.clis.find(c => c.name === invoice.clientName);
+                if (client) {
+                    clientSel.value = client.id;
+                    this.onInvoiceClientChange && this.onInvoiceClientChange();
+                }
+            }
+            if (document.getElementById('invoiceStart')) document.getElementById('invoiceStart').value = invoice.startDate;
+            if (document.getElementById('invoiceEnd')) document.getElementById('invoiceEnd').value = invoice.endDate;
+        }, 300);
     }
 
     returnInvoiceToPending(index) {
