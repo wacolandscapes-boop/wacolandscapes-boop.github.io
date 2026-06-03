@@ -8095,6 +8095,35 @@ class Scheduler {
         this.fromPending = false; // Limpiar flag
     }
 
+    toggleMinimizeInvoice() {
+        const modal = document.getElementById('invoiceModal');
+        const content = modal.querySelector('.modal-content');
+        const btn = document.getElementById('btnMinimizeInvoice');
+        const isMinimized = content.dataset.minimized === 'true';
+        if (isMinimized) {
+            // Restaurar
+            content.dataset.minimized = 'false';
+            content.style.cssText = 'max-width: 800px;';
+            btn.textContent = '—';
+            btn.title = 'Minimizar';
+            modal.style.alignItems = 'center';
+            modal.style.justifyContent = 'center';
+            modal.style.background = 'rgba(0,0,0,0.6)';
+            modal.style.pointerEvents = 'all';
+        } else {
+            // Minimizar — barra flotante en la parte inferior
+            content.dataset.minimized = 'true';
+            content.style.cssText = 'max-width:100%; width:100%; position:fixed; bottom:0; left:0; right:0; margin:0; border-radius:0; max-height:50px; overflow:hidden;';
+            btn.textContent = '▲';
+            btn.title = 'Restaurar';
+            modal.style.alignItems = 'flex-end';
+            modal.style.justifyContent = 'flex-start';
+            modal.style.background = 'transparent';
+            modal.style.pointerEvents = 'none';
+            content.style.pointerEvents = 'all';
+        }
+    }
+
 	setPeriod(type) {
         const today = new Date();
         let startDate, endDate;
@@ -11176,6 +11205,7 @@ document.addEventListener('click', function(e) {
     <div class="modal-content" style="max-width: 800px;">
         <div style="position: relative; background: #e67e22; color: white; padding: 10px 15px; margin: -20px -20px 15px -20px; border-radius: 8px 8px 0 0;">
             <button onclick="app.closeInvoice()" style="position: absolute; top: 8px; right: 8px; background: #e74c3c; color: white; border: none; width: 30px; height: 30px; border-radius: 50%; font-size: 1.1rem; font-weight: bold; cursor: pointer; line-height: 1; z-index: 10;">✕</button>
+            <button onclick="app.toggleMinimizeInvoice()" id="btnMinimizeInvoice" title="Minimizar" style="position: absolute; top: 8px; right: 45px; background: rgba(255,255,255,0.25); color: white; border: none; width: 30px; height: 30px; border-radius: 50%; font-size: 1rem; font-weight: bold; cursor: pointer; line-height: 1; z-index: 10;">—</button>
             
             <div style="display: flex; justify-content: space-between; align-items: center; padding-right: 45px;">
                 <h2 style="margin: 0; font-size: 1.3rem;">💼 Facturación</h2>
