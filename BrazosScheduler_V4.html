@@ -2845,9 +2845,12 @@ class Scheduler {
         const fromGrupo = svc.empId;
 
         if (mode === 'one') {
+            // Eliminar original y re-insertar para evitar duplicados
+            this.servs = this.servs.filter(s => String(s.id) !== String(svcId));
             svc.date = toDate;
             svc.empId = toGrupo;
             svc.grupo = toGrupo;
+            this.servs.push(svc);
         } else if (mode === 'future') {
             // Mover este y todos los futuros — por serieId o por mismo cliente+grupo
             const diffDays = (new Date(toDate) - new Date(fromDate)) / 86400000;
