@@ -4444,43 +4444,52 @@ class Scheduler {
         const start = document.getElementById('genInvStart').value;
         const end = document.getElementById('genInvEnd').value;
         const clientFilter = document.getElementById('genInvClient').value;
-        const typeFilter = document.getElementById('genInvType').value;
+        const statusFilter = document.getElementById('genInvStatus')?.value || 'all';
+        const periodFilter = document.getElementById('genInvPeriod')?.value || 'all';
         
         if (!this.generatedInvoices) {
             this.generatedInvoices = [];
         }
 
-        // Filtrar — ocultar canceladas por defecto, mostrarlas solo si se filtra por 'cancelada'
         const filtered = this.generatedInvoices.filter(inv => {
             if (start && inv.generatedDate < start) return false;
             if (end && inv.generatedDate > end) return false;
             if (clientFilter !== 'all' && inv.clientName !== clientFilter) return false;
-            if (typeFilter !== 'all' && typeFilter !== 'cancelada' && inv.type !== typeFilter) return false;
-            if (typeFilter === 'cancelada') return inv.status === 'cancelada';
-            if (inv.status === 'cancelada') return false;
+            if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
+            if (statusFilter === 'all' && inv.status === 'cancelada') return false;
+            if (periodFilter !== 'all') {
+                const invStart = inv.startDate || '';
+                const invEnd = inv.endDate || '';
+                if (!invStart.startsWith(periodFilter) && !invEnd.startsWith(periodFilter)) return false;
+            }
             return true;
         });
         
-        // Ordenar por fecha descendente
         filtered.sort((a, b) => b.generatedDate.localeCompare(a.generatedDate));
         
-        // Renderizar tabla
+        const statusColors = { pendiente:'#e67e22', enviada:'#2980b9', pagada:'#27ae60', vencida:'#e74c3c', cancelada:'#95a5a6' };
+        const statusLabels = { pendiente:'⏳ Pendiente', enviada:'📧 Enviada', pagada:'✅ Pagada', vencida:'🔴 Vencida', cancelada:'🚫 Cancelada' };
+
         let html = '';
         let total = 0;
+        let sentCount = 0;
+        let paidCount = 0;
         
         filtered.forEach((inv, index) => {
             total += inv.total;
+            if (inv.status === 'enviada') sentCount++;
+            if (inv.status === 'pagada') paidCount++;
             
             const [genYear, genMonth, genDay] = inv.generatedDate.split('-');
             const genFormatted = `${genMonth}/${genDay}/${genYear}`;
-            
             const [startYear, startMonth, startDay] = inv.startDate.split('-');
             const [endYear, endMonth, endDay] = inv.endDate.split('-');
             const periodFormatted = `${startMonth}/${startDay}/${startYear} - ${endMonth}/${endDay}/${endYear}`;
-            
             const invoiceNumberFormatted = inv.invoiceNumber.toString().padStart(4, '0');
             const isCancelled = inv.status === 'cancelada';
             const rowStyle = isCancelled ? 'opacity:0.5;text-decoration:line-through;background:#f8f8f8;' : '';
+            const statusColor = statusColors[inv.status] || '#95a5a6';
+            const statusLabel = statusLabels[inv.status] || inv.status;
 
             html += `<tr style="${rowStyle}">
                 <td><strong>#${invoiceNumberFormatted}</strong></td>
@@ -4490,6 +4499,7 @@ class Scheduler {
                 <td><span style="background:${isCancelled?'#95a5a6':'var(--color-'+inv.type+')'}; color:white; padding:3px 8px; border-radius:4px; font-size:0.7rem">${isCancelled?'CANCELADA':inv.type.toUpperCase()}</span></td>
                 <td style="text-align: center;">${inv.serviceCount}</td>
                 <td style="text-align: right;"><b>$${inv.total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</b></td>
+                <td><span style="background:${statusColor}; color:white; padding:3px 8px; border-radius:4px; font-size:0.7rem; white-space:nowrap;">${statusLabel}</span></td>
                 <td>
                     ${!isCancelled ? `<button onclick="app.regenerateInvoice(${index})" class="btn" style="background: #1A4FCC; color: white; padding: 5px 10px; font-size: 0.8rem;">🔄 Regenerar</button>` : '<span style="color:#95a5a6;font-size:0.8rem">—</span>'}
                 </td>
@@ -4497,13 +4507,16 @@ class Scheduler {
         });
         
         if (filtered.length === 0) {
-            html = `<tr><td colspan="8" style="text-align: center; padding: 40px; color: #95a5a6;">
+            html = `<tr><td colspan="9" style="text-align: center; padding: 40px; color: #95a5a6;">
                 No hay facturas generadas en este período
             </td></tr>`;
         }
         
         document.getElementById('genInvBody').innerHTML = html;
         document.getElementById('genInvCount').innerText = filtered.length;
+        const badge = document.getElementById('genInvBadge'); if(badge) badge.innerText = filtered.length + ' facturas';
+        const sc = document.getElementById('genInvSentCount'); if(sc) sc.innerText = sentCount;
+        const pc = document.getElementById('genInvPaidCount'); if(pc) pc.innerText = paidCount;
         document.getElementById('genInvTotal').innerText = '$' + total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
     }
     
@@ -4662,25 +4675,37 @@ class Scheduler {
         const start = document.getElementById('genInvStart').value;
         const end = document.getElementById('genInvEnd').value;
         const clientFilter = document.getElementById('genInvClient').value;
-        const typeFilter = document.getElementById('genInvType').value;
         
-        // Obtener la factura filtrada
         const filtered = this.generatedInvoices.filter(inv => {
             if (start && inv.generatedDate < start) return false;
             if (end && inv.generatedDate > end) return false;
             if (clientFilter !== 'all' && inv.clientName !== clientFilter) return false;
-            if (typeFilter !== 'all' && inv.type !== typeFilter) return false;
+            if (inv.status === 'cancelada') return false;
             return true;
         }).sort((a, b) => b.generatedDate.localeCompare(a.generatedDate));
         
         const invoice = filtered[index];
         if (!invoice) return;
-        
-        if (!confirm(`¿Regenerar factura #${invoice.invoiceNumber.toString().padStart(4, '0')} de ${invoice.clientName}?`)) {
-            return;
-        }
-        
-        alert(`✅ Factura #${invoice.invoiceNumber.toString().padStart(4, '0')} regenerada\n\n(En la versión completa esto generará el PDF con el mismo número de factura)`);
+
+        // Buscar el cliente
+        const client = this.clis.find(c => c.name === invoice.clientName) ||
+                       this.clis.find(c => invoice.clientName && invoice.clientName.startsWith(c.name));
+        if (!client) { alert('Cliente no encontrado'); return; }
+
+        // Obtener servicios del período
+        const services = this.servs.filter(s => {
+            if (String(s.cliId) !== String(client.id)) return false;
+            if (s.date < invoice.startDate || s.date > invoice.endDate) return false;
+            if (s.cancelled) return false;
+            return true;
+        });
+
+        // Generar PDF con el mismo número de factura
+        const pdfData = this.createPDFBlob(client, services, invoice.startDate, invoice.endDate, 'standard', '', false, false, invoice.invoiceNumber);
+        if (!pdfData || !pdfData.blob) { alert('Error al generar PDF'); return; }
+
+        window.currentPDFData = { ...pdfData, client, blob: pdfData.blob };
+        this.displayPDFPreview(pdfData, client, invoice.startDate, invoice.endDate);
     }
 
 
@@ -11571,25 +11596,38 @@ document.addEventListener('click', function(e) {
 <!-- Modal Facturas Generadas -->
 <div id="generatedInvoicesModal" class="modal">
     <div class="modal-content" style="width: 95%; max-width: none;">
-        <h2 style="background: #16a085; color: white; padding: 15px 20px; margin: -20px -20px 20px -20px; border-radius: 8px 8px 0 0;">
+        <h2 style="background: #16a085; color: white; padding: 15px 20px; margin: -20px -20px 20px -20px; border-radius: 8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;">
             📑 Historial de Facturas Generadas
+            <span id="genInvBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.9rem;">0 facturas</span>
         </h2>
         
         <!-- Filtros -->
         <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px">
-            <div style="display:grid; grid-template-columns: 150px 150px 1fr 200px; gap:15px">
-                <div><label>Desde</label><input type="date" id="genInvStart" onchange="app.refreshGeneratedInvoices()"></div>
-                <div><label>Hasta</label><input type="date" id="genInvEnd" onchange="app.refreshGeneratedInvoices()"></div>
-                <div><label>Cliente</label><select id="genInvClient" onchange="app.refreshGeneratedInvoices()"></select></div>
-                <div><label>Tipo</label>
-                    <select id="genInvType" onchange="app.refreshGeneratedInvoices()">
+            <div style="display:grid; grid-template-columns: 150px 150px 1fr 160px 160px; gap:10px; flex-wrap:wrap;">
+                <div><label style="font-size:0.8rem;font-weight:600;">Generada Desde</label><input type="date" id="genInvStart" onchange="app.refreshGeneratedInvoices()"></div>
+                <div><label style="font-size:0.8rem;font-weight:600;">Generada Hasta</label><input type="date" id="genInvEnd" onchange="app.refreshGeneratedInvoices()"></div>
+                <div><label style="font-size:0.8rem;font-weight:600;">Cliente</label><select id="genInvClient" onchange="app.refreshGeneratedInvoices()" style="width:100%;padding:6px;"></select></div>
+                <div><label style="font-size:0.8rem;font-weight:600;">Status</label>
+                    <select id="genInvStatus" onchange="app.refreshGeneratedInvoices()" style="width:100%;padding:6px;">
                         <option value="all">Todos</option>
-                        <option value="mensual">Mensual</option>
-                        <option value="cada3semanas">Cada 3 Semanas</option>
-                        <option value="quincenal">Quincenal</option>
-                        <option value="semanal">Semanal</option>
-                        <option value="airbnb">AirBnB</option>
-                        <option value="cancelada">🚫 Canceladas</option>
+                        <option value="pendiente">⏳ Pendiente</option>
+                        <option value="enviada">📧 Enviada</option>
+                        <option value="pagada">✅ Pagada</option>
+                        <option value="vencida">🔴 Vencida</option>
+                        <option value="cancelada">🚫 Cancelada</option>
+                    </select>
+                </div>
+                <div><label style="font-size:0.8rem;font-weight:600;">Período (mes)</label>
+                    <select id="genInvPeriod" onchange="app.refreshGeneratedInvoices()" style="width:100%;padding:6px;">
+                        <option value="all">Todos</option>
+                        <option value="2026-05">Mayo 2026</option>
+                        <option value="2026-04">Abril 2026</option>
+                        <option value="2026-03">Marzo 2026</option>
+                        <option value="2026-02">Febrero 2026</option>
+                        <option value="2026-01">Enero 2026</option>
+                        <option value="2025-12">Dic 2025</option>
+                        <option value="2025-11">Nov 2025</option>
+                        <option value="2025-10">Oct 2025</option>
                     </select>
                 </div>
             </div>
@@ -11607,6 +11645,7 @@ document.addEventListener('click', function(e) {
                         <th>Tipo</th>
                         <th>Servicios</th>
                         <th style="text-align: right;">Total</th>
+                        <th>Status</th>
                         <th>Acciones</th>
                     </tr>
                 </thead>
@@ -11616,12 +11655,23 @@ document.addEventListener('click', function(e) {
         
         <!-- Totales -->
         <div style="margin-top: 20px; background: #f8f9fa; padding: 20px; border-radius: 8px;">
-            <div style="display: grid; grid-template-columns: auto 1fr; gap: 15px; align-items: center;">
-                <div style="font-size: 0.85rem; color: #666; font-weight: bold;">FACTURAS:</div>
-                <div id="genInvCount" style="font-size: 1.3rem; font-weight: 900; color: #16a085; text-align: right; min-width: 150px;">0</div>
-                
-                <div style="font-size: 0.85rem; color: #666; font-weight: bold; padding-top: 10px; border-top: 1px solid #ddd;">TOTAL:</div>
-                <div id="genInvTotal" style="font-size: 1.6rem; font-weight: 900; color: #16a085; text-align: right; padding-top: 10px; border-top: 1px solid #ddd; min-width: 150px;">$0.00</div>
+            <div style="display: grid; grid-template-columns: auto auto auto 1fr; gap: 15px; align-items: center;">
+                <div style="text-align:center; background:#16a085; color:white; border-radius:8px; padding:10px 20px;">
+                    <div style="font-size:0.75rem;opacity:0.8;">FACTURAS</div>
+                    <div id="genInvCount" style="font-size:1.5rem;font-weight:900;">0</div>
+                </div>
+                <div style="text-align:center; background:#e67e22; color:white; border-radius:8px; padding:10px 20px;">
+                    <div style="font-size:0.75rem;opacity:0.8;">ENVIADAS</div>
+                    <div id="genInvSentCount" style="font-size:1.5rem;font-weight:900;">0</div>
+                </div>
+                <div style="text-align:center; background:#27ae60; color:white; border-radius:8px; padding:10px 20px;">
+                    <div style="font-size:0.75rem;opacity:0.8;">PAGADAS</div>
+                    <div id="genInvPaidCount" style="font-size:1.5rem;font-weight:900;">0</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:0.85rem;color:#666;font-weight:bold;">TOTAL:</div>
+                    <div id="genInvTotal" style="font-size:1.6rem;font-weight:900;color:#16a085;">$0.00</div>
+                </div>
             </div>
         </div>
         
