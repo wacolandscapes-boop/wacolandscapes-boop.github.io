@@ -10,6 +10,10 @@
     <script>
         emailjs.init("6UBPmJpYjIucIeteX");
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <script>
+        emailjs.init("6UBPmJpYjIucIeteX");
+    </script>
     <style>
         :root { 
             --primary: #87CEEB; --accent: #2E8CE0; --success: #27ae60; --danger: #e74c3c; --bg: #F0F6FF; --border: #C5D8FF; 
@@ -3296,8 +3300,9 @@ class Scheduler {
             serieId: this.editing ? (this.editing.serieId || null) : null
         };
         if(this.editing) {
-            const _editIdx = this.servs.findIndex(x=>String(x.id)===String(this.editing.id));
-            if(_editIdx >= 0) this.servs[_editIdx] = data;
+            // Eliminar el original primero para evitar duplicados
+            this.servs = this.servs.filter(x => String(x.id) !== String(this.editing.id));
+            this.servs.push(data);
             // Aplicar prioridad a toda la serie futura si se seleccionó
             const prioApply = document.querySelector('input[name="priorityApply"]:checked');
             if(prioApply && prioApply.value === 'serie' && data.priority) {
@@ -3410,13 +3415,17 @@ class Scheduler {
             const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
             if (diffDays !== 0) {
                 this.servs.forEach(sv => {
-                    if (String(sv.cliId) === String(data.cliId) && sv.id !== data.id && sv.date > this.editing.date) {
+                    // Usar serieId si existe, si no usar cliId+empId para identificar la serie
+                    const isSameSerie = this.editing.serieId
+                        ? sv.serieId === this.editing.serieId
+                        : (String(sv.cliId) === String(data.cliId) && sv.empId === this.editing.empId);
+                    if (isSameSerie && sv.id !== data.id && sv.date > this.editing.date) {
                         const d = new Date(sv.date + 'T12:00:00');
                         d.setDate(d.getDate() + diffDays);
                         sv.date = d.toLocaleDateString('en-CA');
                     }
                 });
-                alert(`✅ Serie recorrida ${diffDays > 0 ? '+' : ''}${diffDays} días en ${this.servs.filter(sv => String(sv.cliId) === String(data.cliId) && sv.date >= data.date).length} servicios futuros.`);
+                alert(`✅ Serie recorrida ${diffDays > 0 ? '+' : ''}${diffDays} días en ${this.servs.filter(sv => (this.editing.serieId ? sv.serieId === this.editing.serieId : String(sv.cliId) === String(data.cliId)) && sv.date >= data.date).length} servicios futuros.`);
             }
         }
 
