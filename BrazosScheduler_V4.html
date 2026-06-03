@@ -10391,7 +10391,6 @@ class Scheduler {
             client_id: this.CLIENT_ID,
             scope: this.SCOPES,
             prompt: '',
-            login_hint: 'brazoscleaningservices@gmail.com',
             callback: async (response) => {
                 if (response.error) { alert('❌ Error: ' + response.error); return; }
                 this.driveToken = response.access_token;
