@@ -9623,7 +9623,7 @@ class Scheduler {
                 if (y_b>230) { doc.addPage(); y_b=20; }
             });
 
-            if (y_b<195) y_b=195;
+            if (y_b<170) y_b=170;
 
             // Totales - derecha
             doc.setDrawColor(120,120,120); doc.setLineWidth(0.3);
@@ -9645,30 +9645,25 @@ class Scheduler {
             doc.text('TOTAL AMOUNT',tX+2,y_b+32);
             doc.text('$'+(total_b+taxAmt_b).toFixed(2),tX+40,y_b+32);
 
-            // Payment Details - izquierda
-            doc.setFont(undefined,'normal'); doc.setFontSize(8.5);
-            doc.rect(18,y_b+2,90,30);
-            doc.setFont(undefined,'bold'); doc.text('Payment Details:', 20, y_b+10);
-            doc.setFont(undefined,'normal'); doc.text('MAKE CHECKS PAYABLE TO:', 20, y_b+17);
-            doc.setFont(undefined,'bold'); doc.text(companyName, 20, y_b+24);
+            // Payment Details - izquierda (mismo renglón que totales)
+            doc.setDrawColor(44, 62, 80);
+            doc.setFillColor(44, 62, 80);
+            doc.rect(18, y_b+2, 90, 33, 'FD');
+            doc.setFont(undefined,'bold'); doc.setFontSize(8.5);
+            doc.setTextColor(255,255,255);
+            doc.text('PAYMENT OPTIONS:', 20, y_b+9);
+            doc.setFont(undefined,'normal'); doc.setFontSize(8);
+            doc.setTextColor(220,220,220);
+            doc.text('• Check payable to:', 20, y_b+16);
+            doc.setFont(undefined,'bold');
+            doc.text('"Brazos Cleaning Services"', 20, y_b+22);
+            doc.setFont(undefined,'normal');
+            doc.text('• Mail to: P.O Box 7543', 20, y_b+28);
+            doc.text('  Waco, TX. 76714', 20, y_b+33);
 
             // Thank you footer
             doc.setFont(undefined,'bold'); doc.setFontSize(10); doc.setTextColor(60,60,60);
             doc.text('THANK YOU FOR YOUR BUSINESS!', 105, y_b+44, { align:'center' });
-
-            // ── PAYMENT OPTIONS NOTE ──
-            const noteYb = y_b + 50;
-            doc.setDrawColor(44, 62, 80);
-            doc.setFillColor(44, 62, 80);
-            doc.roundedRect(18, noteYb, 174, 20, 2, 2, 'FD');
-            doc.setFontSize(8.5);
-            doc.setFont(undefined, 'bold');
-            doc.setTextColor(255, 255, 255);
-            doc.text('PAYMENT OPTIONS:', 23, noteYb + 6);
-            doc.setFont(undefined, 'normal');
-            doc.setTextColor(220, 220, 220);
-            doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 23, noteYb + 12);
-            doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 23, noteYb + 17);
 
             // Guardar número y descargar
             localStorage.setItem('lastInvoiceNumber', invoiceNumber.toString());
