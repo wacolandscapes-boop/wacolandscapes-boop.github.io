@@ -4523,6 +4523,7 @@ class Scheduler {
                         <div style="display:flex;gap:4px;flex-wrap:wrap;">
                             <button onclick="app.regenerateInvoice(${index})" class="btn" style="background: #1A4FCC; color: white; padding: 5px 8px; font-size: 0.75rem;">🔄 Regenerar</button>
                             <button onclick="app.openInvoiceForEdit(${index})" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
+                            <button onclick="app.editInvoiceNumber('${inv.id}', '${inv.clientName}', ${inv.invoiceNumber})" class="btn" style="background: #6c757d; color: white; padding: 5px 8px; font-size: 0.75rem;"># Nº</button>
                         </div>` : '<span style="color:#95a5a6;font-size:0.8rem">—</span>'}
                 </td>
             </tr>`;
@@ -4691,6 +4692,21 @@ class Scheduler {
         a.href = URL.createObjectURL(blob);
         a.download = `cobros_${new Date().toISOString().split('T')[0]}.csv`;
         a.click();
+    }
+
+    editInvoiceNumber(id, clientName, currentNumber) {
+        const newNum = prompt(`Editar número de factura para ${clientName}:\nNúmero actual: ${currentNumber}`, currentNumber);
+        if (!newNum || isNaN(parseInt(newNum))) return;
+        const num = parseInt(newNum);
+        const inv = this.generatedInvoices.find(i => String(i.id) === String(id));
+        if (!inv) return;
+        inv.invoiceNumber = num;
+        // Actualizar lastInvoiceNumber si el nuevo es mayor
+        const currentLast = parseInt(localStorage.getItem('lastInvoiceNumber') || '0');
+        if (num > currentLast) localStorage.setItem('lastInvoiceNumber', num.toString());
+        this.save();
+        this.refreshGeneratedInvoices();
+        alert(`✅ Factura renumerada a #${num.toString().padStart(4,'0')}`);
     }
 
     changeInvoiceStatus(idOrNum, clientName, newStatus) {
@@ -8462,7 +8478,7 @@ class Scheduler {
                     <button onclick="app.savePDF(${pdfData.invoiceNumber}, '${client.name}', '${startDate}')" class="btn" style="background: #27ae60; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         💾 Guardar
                     </button>
-                    ${client.email ? `<button onclick="app.sendInvoiceByGmail(window.currentPDFData.blob, window.currentPDFData.client, window.currentPDFData.invoiceNumber, window.currentPDFData.total || 0, '${startDate}', '${endDate}')" class="btn" style="background: #ea4335; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                    ${client.email ? `<button onclick="app.sendInvoiceByGmail(window.currentPDFData.blob, window.currentPDFData.client, window.currentPDFData.invoiceNumber, window.currentPDFData.total || 0, window.currentPDFData.startDate || '${startDate}', window.currentPDFData.endDate || '${endDate}')" class="btn" style="background: #ea4335; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         📧 Enviar por Gmail
                     </button>` : ''}
                     <button onclick="document.getElementById('pdfPreviewModal').remove();" class="btn" style="background: #95a5a6; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
@@ -8476,6 +8492,7 @@ class Scheduler {
         
         // Guardar datos para usar en savePDF y sendGmail
         window.currentPDFData = pdfData;
+        window.currentPDFData.startDate = startDate;
         window.currentPDFData.endDate = endDate;
         window.currentPDFData.serviceCount = pdfData.services ? pdfData.services.length : allServices.length;
         window.currentPDFData.invoiceConfig = { template, paymentDue, showDetails, applyTax, taxRate };
@@ -8544,8 +8561,14 @@ class Scheduler {
 
             alert(`✅ Factura enviada exitosamente a ${emails.join(', ')}`);
 
-            // Marcar factura como "enviada" en generatedInvoices o crearla si no existe
+            // Guardar número de factura en localStorage para que el siguiente incremente
             const invNum = parseInt(invoiceNum);
+            const currentLast = parseInt(localStorage.getItem('lastInvoiceNumber') || '0');
+            if (invNum > currentLast) {
+                localStorage.setItem('lastInvoiceNumber', invNum.toString());
+            }
+
+            // Marcar factura como "enviada" en generatedInvoices o crearla si no existe
             if (!this.generatedInvoices) this.generatedInvoices = [];
             let genInv = this.generatedInvoices.find(i => i.invoiceNumber === invNum && i.clientName === client.name);
             if (genInv) {
