@@ -8149,6 +8149,7 @@ class Scheduler {
         // Obtener todos los IDs del cliente (incluyendo otras propiedades del mismo nombre)
         const allClientsForName = this.clis.filter(c => c.name === client.name);
         const hasMultiType = allClientsForName.some(c => c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion');
+        console.log('DEBUG previewInvoice - clientId:', clientId, 'client.type:', client.type, 'hasMultiType:', hasMultiType, 'allClientsForName:', allClientsForName.length);
         
         if (hasMultiType) {
             allClientsForName.forEach(c => {
