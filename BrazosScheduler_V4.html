@@ -8149,7 +8149,6 @@ class Scheduler {
         // Obtener todos los IDs del cliente (incluyendo otras propiedades del mismo nombre)
         const allClientsForName = this.clis.filter(c => c.name === client.name);
         const hasMultiType = allClientsForName.some(c => c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion');
-        console.log('DEBUG previewInvoice - clientId:', clientId, 'client.type:', client.type, 'hasMultiType:', hasMultiType, 'allClientsForName:', allClientsForName.length);
         
         if (hasMultiType) {
             allClientsForName.forEach(c => {
@@ -8495,7 +8494,7 @@ class Scheduler {
         window.currentPDFData = pdfData;
         window.currentPDFData.startDate = startDate;
         window.currentPDFData.endDate = endDate;
-        window.currentPDFData.serviceCount = pdfData.services ? pdfData.services.length : allServices.length;
+        window.currentPDFData.serviceCount = pdfData.services ? pdfData.services.length : (typeof allServices !== 'undefined' ? allServices.length : 0);
         window.currentPDFData.invoiceConfig = { template, paymentDue, showDetails, applyTax, taxRate };
     }
     
