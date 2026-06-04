@@ -9183,6 +9183,8 @@ class Scheduler {
         doc.setFontSize(10);
         doc.text(client.name, 20, yStart + 7);
         if (client.address) doc.text(client.address, 20, yStart + 12);
+        const cityLine = [client.city, client.state, client.zip].filter(Boolean).join(', ');
+        if (cityLine) doc.text(cityLine, 20, yStart + 17);
         if (client.phone) doc.text('Tel: ' + client.phone, 20, yStart + 17);
         if (client.email) {
             const clientEmails = client.email.split(',').map(e => e.trim());
@@ -9583,6 +9585,8 @@ class Scheduler {
             doc.setFont(undefined,'normal'); doc.setFontSize(8);
             doc.text(client.name||'', 20, 64);
             if (client.address) doc.text(client.address, 20, 76);
+            const cityLine2 = [client.city, client.state, client.zip].filter(Boolean).join(', ');
+            if (cityLine2) doc.text(cityLine2, 20, 81);
 
             // Datos empresa derecha
             doc.setFont(undefined,'bold'); doc.setFontSize(8.5);
@@ -9703,6 +9707,8 @@ class Scheduler {
         doc.setFontSize(10);
         doc.text(client.name, 20, yStart + 7);
         if (client.address) doc.text(client.address, 20, yStart + 12);
+        const cityLine = [client.city, client.state, client.zip].filter(Boolean).join(', ');
+        if (cityLine) doc.text(cityLine, 20, yStart + 17);
         if (client.phone) doc.text('Tel: ' + client.phone, 20, yStart + 17);
         if (client.email) {
             const clientEmails = client.email.split(',').map(e => e.trim());
