@@ -8976,7 +8976,16 @@ class Scheduler {
             doc.setFontSize(8);
             doc.text(companyAddress || '388 Downsville Rd.', 175, 69, { align: 'center' });
             doc.text(companyPhone || '(254) 733-4577', 175, 74, { align: 'center' });
-            if (companyWebsite || config.email) doc.text(companyWebsite || config.email || '', 175, 79, { align: 'center' });
+            if (companyWebsite || config.email) {
+                const emailStr = companyWebsite || config.email || '';
+                const emailParts = emailStr.split(',').map(e => e.trim());
+                if (emailParts.length > 1) {
+                    doc.text(emailParts[0], 175, 79, { align: 'center' });
+                    doc.text(emailParts[1], 175, 83, { align: 'center' });
+                } else {
+                    doc.text(emailStr, 175, 79, { align: 'center' });
+                }
+            }
 
             // TABLA de servicios - encabezado
             const tTop = 86;           doc.setFillColor(240,240,240);
@@ -9155,7 +9164,11 @@ class Scheduler {
         doc.text(client.name, 20, yStart + 7);
         if (client.address) doc.text(client.address, 20, yStart + 12);
         if (client.phone) doc.text('Tel: ' + client.phone, 20, yStart + 17);
-        if (client.email) doc.text('Email: ' + client.email, 20, yStart + 22);
+        if (client.email) {
+            const clientEmails = client.email.split(',').map(e => e.trim());
+            doc.text('Email: ' + clientEmails[0], 20, yStart + 22);
+            if (clientEmails[1]) doc.text('        ' + clientEmails[1], 20, yStart + 27);
+        }
         
         doc.setFont(undefined, 'bold');
         doc.setFontSize(10);
@@ -9557,7 +9570,16 @@ class Scheduler {
             doc.setFont(undefined,'normal'); doc.setFontSize(8);
             doc.text(companyAddress||'388 Downsville Rd.', 148, 61, { align:'center' });
             doc.text(companyPhone||'(254) 733-4577', 148, 66, { align:'center' });
-            if (companyWebsite||config.email) doc.text(companyWebsite||config.email||'', 148, 71, { align:'center' });
+            if (companyWebsite||config.email) {
+                const emailStr2 = companyWebsite||config.email||'';
+                const emailParts2 = emailStr2.split(',').map(e => e.trim());
+                if (emailParts2.length > 1) {
+                    doc.text(emailParts2[0], 148, 71, { align:'center' });
+                    doc.text(emailParts2[1], 148, 75, { align:'center' });
+                } else {
+                    doc.text(emailStr2, 148, 71, { align:'center' });
+                }
+            }
 
             // Encabezado tabla
             const tTop_b = 78;
@@ -9634,6 +9656,20 @@ class Scheduler {
             doc.setFont(undefined,'bold'); doc.setFontSize(10); doc.setTextColor(60,60,60);
             doc.text('THANK YOU FOR YOUR BUSINESS!', 105, y_b+44, { align:'center' });
 
+            // ── PAYMENT OPTIONS NOTE ──
+            const noteYb = y_b + 50;
+            doc.setDrawColor(44, 62, 80);
+            doc.setFillColor(44, 62, 80);
+            doc.roundedRect(18, noteYb, 174, 20, 2, 2, 'FD');
+            doc.setFontSize(8.5);
+            doc.setFont(undefined, 'bold');
+            doc.setTextColor(255, 255, 255);
+            doc.text('PAYMENT OPTIONS:', 23, noteYb + 6);
+            doc.setFont(undefined, 'normal');
+            doc.setTextColor(220, 220, 220);
+            doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 23, noteYb + 12);
+            doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 23, noteYb + 17);
+
             // Guardar número y descargar
             localStorage.setItem('lastInvoiceNumber', invoiceNumber.toString());
             const fname_b = `Factura_${client.name.replace(/\s+/g,'_')}_${new Date().toISOString().split('T')[0]}.pdf`;
@@ -9653,7 +9689,11 @@ class Scheduler {
         doc.text(client.name, 20, yStart + 7);
         if (client.address) doc.text(client.address, 20, yStart + 12);
         if (client.phone) doc.text('Tel: ' + client.phone, 20, yStart + 17);
-        if (client.email) doc.text('Email: ' + client.email, 20, yStart + 22);
+        if (client.email) {
+            const clientEmails = client.email.split(',').map(e => e.trim());
+            doc.text('Email: ' + clientEmails[0], 20, yStart + 22);
+            if (clientEmails[1]) doc.text('        ' + clientEmails[1], 20, yStart + 27);
+        }
         
         doc.setFont(undefined, 'bold');
         doc.setFontSize(10);
