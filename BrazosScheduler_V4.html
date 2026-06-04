@@ -3983,6 +3983,17 @@ class Scheduler {
         this.detectPendingInvoices();
         this.renderPendingInvoices();
         document.getElementById('pendingInvoicesModal').style.display = 'block';
+        // Actualizar contadores
+        const total = (this.pendingInvoices || []).length;
+        const sent = (this.generatedInvoices || []).filter(i => {
+            const today = new Date();
+            const monthKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
+            return i.status === 'enviada' && (i.startDate?.startsWith(monthKey) || i.generatedDate?.startsWith(monthKey));
+        }).length;
+        const tb = document.getElementById('pendingTotalBadge');
+        const sb = document.getElementById('pendingSentBadge');
+        if (tb) tb.textContent = total + ' pendientes';
+        if (sb) sb.textContent = sent + ' enviadas';
     }
     
     closePendingInvoices() {
@@ -8561,7 +8572,16 @@ class Scheduler {
                     invoiceConfig: window.currentPDFData?.invoiceConfig || null
                 });
             }
+            // Eliminar de pendingInvoices
+            if (this.pendingInvoices) {
+                this.pendingInvoices = this.pendingInvoices.filter(p => 
+                    !(p.clientName === client.name && p.startDate === startDate && p.endDate === endDate)
+                );
+            }
             this.save();
+            // Actualizar contador de pendientes si está visible
+            const pendBadge = document.getElementById('pendingInvoicesBadge');
+            if (pendBadge) pendBadge.textContent = (this.pendingInvoices || []).length;
 
         } catch(e) {
             alert('❌ Error al enviar: ' + (e?.text || e.message || 'Error desconocido'));
@@ -11831,8 +11851,12 @@ document.addEventListener('click', function(e) {
 <!-- Modal Facturas Pendientes -->
 <div id="pendingInvoicesModal" class="modal">
     <div class="modal-content" style="width: 95%; max-width: none;">
-        <h2 style="background: #f39c12; color: white; padding: 15px 20px; margin: -20px -20px 20px -20px; border-radius: 8px 8px 0 0;">
-            📋 Facturas Pendientes de Generar
+        <h2 style="background: #f39c12; color: white; padding: 15px 20px; margin: -20px -20px 20px -20px; border-radius: 8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;">
+            <span>📋 Facturas Pendientes de Generar</span>
+            <div style="display:flex; gap:8px;">
+                <span id="pendingTotalBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.85rem;">0 total</span>
+                <span id="pendingSentBadge" style="background:#27ae60; padding:4px 12px; border-radius:20px; font-size:0.85rem;">0 enviadas</span>
+            </div>
         </h2>
         
         <div id="pendingInvoicesList" style="max-height: 600px; overflow-y: auto;">
