@@ -9287,6 +9287,20 @@ class Scheduler {
         doc.setFont(undefined, 'normal');
         doc.text('Thank you for your business!', 105, y + (applyTax && taxRate > 0 ? 37 : 30), { align: 'center' });
         
+        // ── PAYMENT OPTIONS NOTE ──
+        const noteY = y + (applyTax && taxRate > 0 ? 44 : 37);
+        doc.setDrawColor(220, 220, 220);
+        doc.setFillColor(248, 248, 248);
+        doc.roundedRect(20, noteY, 170, 22, 2, 2, 'FD');
+        doc.setFontSize(8);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor(40, 40, 40);
+        doc.text('PAYMENT OPTIONS:', 25, noteY + 6);
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(60, 60, 60);
+        doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 25, noteY + 12);
+        doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 25, noteY + 17);
+        
         // Retornar el PDF y el número de factura
         return {
             blob: doc.output('blob'),
@@ -9739,6 +9753,20 @@ class Scheduler {
         doc.setFontSize(8);
         doc.setFont(undefined, 'normal');
         doc.text('Thank you for your business!', 105, y + (applyTax && taxRate > 0 ? 37 : 30), { align: 'center' });
+
+        // ── PAYMENT OPTIONS NOTE ──
+        const noteY2 = y + (applyTax && taxRate > 0 ? 44 : 37);
+        doc.setDrawColor(220, 220, 220);
+        doc.setFillColor(248, 248, 248);
+        doc.roundedRect(20, noteY2, 170, 22, 2, 2, 'FD');
+        doc.setFontSize(8);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor(40, 40, 40);
+        doc.text('PAYMENT OPTIONS:', 25, noteY2 + 6);
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(60, 60, 60);
+        doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 25, noteY2 + 12);
+        doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 25, noteY2 + 17);
         
         // Guardar
         // AHORA SÍ guardar el número de factura (después de generar el PDF)
