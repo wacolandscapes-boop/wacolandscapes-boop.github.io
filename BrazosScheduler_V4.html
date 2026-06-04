@@ -9280,7 +9280,7 @@ class Scheduler {
         // Empujar el total hacia la parte inferior de la página
         const pageHeight = doc.internal.pageSize.getHeight();
         const totalBlockHeight = (applyTax && taxRate > 0) ? 45 : 35;
-        const minY = pageHeight - totalBlockHeight; // mínimo 35-45px del fondo
+        const minY = pageHeight - totalBlockHeight - 28; // extra space for payment note
         if (y < minY) y = minY;
 
         doc.setFillColor(44, 62, 80);
@@ -9318,15 +9318,15 @@ class Scheduler {
         
         // ── PAYMENT OPTIONS NOTE ──
         const noteY = y + (applyTax && taxRate > 0 ? 44 : 37);
-        doc.setDrawColor(220, 220, 220);
-        doc.setFillColor(248, 248, 248);
+        doc.setDrawColor(44, 62, 80);
+        doc.setFillColor(44, 62, 80);
         doc.roundedRect(20, noteY, 170, 22, 2, 2, 'FD');
         doc.setFontSize(8);
         doc.setFont(undefined, 'bold');
-        doc.setTextColor(40, 40, 40);
+        doc.setTextColor(255, 255, 255);
         doc.text('PAYMENT OPTIONS:', 25, noteY + 6);
         doc.setFont(undefined, 'normal');
-        doc.setTextColor(60, 60, 60);
+        doc.setTextColor(220, 220, 220);
         doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 25, noteY + 12);
         doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 25, noteY + 17);
         
@@ -9772,7 +9772,7 @@ class Scheduler {
         // Empujar el total hacia la parte inferior
         const pageHeight2 = doc.internal.pageSize.getHeight();
         const totalBlockHeight2 = (applyTax && taxRate > 0) ? 45 : 35;
-        const minY2 = pageHeight2 - totalBlockHeight2;
+        const minY2 = pageHeight2 - totalBlockHeight2 - 28; // extra space for payment note
         if (y < minY2) y = minY2;
 
         // TOTAL
@@ -9812,15 +9812,15 @@ class Scheduler {
 
         // ── PAYMENT OPTIONS NOTE ──
         const noteY2 = y + (applyTax && taxRate > 0 ? 44 : 37);
-        doc.setDrawColor(220, 220, 220);
-        doc.setFillColor(248, 248, 248);
+        doc.setDrawColor(44, 62, 80);
+        doc.setFillColor(44, 62, 80);
         doc.roundedRect(20, noteY2, 170, 22, 2, 2, 'FD');
         doc.setFontSize(8);
         doc.setFont(undefined, 'bold');
-        doc.setTextColor(40, 40, 40);
+        doc.setTextColor(255, 255, 255);
         doc.text('PAYMENT OPTIONS:', 25, noteY2 + 6);
         doc.setFont(undefined, 'normal');
-        doc.setTextColor(60, 60, 60);
+        doc.setTextColor(220, 220, 220);
         doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 25, noteY2 + 12);
         doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 25, noteY2 + 17);
         
