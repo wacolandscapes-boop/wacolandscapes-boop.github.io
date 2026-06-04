@@ -4748,7 +4748,6 @@ class Scheduler {
         setTimeout(() => {
             const clientSel = document.getElementById('invoiceClient');
             if (clientSel) {
-                // Buscar el cliente por nombre
                 const client = this.clis.find(c => c.name === invoice.clientName);
                 if (client) {
                     clientSel.value = client.id;
@@ -4757,6 +4756,9 @@ class Scheduler {
             }
             if (document.getElementById('invoiceStart')) document.getElementById('invoiceStart').value = invoice.startDate;
             if (document.getElementById('invoiceEnd')) document.getElementById('invoiceEnd').value = invoice.endDate;
+            // Guardar número original en campo oculto
+            const hiddenNum = document.getElementById('editingInvoiceNumber');
+            if (hiddenNum) hiddenNum.value = invoice.invoiceNumber;
         }, 300);
     }
 
@@ -8276,6 +8278,10 @@ class Scheduler {
         }
         const btn = document.getElementById('btnMinimizeInvoice');
         if (btn) btn.textContent = '—';
+        // Limpiar número de edición
+        const hiddenNum = document.getElementById('editingInvoiceNumber');
+        if (hiddenNum) hiddenNum.value = '';
+        this._editingInvoiceNumber = null;
         this.fromPending = false;
     }
 
@@ -8784,7 +8790,10 @@ class Scheduler {
         const companyLogo = config.logo || '';
         
         // Calcular próximo número (SIN guardarlo)
-        let invoiceNumber = parseInt(localStorage.getItem('lastInvoiceNumber') || '0') + 1;
+        const editingNum = document.getElementById('editingInvoiceNumber')?.value;
+        let invoiceNumber = editingNum ? parseInt(editingNum) : (this._editingInvoiceNumber || (parseInt(localStorage.getItem('lastInvoiceNumber') || '0') + 1));
+        this._editingInvoiceNumber = null;
+        if (document.getElementById('editingInvoiceNumber')) document.getElementById('editingInvoiceNumber').value = '';
         const startNumber = config.invoiceStartNumber || 1;
         if (invoiceNumber < startNumber) invoiceNumber = startNumber;
         const invoiceNumberFormatted = invoiceNumber.toString().padStart(4, '0');
@@ -9376,7 +9385,10 @@ class Scheduler {
         const companyLogo = config.logo || '';
         
         // Calcular próximo número (SIN guardarlo aún - se guarda al final)
-        let invoiceNumber = parseInt(localStorage.getItem('lastInvoiceNumber') || '0') + 1;
+        const editingNum2 = document.getElementById('editingInvoiceNumber')?.value;
+        let invoiceNumber = editingNum2 ? parseInt(editingNum2) : (this._editingInvoiceNumber || (parseInt(localStorage.getItem('lastInvoiceNumber') || '0') + 1));
+        this._editingInvoiceNumber = null;
+        if (document.getElementById('editingInvoiceNumber')) document.getElementById('editingInvoiceNumber').value = '';
         const startNumber = config.invoiceStartNumber || 1;
         if (invoiceNumber < startNumber) invoiceNumber = startNumber;
         const invoiceNumberFormatted = invoiceNumber.toString().padStart(4, '0');
@@ -11517,6 +11529,7 @@ document.addEventListener('click', function(e) {
 <!-- Modal Facturación -->
 <div id="invoiceModal" class="modal">
     <div class="modal-content" style="max-width: 800px;">
+        <input type="hidden" id="editingInvoiceNumber" value="">
         <div style="position: relative; background: #e67e22; color: white; padding: 10px 15px; margin: -20px -20px 15px -20px; border-radius: 8px 8px 0 0;">
             <button onclick="app.closeInvoice()" style="position: absolute; top: 8px; right: 8px; background: #e74c3c; color: white; border: none; width: 30px; height: 30px; border-radius: 50%; font-size: 1.1rem; font-weight: bold; cursor: pointer; line-height: 1; z-index: 10;">✕</button>
             <button onclick="app.toggleMinimizeInvoice()" id="btnMinimizeInvoice" title="Minimizar" style="position: absolute; top: 8px; right: 45px; background: rgba(255,255,255,0.25); color: white; border: none; width: 30px; height: 30px; border-radius: 50%; font-size: 1rem; font-weight: bold; cursor: pointer; line-height: 1; z-index: 10;">—</button>
