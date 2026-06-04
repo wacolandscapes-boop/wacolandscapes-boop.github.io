@@ -7006,6 +7006,7 @@ class Scheduler {
                     <span style="cursor:${hasMultiple?'pointer':'default'}" onclick="event.stopPropagation();${hasMultiple?`var e=document.getElementById('${expandId}');e.style.display=e.style.display==='none'?'block':'none';`:''}" >
                         <b>${name}</b>${hasMultiple ? ` <span style="background:#0e7490;color:white;font-size:0.65rem;padding:1px 6px;border-radius:10px;margin-left:4px;">${props.length} ▼</span>` : ''}
                         <br><small style="color:#666">${first.tel||'Sin tel'} · ${first.address||'Sin dirección'} · ${first.type||''}</small>
+                        <br><small style="${first.email ? 'color:#2563eb;' : 'color:#e74c3c;font-weight:600;'}">📧 ${first.email || '⚠ Sin email'}</small>
                     </span>
                     <div style="display:flex;gap:4px;align-items:center;">
                         ${isMulti ? `<button onclick="event.stopPropagation();app.quickAddProp(${JSON.stringify(name)},${JSON.stringify(first.type)})" style="background:#27ae60;color:white;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:0.75rem;">+ Prop</button>` : ''}
