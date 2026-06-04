@@ -4499,7 +4499,13 @@ class Scheduler {
                 <td><span style="background:${isCancelled?'#95a5a6':'var(--color-'+inv.type+')'}; color:white; padding:3px 8px; border-radius:4px; font-size:0.7rem">${isCancelled?'CANCELADA':inv.type.toUpperCase()}</span></td>
                 <td style="text-align: center;">${inv.serviceCount}</td>
                 <td style="text-align: right;"><b>$${inv.total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</b></td>
-                <td><span style="background:${statusColor}; color:white; padding:3px 8px; border-radius:4px; font-size:0.7rem; white-space:nowrap;">${statusLabel}</span></td>
+                <td><select onchange="app.changeInvoiceStatus('${inv.id || inv.invoiceNumber}', '${inv.clientName}', this.value)" style="background:${statusColor}; color:white; border:none; padding:3px 6px; border-radius:4px; font-size:0.7rem; cursor:pointer; font-weight:bold;">
+                    <option value="pendiente" ${inv.status==='pendiente'?'selected':''}>⏳ Pendiente</option>
+                    <option value="enviada" ${inv.status==='enviada'?'selected':''}>📧 Enviada</option>
+                    <option value="pagada" ${inv.status==='pagada'?'selected':''}>✅ Pagada</option>
+                    <option value="vencida" ${inv.status==='vencida'?'selected':''}>🔴 Vencida</option>
+                    <option value="cancelada" ${inv.status==='cancelada'?'selected':''}>🚫 Cancelada</option>
+                </select></td>
                 <td>
                     ${!isCancelled ? `
                         <div style="display:flex;gap:4px;flex-wrap:wrap;">
@@ -4673,6 +4679,19 @@ class Scheduler {
         a.href = URL.createObjectURL(blob);
         a.download = `cobros_${new Date().toISOString().split('T')[0]}.csv`;
         a.click();
+    }
+
+    changeInvoiceStatus(idOrNum, clientName, newStatus) {
+        if (!this.generatedInvoices) return;
+        // Buscar por id primero, luego por invoiceNumber + clientName
+        let inv = this.generatedInvoices.find(i => String(i.id) === String(idOrNum));
+        if (!inv) inv = this.generatedInvoices.find(i => String(i.invoiceNumber) === String(idOrNum) && i.clientName === clientName);
+        if (!inv) return;
+        inv.status = newStatus;
+        if (newStatus === 'enviada' && !inv.sentAt) inv.sentAt = new Date().toLocaleDateString('en-CA');
+        if (newStatus === 'pagada') inv.paidAt = new Date().toLocaleDateString('en-CA');
+        this.save();
+        this.refreshGeneratedInvoices();
     }
 
     openInvoiceForEdit(index) {
@@ -8509,6 +8528,32 @@ class Scheduler {
             }
 
             alert(`✅ Factura enviada exitosamente a ${emails.join(', ')}`);
+
+            // Marcar factura como "enviada" en generatedInvoices o crearla si no existe
+            const invNum = parseInt(invoiceNum);
+            if (!this.generatedInvoices) this.generatedInvoices = [];
+            let genInv = this.generatedInvoices.find(i => i.invoiceNumber === invNum && i.clientName === client.name);
+            if (genInv) {
+                genInv.status = 'enviada';
+                genInv.sentAt = new Date().toLocaleDateString('en-CA');
+            } else {
+                // Crear registro en generadas
+                this.generatedInvoices.push({
+                    id: Date.now(),
+                    invoiceNumber: invNum,
+                    clientName: client.name,
+                    clientEmail: emails.join(', '),
+                    generatedDate: new Date().toLocaleDateString('en-CA'),
+                    startDate: startDate || '',
+                    endDate: endDate || '',
+                    total: total || 0,
+                    serviceCount: 0,
+                    type: client.type || 'mensual',
+                    status: 'enviada',
+                    sentAt: new Date().toLocaleDateString('en-CA')
+                });
+            }
+            this.save();
 
         } catch(e) {
             alert('❌ Error al enviar: ' + (e?.text || e.message || 'Error desconocido'));
