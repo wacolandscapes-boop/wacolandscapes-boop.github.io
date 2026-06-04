@@ -8483,6 +8483,9 @@ class Scheduler {
             const toEmail = client.email;
             if (!toEmail) { alert('Este cliente no tiene email registrado.'); return; }
 
+            // Separar múltiples emails
+            const emails = toEmail.split(',').map(e => e.trim()).filter(e => e.length > 0);
+
             // Convertir PDF blob a base64
             const arrayBuffer = await pdfBlob.arrayBuffer();
             const uint8Array = new Uint8Array(arrayBuffer);
@@ -8493,16 +8496,19 @@ class Scheduler {
             const invoiceNum = invoiceNumber.toString().padStart(4,'0');
             const fileName = `Invoice_${invoiceNum}_${client.name.replace(/[^a-zA-Z0-9]/g,'_')}.pdf`;
 
-            const templateParams = {
-                client_name: client.name,
-                invoice_number: invoiceNum,
-                to_email: toEmail,
-                pdf_content: base64PDF,
-                pdf_name: fileName
-            };
+            // Enviar a cada email
+            for (const email of emails) {
+                const templateParams = {
+                    client_name: client.name,
+                    invoice_number: invoiceNum,
+                    to_email: email,
+                    pdf_content: base64PDF,
+                    pdf_name: fileName
+                };
+                await emailjs.send('service_mamjtia', 'template_ygaa3xa', templateParams);
+            }
 
-            await emailjs.send('service_mamjtia', 'template_ygaa3xa', templateParams);
-            alert(`✅ Factura enviada exitosamente a ${toEmail}`);
+            alert(`✅ Factura enviada exitosamente a ${emails.join(', ')}`);
 
         } catch(e) {
             alert('❌ Error al enviar: ' + (e?.text || e.message || 'Error desconocido'));
