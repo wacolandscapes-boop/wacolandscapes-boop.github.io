@@ -9112,12 +9112,28 @@ class Scheduler {
             doc.text('MAKE CHECKS PAYABLE TO:', 20, y_a+17);
             doc.setFont(undefined,'bold');
             doc.text(companyName, 20, y_a+24);
+            doc.setFont(undefined,'normal');
+            doc.text('Mail to: P.O Box 7543, Waco, TX. 76714', 20, y_a+30);
 
             // Thank you footer
             doc.setFont(undefined,'bold');
             doc.setFontSize(10);
             doc.setTextColor(60,60,60);
             doc.text('THANK YOU FOR YOUR BUSINESS!', 105, y_a+44, { align: 'center' });
+
+            // ── PAYMENT OPTIONS NOTE ──
+            const noteYa = y_a + 50;
+            doc.setDrawColor(44, 62, 80);
+            doc.setFillColor(44, 62, 80);
+            doc.roundedRect(18, noteYa, 174, 20, 2, 2, 'FD');
+            doc.setFontSize(8.5);
+            doc.setFont(undefined, 'bold');
+            doc.setTextColor(255, 255, 255);
+            doc.text('PAYMENT OPTIONS:', 23, noteYa + 6);
+            doc.setFont(undefined, 'normal');
+            doc.setTextColor(220, 220, 220);
+            doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 23, noteYa + 12);
+            doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 23, noteYa + 17);
 
             // Retornar sin ejecutar el bloque genérico
             return {
