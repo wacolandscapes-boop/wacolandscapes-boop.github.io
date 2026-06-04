@@ -8130,28 +8130,26 @@ class Scheduler {
         // Para AirBnb/Único, obtener TODAS las propiedades
         let allServices = [];
         
-        if (client.type === 'airbnb' || client.type === 'unico' || client.type === 'construccion') {
-            const allClients = this.clis.filter(c => 
-                c.name === client.name && 
-                (c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion')
-            );
-            
-            allClients.forEach(c => {
+        // Obtener todos los IDs del cliente (incluyendo otras propiedades del mismo nombre)
+        const allClientsForName = this.clis.filter(c => c.name === client.name);
+        const hasMultiType = allClientsForName.some(c => c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion');
+        
+        if (hasMultiType) {
+            allClientsForName.forEach(c => {
                 const clientServices = this.servs.filter(s => {
-                    if (s.cliId != c.id) return false;
+                    if (String(s.cliId) !== String(c.id)) return false;
                     if (s.date < startDate || s.date > endDate) return false;
                     return true;
                 }).map(s => ({
                     ...s,
-                    propId: c.propId,
+                    propId: c.propId || c.name,
                     price: parseFloat(c.price) || 0
                 }));
-                
                 allServices = allServices.concat(clientServices);
             });
         } else {
             allServices = this.servs.filter(s => {
-                if (s.cliId != clientId) return false;
+                if (String(s.cliId) !== String(clientId)) return false;
                 if (s.date < startDate || s.date > endDate) return false;
                 return true;
             }).map(s => ({
@@ -8371,28 +8369,27 @@ class Scheduler {
         let allClients = [client];
         let allServices = [];
         
-        if (client.type === 'airbnb' || client.type === 'unico' || client.type === 'construccion') {
-            allClients = this.clis.filter(c => 
-                c.name === client.name && 
-                (c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion')
-            );
-            
+        // Buscar todos los registros del mismo nombre
+        const allClientsForName2 = this.clis.filter(c => c.name === client.name);
+        const hasMultiType2 = allClientsForName2.some(c => c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion');
+        
+        if (hasMultiType2) {
+            allClients = allClientsForName2;
             allClients.forEach(c => {
                 const clientServices = this.servs.filter(s => {
-                    if (s.cliId != c.id) return false;
+                    if (String(s.cliId) !== String(c.id)) return false;
                     if (s.date < startDate || s.date > endDate) return false;
                     return true;
                 }).map(s => ({
                     ...s,
-                    propId: c.propId,
+                    propId: c.propId || c.name,
                     price: parseFloat(c.price) || 0
                 }));
-                
                 allServices = allServices.concat(clientServices);
             });
         } else {
             allServices = this.servs.filter(s => {
-                if (s.cliId != clientId) return false;
+                if (String(s.cliId) !== String(clientId)) return false;
                 if (s.date < startDate || s.date > endDate) return false;
                 return true;
             }).map(s => ({
