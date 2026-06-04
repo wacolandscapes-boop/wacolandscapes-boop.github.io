@@ -4808,10 +4808,19 @@ class Scheduler {
         });
 
         // Generar PDF con el mismo número de factura
-        const pdfData = this.createPDFBlob(client, services, invoice.startDate, invoice.endDate, 'standard', '', false, false, invoice.invoiceNumber);
+        const pdfData = this.createPDFBlob(
+            client, services,
+            invoice.startDate, invoice.endDate,
+            invoice.invoiceConfig?.template || 'brazos',
+            invoice.invoiceConfig?.paymentDue || '',
+            invoice.invoiceConfig?.showDetails !== undefined ? invoice.invoiceConfig.showDetails : true,
+            invoice.invoiceConfig?.applyTax || false,
+            invoice.invoiceConfig?.taxRate || 0,
+            invoice.invoiceNumber
+        );
         if (!pdfData || !pdfData.blob) { alert('Error al generar PDF'); return; }
 
-        window.currentPDFData = { ...pdfData, client, blob: pdfData.blob };
+        window.currentPDFData = { ...pdfData, client, blob: pdfData.blob, serviceCount: services.length, invoiceConfig: invoice.invoiceConfig };
         this.displayPDFPreview(pdfData, client, invoice.startDate, invoice.endDate);
     }
 
@@ -8460,7 +8469,8 @@ class Scheduler {
         // Guardar datos para usar en savePDF y sendGmail
         window.currentPDFData = pdfData;
         window.currentPDFData.endDate = endDate;
-        window.currentPDFData.serviceCount = pdfData.services ? pdfData.services.length : 0;
+        window.currentPDFData.serviceCount = pdfData.services ? pdfData.services.length : allServices.length;
+        window.currentPDFData.invoiceConfig = { template, paymentDue, showDetails, applyTax, taxRate };
     }
     
     async sendPendingInvoiceByGmail(invId) {
@@ -8547,7 +8557,8 @@ class Scheduler {
                     serviceCount: window.currentPDFData?.serviceCount || 0,
                     type: client.type || 'mensual',
                     status: 'enviada',
-                    sentAt: new Date().toLocaleDateString('en-CA')
+                    sentAt: new Date().toLocaleDateString('en-CA'),
+                    invoiceConfig: window.currentPDFData?.invoiceConfig || null
                 });
             }
             this.save();
