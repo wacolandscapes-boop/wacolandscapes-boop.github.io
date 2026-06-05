@@ -11085,16 +11085,14 @@ class Scheduler {
         document.getElementById('nominaMariaContent').style.display = 'block';
         document.getElementById('nmMinBar').style.display = 'none';
 
-        // Poblar selector de empleados
+        // Poblar selector de grupos
         const sel = document.getElementById('nmEmpSel');
         sel.innerHTML = '';
-        this.emps.forEach(e => {
-            const grp = Object.keys(this.grupos).find(g => (this.grupos[g]||[]).map(String).includes(String(e.id)));
-            if (!grp) return;
+        Object.keys(this.grupos).forEach(grp => {
             const opt = document.createElement('option');
-            opt.value = e.id;
+            opt.value = grp;
             opt.dataset.group = grp;
-            opt.textContent = e.name + ' (' + grp + ')';
+            opt.textContent = grp + ' (' + (this.grupos[grp]||[]).length + ' empleados)';
             sel.appendChild(opt);
         });
 
@@ -11158,7 +11156,7 @@ class Scheduler {
     nmGetEmpGroup() {
         const sel = document.getElementById('nmEmpSel');
         if (!sel || !sel.selectedOptions[0]) return '';
-        return sel.selectedOptions[0].dataset.group || '';
+        return sel.selectedOptions[0].dataset.group || sel.value || '';
     }
 
     nmGetPriceCatalog() {
@@ -11187,6 +11185,17 @@ class Scheduler {
         } catch(e) {}
     }
 
+    nmPricePerVisit(cli) {
+        const pfm = parseFloat(cli.price || cli.fee || 0);
+        if (cli.invoicingType !== 'fixed_monthly') return pfm;
+        const freq = cli.type || 'mensual';
+        if (freq === 'semanal') return (pfm * 12) / 52;
+        if (freq === 'quincenal') return (pfm * 12) / 26;
+        if (freq === '2xsemana') return (pfm * 12) / 104;
+        if (freq === 'diario') return (pfm * 12) / 260;
+        return pfm; // mensual
+    }
+
     calcNominaMaria() {
         const monStr = document.getElementById('nmWeekStart').value;
         if (!monStr) return;
@@ -11203,8 +11212,8 @@ class Scheduler {
         const empId = this.nmGetEmpId();
         const empGroup = this.nmGetEmpGroup();
         const emp = this.emps.find(e => String(e.id) === String(empId));
-        const empName = emp ? emp.name : 'Empleado';
-        document.querySelector('#nominaMariaContent h2').textContent = '💰 Nómina — ' + empName;
+        const empName = empGroup || (emp ? emp.name : 'Empleado');
+        document.querySelector('#nominaMariaContent h2').textContent = '💰 Nómina % — ' + empName;
         document.getElementById('nmMinBar').textContent = '💰 Nómina ' + empName.split(' ')[0] + ' □ Expandir';
 
         const groupIds = (this.grupos[empGroup] || []).map(String);
@@ -11229,6 +11238,8 @@ class Scheduler {
                     <th style="padding:8px;text-align:left;">Cliente</th>
                     <th style="padding:8px;text-align:right;">Precio $</th>
                     <th style="padding:8px;text-align:right;">${Math.round(pct*100)}% Pago</th>
+                    <th style="padding:8px;text-align:center;" title="Empleados que trabajaron">÷ Emp</th>
+                    <th style="padding:8px;text-align:right;">Pago Emp</th>
                     <th style="padding:8px;text-align:center;" title="Solo horas — ignorar %">Solo hrs</th>
                 </tr></thead><tbody>`;
             weekServs.forEach((s, idx) => {
@@ -11237,8 +11248,14 @@ class Scheduler {
                 const savedPrice = weekData && weekData.prices && weekData.prices[idx] !== undefined ? weekData.prices[idx] : null;
                 const catalogKey = this.nmGetEmpId() + '_' + String(s.cliId);
                 const catalogPrice = priceCatalog[catalogKey] !== undefined ? priceCatalog[catalogKey] : null;
-                const precio = savedPrice !== null ? savedPrice : (catalogPrice !== null ? catalogPrice : parseFloat(cli.price || 0));
+                // Usar precio por visita según tipo de cliente (cuota fija o por servicio)
+                const defaultPrice = this.nmPricePerVisit(cli);
+                const precio = savedPrice !== null ? savedPrice : (catalogPrice !== null ? catalogPrice : defaultPrice);
                 const soloHrsChecked = weekData && weekData.soloHrs && weekData.soloHrs[idx];
+                // ÷ Empleados: precargado con número del grupo, editable
+                const savedEmp = weekData && weekData.emps && weekData.emps[idx] !== undefined ? weekData.emps[idx] : null;
+                const defaultEmpCount = groupIds.length || 1;
+                const empCount = savedEmp !== null ? savedEmp : defaultEmpCount;
                 const dayIdx = weekDates.indexOf(s.date);
                 const dayLabel = DAYS[dayIdx] + ' ' + s.date.slice(8);
                 const propLabel = (cli.type==='airbnb'||cli.type==='unico'||cli.type==='construccion') && cli.propId ? cli.name + ' / ' + cli.propId : cli.name || s.cliId;
@@ -11252,6 +11269,12 @@ class Scheduler {
                     </td>
                     <td style="padding:8px;text-align:right;color:#86efac;" id="nmPctPay_${idx}">$0.00</td>
                     <td style="padding:8px;text-align:center;">
+                        <input type="number" id="nmEmp_${idx}" value="${empCount}" min="1" max="20" step="1"
+                            style="width:50px;padding:4px;border:1px solid #4a5568;border-radius:4px;background:#1a1a2e;color:#e2e8f0;text-align:center;font-size:0.85rem;"
+                            oninput="app.updateNomina()">
+                    </td>
+                    <td style="padding:8px;text-align:right;color:#fbbf24;font-weight:700;" id="nmEmpPay_${idx}">$0.00</td>
+                    <td style="padding:8px;text-align:center;">
                         <input type="checkbox" id="nmSoloHrs_${idx}" ${soloHrsChecked ? 'checked' : ''}
                             title="Ignorar % — se paga por horas"
                             onchange="app.updateNomina()" style="width:16px;height:16px;cursor:pointer;">
@@ -11261,6 +11284,8 @@ class Scheduler {
             html += `<tr style="background:#374151;font-weight:700;">
                 <td colspan="3" style="padding:8px;color:#a78bfa;">Total servicios (${weekServs.length})</td>
                 <td style="padding:8px;text-align:right;color:#86efac;" id="nmTotalPctRow">$0.00</td>
+                <td></td>
+                <td style="padding:8px;text-align:right;color:#fbbf24;" id="nmTotalEmpPay">$0.00</td>
                 <td></td>
             </tr></tbody></table>`;
             tbl.innerHTML = html;
@@ -11303,28 +11328,42 @@ class Scheduler {
 
         // Calcular pago por servicios — respetando checkbox "Solo hrs"
         let totalPct = 0;
-        const prices = {}, soloHrs = {};
+        let totalEmpPay = 0;
+        const prices = {}, soloHrs = {}, emps = {};
         for (let i = 0; i < svcCount; i++) {
             const priceInp = document.getElementById('nmPrice_' + i);
             const soloHrsChk = document.getElementById('nmSoloHrs_' + i);
             const pctPayEl = document.getElementById('nmPctPay_' + i);
+            const empInp = document.getElementById('nmEmp_' + i);
+            const empPayEl = document.getElementById('nmEmpPay_' + i);
             if (!priceInp) continue;
             const precio = parseFloat(priceInp.value) || 0;
             const isSoloHrs = soloHrsChk && soloHrsChk.checked;
-            const pago = isSoloHrs ? 0 : precio * pct;
-            totalPct += pago;
+            const empCount = empInp ? (parseInt(empInp.value) || 1) : 1;
+            // Pago bruto = precio × %
+            const pagoBruto = isSoloHrs ? 0 : precio * pct;
+            // Pago por empleado = pago bruto ÷ # empleados
+            const pagoEmp = isSoloHrs ? 0 : pagoBruto / empCount;
+            totalPct += pagoBruto;
+            totalEmpPay += pagoEmp;
             prices[i] = precio;
             soloHrs[i] = isSoloHrs;
+            emps[i] = empCount;
             // Guardar en catálogo de precios por empleado
             const cliId = priceInp.dataset.cliid;
             if (cliId) priceCatalog[this.nmGetEmpId() + '_' + cliId] = precio;
             if (pctPayEl) {
-                pctPayEl.textContent = isSoloHrs ? '(hrs)' : '$' + pago.toFixed(2);
+                pctPayEl.textContent = isSoloHrs ? '(hrs)' : '$' + pagoBruto.toFixed(2);
                 pctPayEl.style.color = isSoloHrs ? '#94a3b8' : '#86efac';
+            }
+            if (empPayEl) {
+                empPayEl.textContent = isSoloHrs ? '(hrs)' : '$' + pagoEmp.toFixed(2);
             }
         }
         const totalRow = document.getElementById('nmTotalPctRow');
         if (totalRow) totalRow.textContent = '$' + totalPct.toFixed(2);
+        const totalEmpRow = document.getElementById('nmTotalEmpPay');
+        if (totalEmpRow) totalEmpRow.textContent = '$' + totalEmpPay.toFixed(2);
         this.nmSavePriceCatalog(priceCatalog);
 
         // Horas directas
@@ -11339,7 +11378,7 @@ class Scheduler {
         const directPay = directHrs * rate;
 
         // Guardar datos de la semana
-        if (monStr) this.nmSaveWeekData(monStr, { prices, soloHrs, hrs, bonus });
+        if (monStr) this.nmSaveWeekData(monStr, { prices, soloHrs, hrs, bonus, emps });
 
         // Total horas equivalentes
         const hrsFromPct = rate > 0 ? totalPct / rate : 0;
@@ -11367,7 +11406,7 @@ class Scheduler {
                 <div>
                     <div style="color:#94a3b8;font-size:0.8rem;margin-bottom:8px;">RESUMEN SEMANA</div>
                     <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
-                        <span>Pago por servicios (${Math.round(pct*100)}%)</span><span style="color:#86efac;">${fmt(totalPct)}</span>
+                        <span>Pago bruto (${Math.round(pct*100)}%)</span><span style="color:#86efac;">${fmt(totalPct)}</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
                         <span>Horas directas (${directHrs.toFixed(2)} hrs × ${fmt(rate)})</span><span style="color:#86efac;">${fmt(directPay)}</span>
@@ -12418,7 +12457,7 @@ document.addEventListener('click', function(e) {
     <!-- Selector de empleado -->
     <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
       <div>
-        <label style="font-size:0.8rem;color:#94a3b8;">Empleado</label>
+        <label style="font-size:0.8rem;color:#94a3b8;">Grupo</label>
         <select id="nmEmpSel" onchange="app.calcNominaMaria()" style="padding:6px 10px;border:1px solid #4a5568;border-radius:6px;background:#2d3748;color:#e2e8f0;margin-left:8px;"></select>
       </div>
       <div>
