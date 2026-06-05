@@ -8270,14 +8270,15 @@ class Scheduler {
         const modal = document.getElementById('invoiceModal');
         modal.style.display = 'none';
         modal.style.pointerEvents = 'none';
+        modal.style.background = 'rgba(0,0,0,0.6)';
+        modal.style.backdropFilter = 'blur(5px)';
+        modal.dataset.minimized = 'false';
         const content = modal.querySelector('.modal-content');
-        if (content) {
-            content.dataset.minimized = 'false';
-            content.style.cssText = 'max-width: 800px;';
-        }
+        if (content) content.style.display = 'block';
+        const minBar = document.getElementById('invMinBar');
+        if (minBar) minBar.style.display = 'none';
         const btn = document.getElementById('btnMinimizeInvoice');
         if (btn) btn.textContent = '—';
-        // Limpiar número de edición
         const hiddenNum = document.getElementById('editingInvoiceNumber');
         if (hiddenNum) hiddenNum.value = '';
         this._editingInvoiceNumber = null;
@@ -8287,24 +8288,27 @@ class Scheduler {
     toggleMinimizeInvoice() {
         const modal = document.getElementById('invoiceModal');
         const content = modal.querySelector('.modal-content');
-        const btn = document.getElementById('btnMinimizeInvoice');
-        const isMinimized = content.dataset.minimized === 'true';
-        if (isMinimized) {
-            // Restaurar
-            content.dataset.minimized = 'false';
-            content.style.cssText = 'max-width: 800px;';
-            btn.textContent = '—';
-            btn.title = 'Minimizar';
-            modal.classList.remove('modal-minimized');
-            modal.style.cssText = 'display:block; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); backdrop-filter:blur(5px); pointer-events:all; align-items:center; justify-content:center;';
+        const minBar = document.getElementById('invMinBar');
+        const isMin = modal.dataset.minimized === 'true';
+        if (isMin) {
+            modal.dataset.minimized = 'false';
+            modal.style.background = 'rgba(0,0,0,0.6)';
+            modal.style.backdropFilter = 'blur(5px)';
+            modal.style.pointerEvents = 'auto';
+            content.style.display = 'block';
+            minBar.style.display = 'none';
+            const btn = document.getElementById('btnMinimizeInvoice');
+            if (btn) btn.textContent = '—';
         } else {
-            // Minimizar
-            content.dataset.minimized = 'true';
-            content.style.cssText = 'max-width:100%; width:100%; position:fixed; bottom:0; left:0; right:0; margin:0; border-radius:0; max-height:50px; overflow:hidden; pointer-events:all; z-index:1001;';
-            btn.textContent = '▲';
-            btn.title = 'Restaurar';
-            modal.classList.add('modal-minimized');
-            modal.style.cssText = 'display:block; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:transparent; backdrop-filter:none; pointer-events:none;';
+            modal.dataset.minimized = 'true';
+            modal.style.background = 'transparent';
+            modal.style.backdropFilter = 'none';
+            modal.style.pointerEvents = 'none';
+            content.style.display = 'none';
+            minBar.style.display = 'flex';
+            minBar.style.pointerEvents = 'auto';
+            const btn = document.getElementById('btnMinimizeInvoice');
+            if (btn) btn.textContent = '□';
         }
     }
 
@@ -11526,6 +11530,11 @@ document.addEventListener('click', function(e) {
 
 
 <!-- Modal Facturación -->
+  <!-- Barra minimizada Facturación -->
+  <div id="invMinBar" onclick="app.toggleMinimizeInvoice()" style="display:none;position:fixed;bottom:0;left:50%;transform:translateX(-50%);background:#e67e22;color:white;padding:8px 20px;border-radius:8px 8px 0 0;cursor:pointer;font-weight:700;z-index:9001;">
+    💼 Facturación □ Expandir
+  </div>
+
 <div id="invoiceModal" class="modal">
     <div class="modal-content" style="max-width: 800px;">
         <input type="hidden" id="editingInvoiceNumber" value="">
