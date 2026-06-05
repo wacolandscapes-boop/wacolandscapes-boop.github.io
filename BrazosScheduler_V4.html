@@ -3360,7 +3360,8 @@ class Scheduler {
                 document.getElementById('cancelModal').style.display = 'flex';
                 return; // esperar confirmación del modal
             }
-            this.servs.push(data); 
+            // Solo agregar si NO es edición (en edición ya se hizo arriba)
+            if (!this.editing) this.servs.push(data); 
             const c = this.clis.find(x=>x.id==data.cliId); 
             if(!this.editing && document.getElementById('mRep').value==='yes' && c) {
                 let days2x = null;
