@@ -10429,7 +10429,27 @@ class Scheduler {
                     const empRate = emp ? getRateForEmp(emp) : 15;
                     const cost = empRate * hrs;
                     let svcPrice=parseFloat(svc.price||0);
-                    if(!svcPrice){const matchCli=this.clis.find(c=>c.name===svc.clientName||(svc.clientName&&svc.clientName.startsWith(c.name)));if(matchCli)svcPrice=parseFloat(matchCli.price||matchCli.fee||0);}
+                    if(!svcPrice){
+                        const matchCli=this.clis.find(c=>c.name===svc.clientName||(svc.clientName&&svc.clientName.startsWith(c.name)));
+                        if(matchCli){
+                            const pfm = parseFloat(matchCli.price||matchCli.fee||0);
+                            if(matchCli.invoicingType === 'fixed_monthly') {
+                                const freq = matchCli.type || 'mensual';
+                                if (freq === 'semanal') {
+                                    svcPrice = (pfm * 12) / 52;
+                                } else if (freq === 'quincenal' || freq === 'cada3semanas') {
+                                    svcPrice = (pfm * 12) / 26;
+                                } else if (freq === 'diario' || freq === '2xsemana') {
+                                    svcPrice = (pfm * 12) / 260;
+                                } else {
+                                    // mensual — precio directo
+                                    svcPrice = pfm;
+                                }
+                            } else {
+                                svcPrice = pfm;
+                            }
+                        }
+                    }
                     groupRows[grp].services.push({date:dt,clientName:svc.clientName,address:svc.address,scheduledStart:svc.scheduledStart,scheduledEnd:svc.scheduledEnd,checkin:svc.checkin,checkout:svc.checkout,hrs,cost,price:svcPrice,status:svc.status,note:svc.note});
                     if(svc.status==='done'){
                         groupRows[grp].doneCount++;groupRows[grp].totalHrs+=hrs;groupRows[grp].totalCost+=cost;groupRows[grp].totalBilled+=svcPrice;
