@@ -7968,8 +7968,7 @@ class Scheduler {
         
         modal.style.display = 'block';
         modal.style.pointerEvents = 'all';
-        
-        // Llenar select de clientes
+        window.currentPDFData = null; // Limpiar datos del preview anterior
         const select = document.getElementById('invoiceClient');
         const currentValue = select.value; // Guardar valor actual si existe
         select.innerHTML = '<option value="">-- Selecciona Cliente --</option>';
