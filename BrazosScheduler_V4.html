@@ -10656,6 +10656,7 @@ class Scheduler {
             const row=groupRows[grp];
             const grpId=grp.replace(/\s+/g,'_');
             const activeCount=(this.grupos[grp]||[]).filter(id=>id&&id.trim()!=='').length||1;
+            console.log('recalc', grpId, 'activeCount:', activeCount, 'totalCost:', row.totalCost, 'perEmp:', row.totalCost/activeCount);
             this.recalcGroupMO(grpId, row.totalCost/activeCount, row.totalHrs/activeCount, row.totalBilled);
         });
     }
