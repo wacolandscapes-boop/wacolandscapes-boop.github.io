@@ -10796,8 +10796,10 @@ class Scheduler {
             const grpId = grp.replace(/\s+/g,'_');
             const empCountInp = document.getElementById('prodEmpCount_' + grpId);
             const empCount = empCountInp ? (parseInt(empCountInp.value) || 1) : 1;
-            const adjCost = row.totalCost * empCount;
+            const adjCost = parseFloat(document.getElementById('prodMOCost_' + grpId)?.textContent?.replace(/[$,]/g,'') || row.totalCost);
             const adjHrs = row.totalHrs * empCount;
+            const transitCostEl = document.getElementById('prodTransitCost_' + grpId);
+            const transitCost = transitCostEl ? parseFloat(transitCostEl.textContent.replace(/[$,—]/g,'') || 0) : 0;
             const adjNet = row.totalBilled - adjCost;
             pdfGrandCost += adjCost;
             pdfGrandBilled += row.totalBilled;
@@ -10827,7 +10829,7 @@ class Scheduler {
                 <td colspan="4" style="padding:5px 8px;color:#f57f17;font-style:italic;">🚗 Traslado entre servicios (${empCount} empleados)</td>
                 <td style="padding:5px 8px;text-align:center;color:#f57f17;font-weight:600">${fmtH(row.transitHrs * empCount)}</td>
                 <td style="padding:5px 8px;text-align:right;color:#f57f17">—</td>
-                <td style="padding:5px 8px;text-align:right;color:#f57f17;font-weight:600">$${fmt(adjCost / (row.totalHrs||1) * row.transitHrs * empCount)}</td>
+                <td style="padding:5px 8px;text-align:right;color:#f57f17;font-weight:600">${transitCost > 0 ? '$' + fmt(transitCost) : '—'}</td>
                 <td></td>
               </tr></tfoot>` : ''}
               </table></div>`;
