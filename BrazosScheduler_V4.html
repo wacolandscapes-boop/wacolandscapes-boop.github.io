@@ -10204,13 +10204,13 @@ class Scheduler {
         }
     }
 
-    recalcGroupMO(grpId, totalCostPerEmp, totalHrsPerEmp, totalBilled) {
+    recalcGroupMO(grpId, baseCost, baseHrs, totalBilled) {
         const empCountInp = document.getElementById('prodEmpCount_' + grpId);
         if (!empCountInp) return;
         const empCount = parseInt(empCountInp.value) || 1;
-        const totalCost = totalCostPerEmp * empCount;
-        const totalHrs = totalHrsPerEmp * empCount;
-        const ratePerEmp = totalHrsPerEmp > 0 ? totalCostPerEmp / totalHrsPerEmp : 0;
+        const totalCost = baseCost * empCount;
+        const totalHrs = baseHrs * empCount;
+        const ratePerEmp = baseHrs > 0 ? baseCost / baseHrs : 0;
         const net = (totalBilled || 0) - totalCost;
         const fmt = n => n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
         const fmtH = m => { const h=Math.floor(m/60); const min=Math.round(m%60); return h>0?(min>0?h+'h '+min+'min':h+'h'):(min+'min'); };
@@ -10589,7 +10589,7 @@ class Scheduler {
                     <span style="font-size:0.75rem;opacity:0.9;">Empleados que trabajaron:</span>
                     <input type="number" id="prodEmpCount_${grpId}" value="${defaultEmpCount}" min="1" max="10"
                       style="width:45px;padding:2px 6px;border:none;border-radius:4px;background:rgba(255,255,255,0.2);color:white;text-align:center;font-size:0.85rem;font-weight:700;"
-                      oninput="app.recalcGroupMO('${grpId}', ${defaultEmpCount > 0 ? row.totalCost/defaultEmpCount : row.totalCost}, ${defaultEmpCount > 0 ? row.totalHrs/defaultEmpCount : row.totalHrs}, ${row.totalBilled})">
+                      oninput="app.recalcGroupMO('${grpId}', ${row.totalCost}, ${row.totalHrs}, ${row.totalBilled})">
                   </div>
                 </div>
                 <table style="width:100%;border-collapse:collapse;font-size:0.8rem">
@@ -10655,9 +10655,7 @@ class Scheduler {
         Object.keys(groupRows).sort().forEach(grp=>{
             const row=groupRows[grp];
             const grpId=grp.replace(/\s+/g,'_');
-            const activeCount=(this.grupos[grp]||[]).filter(id=>id&&id.trim()!=='').length||1;
-            console.log('recalc', grpId, 'activeCount:', activeCount, 'totalCost:', row.totalCost, 'perEmp:', row.totalCost/activeCount);
-            this.recalcGroupMO(grpId, row.totalCost/activeCount, row.totalHrs/activeCount, row.totalBilled);
+            this.recalcGroupMO(grpId, row.totalCost, row.totalHrs, row.totalBilled);
         });
     }
 
