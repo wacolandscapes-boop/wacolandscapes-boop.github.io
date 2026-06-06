@@ -11484,9 +11484,12 @@ class Scheduler {
         const checks = document.querySelectorAll('#nmPrintEmpList input[type=checkbox]:checked');
         const selectedIds = [...checks].map(c => c.value);
         document.getElementById('nmPrintModal').remove();
-        selectedIds.forEach(empId => {
-            const emp = this.emps.find(e => String(e.id) === String(empId));
-            this.printNominaForEmp(emp);
+        // Usar setTimeout para evitar que el browser bloquee múltiples window.open
+        selectedIds.forEach((empId, idx) => {
+            setTimeout(() => {
+                const emp = this.emps.find(e => String(e.id) === String(empId));
+                this.printNominaForEmp(emp);
+            }, idx * 800);
         });
     }
 
@@ -11500,7 +11503,8 @@ class Scheduler {
         const rate = parseFloat(document.getElementById('nmRate').value) || 15;
         const bonus = parseFloat(document.getElementById('nmBonus').value) || 0;
 
-        // Recopilar datos de la tabla
+        // Recopilar datos de la tabla — índices correctos de columnas
+        // Col 0: Día, 1: Cliente, 2: Precio (input), 3: % Pago (text), 4: ÷ Emp (input), 5: Pago Emp (text), 6: Solo hrs (checkbox)
         const tbl = document.getElementById('nmServicesTable');
         const rows = tbl.querySelectorAll('tbody tr:not(:last-child)');
         let tableRows = '';
@@ -11508,19 +11512,19 @@ class Scheduler {
 
         rows.forEach(row => {
             const cells = row.querySelectorAll('td');
-            if (cells.length < 5) return;
-            const dia = cells[0]?.textContent || '';
-            const cliente = cells[1]?.textContent || '';
-            const precio = cells[2]?.querySelector('input')?.value || '0';
-            const empCount = cells[3]?.querySelector('input')?.value || '1';
-            const isSoloHrs = cells[5]?.querySelector('input')?.checked;
-            const pagoBruto = isSoloHrs ? 0 : parseFloat(precio) * (pct/100);
-            const pagoEmp = isSoloHrs ? 0 : pagoBruto / parseInt(empCount);
+            if (cells.length < 6) return;
+            const dia = cells[0]?.textContent?.trim() || '';
+            const cliente = cells[1]?.textContent?.trim() || '';
+            const precio = parseFloat(cells[2]?.querySelector('input')?.value || 0);
+            const empCount = parseInt(cells[4]?.querySelector('input')?.value || 1);
+            const isSoloHrs = cells[6]?.querySelector('input')?.checked;
+            const pagoBruto = isSoloHrs ? 0 : precio * (pct/100);
+            const pagoEmp = isSoloHrs ? 0 : pagoBruto / empCount;
             totalPago += pagoEmp;
             tableRows += `<tr>
                 <td>${dia}</td>
                 <td>${cliente}</td>
-                <td style="text-align:right;">$${parseFloat(precio).toFixed(2)}</td>
+                <td style="text-align:right;">$${precio.toFixed(2)}</td>
                 <td style="text-align:right;">$${pagoBruto.toFixed(2)}</td>
                 <td style="text-align:center;">${empCount}</td>
                 <td style="text-align:right;font-weight:bold;color:#7c3aed;">$${pagoEmp.toFixed(2)}</td>
