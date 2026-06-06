@@ -10210,14 +10210,13 @@ class Scheduler {
         const empCount = parseInt(empCountInp.value) || 1;
         const totalCost = baseCost * empCount;
         const totalHrs = baseHrs * empCount;
-        const ratePerHr = baseHrs > 0 ? (baseCost / baseHrs) * 60 : 0;
+        const ratePerHr = baseHrs > 0 ? baseCost / baseHrs : 0;
         const net = (totalBilled || 0) - totalCost;
         const fmt = n => n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        const fmtH = m => {
-            const totalMin = Math.round(m);
-            const h = Math.floor(totalMin / 60);
-            const min = totalMin % 60;
-            const frac = (totalMin / 60).toFixed(2);
+        const fmtH = hrs => {
+            const h = Math.floor(hrs);
+            const min = Math.round((hrs - h) * 60);
+            const frac = hrs.toFixed(2);
             const hStr = h > 0 ? (min > 0 ? h + 'h ' + min + 'min' : h + 'h') : (min + 'min');
             return hStr + ' (' + frac + ' hrs)';
         };
