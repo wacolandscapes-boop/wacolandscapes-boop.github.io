@@ -10230,6 +10230,15 @@ class Scheduler {
         if (costEl) costEl.textContent = '$' + fmt(totalCost);
         if (hdrCostEl) hdrCostEl.textContent = fmt(totalCost);
         if (hdrNetEl) hdrNetEl.textContent = fmt(net);
+        // Update transit cost
+        const transitCostEl = document.getElementById('prodTransitCost_' + grpId);
+        if (transitCostEl && this._lastProdRender) {
+            const row = this._lastProdRender.groupRows[Object.keys(this._lastProdRender.groupRows).find(g => g.replace(/\s+/g,'_') === grpId)];
+            if (row && row.transitHrs > 0) {
+                const transitCost = ratePerHr * row.transitHrs * empCount;
+                transitCostEl.textContent = '$' + fmt(transitCost);
+            }
+        }
         // Actualizar resumen global
         if (this._lastProdRender) {
             let newGrandCost = 0;
@@ -10543,7 +10552,29 @@ class Scheduler {
         });
 
         // Save for CSV export
-        this._lastProdRender={groupRows,dates,grandHrs,grandCost,grandSvcs,grandBilled,dailyTotals,view};
+        // ── CALCULAR TIEMPOS DE TRASLADO ENTRE SERVICIOS ──
+        Object.keys(groupRows).forEach(grp => {
+            const row = groupRows[grp];
+            // Agrupar servicios por fecha
+            const byDate = {};
+            row.services.forEach(s => {
+                if (!byDate[s.date]) byDate[s.date] = [];
+                byDate[s.date].push(s);
+            });
+            let totalTransitHrs = 0;
+            Object.keys(byDate).forEach(dt => {
+                const dayServs = byDate[dt]
+                    .filter(s => s.checkin && s.checkout)
+                    .sort((a, b) => a.checkin.localeCompare(b.checkin));
+                for (let i = 0; i < dayServs.length - 1; i++) {
+                    const [eh, em] = dayServs[i].checkout.split(':').map(Number);
+                    const [sh, sm] = dayServs[i+1].checkin.split(':').map(Number);
+                    const transitMin = (sh * 60 + sm) - (eh * 60 + em);
+                    if (transitMin > 0) totalTransitHrs += transitMin / 60;
+                }
+            });
+            row.transitHrs = totalTransitHrs;
+        });
 
         if(!Object.keys(groupRows).length){content.innerHTML='<p style="color:#888;text-align:center;padding:40px">Sin datos para este período.</p>';return;}
         const grandNet=grandBilled-grandCost;
@@ -10633,6 +10664,12 @@ class Scheduler {
                     <td style="padding:6px 12px;text-align:center;color:#2980b9;font-weight:600" id="prodMOHrs_${grpId}">${fmtH(row.totalHrs)}</td>
                     <td style="padding:6px 12px;text-align:right;font-weight:700;color:#0e7490" id="prodMOCost_${grpId}">$${fmt(row.totalCost)}</td>
                   </tr>
+                  ${row.transitHrs > 0 ? `<tr style="border-top:1px solid #e8f5e9;background:#fffde7;">
+                    <td style="padding:6px 12px;color:#f57f17;font-style:italic;">🚗 Traslado entre servicios</td>
+                    <td style="padding:6px 12px;text-align:center;color:#f57f17">${fmtH(row.transitHrs)}</td>
+                    <td style="padding:6px 12px;text-align:center;color:#f57f17;font-weight:600">${fmtH(row.transitHrs)}</td>
+                    <td style="padding:6px 12px;text-align:right;color:#f57f17;font-weight:600" id="prodTransitCost_${grpId}">—</td>
+                  </tr>` : ''}
                   </tbody></table>
               </div>`;
 
@@ -10644,6 +10681,7 @@ class Scheduler {
                 </div>
                 <div style="display:flex;gap:16px;font-size:0.8rem;opacity:.9">
                   <span>⏱ ${fmtH(row.totalHrs)}</span>
+                  <span>🚗 Traslado: ${row.transitHrs > 0 ? fmtH(row.transitHrs) : '—'}</span>
                   <span>💰 Facturado: $${fmt(row.totalBilled)}</span>
                   <span>👷 Costo: $<span id="prodHdrCost_${grpId}">${fmt(row.totalCost)}</span></span>
                   <span style="font-weight:700">= Neto: $<span id="prodHdrNet_${grpId}">${fmt(row.totalBilled-row.totalCost)}</span></span>
@@ -10763,7 +10801,7 @@ class Scheduler {
             pdfGrandBilled += row.totalBilled;
             groupsHTML+=`<div style="margin-bottom:18px;border:1px solid #ccc;border-radius:6px;overflow:hidden;page-break-inside:avoid">
               <div style="background:#0e7490;color:white;padding:8px 12px">
-                <strong>👥 ${grp} (${empCount} empleados)</strong> — ${row.doneCount} servicios · ${fmtH(adjHrs)} · Facturado: $${fmt(row.totalBilled)} · Costo MO: $${fmt(adjCost)} · <strong>Neto: $${fmt(adjNet)}</strong>
+                <strong>👥 ${grp} (${empCount} empleados)</strong> — ${row.doneCount} servicios · ${fmtH(adjHrs)}${row.transitHrs > 0 ? ' + 🚗 ' + fmtH(row.transitHrs * empCount) + ' traslado' : ''} · Facturado: $${fmt(row.totalBilled)} · Costo MO: $${fmt(adjCost)} · <strong>Neto: $${fmt(adjNet)}</strong>
               </div>`;
             groupsHTML+=`<table style="width:100%;border-collapse:collapse;font-size:10px">
               <thead><tr style="background:#f5f5f5">
@@ -10782,7 +10820,15 @@ class Scheduler {
                 <td style="padding:5px 8px;text-align:right;color:#0e7490">${s.cost>0?'$'+fmt(s.cost):'—'}</td>
                 <td style="padding:5px 8px;text-align:center;font-size:9px">${s.status==='done'?'✅ Terminado':s.status==='active'?'⏳ Activo':'🔜 Pendiente'}</td>
               </tr>`).join('')}
-              </tbody></table></div>`;
+              </tbody>
+              ${row.transitHrs > 0 ? `<tfoot><tr style="background:#fffde7;border-top:2px solid #f57f17;">
+                <td colspan="4" style="padding:5px 8px;color:#f57f17;font-style:italic;">🚗 Traslado entre servicios (${empCount} empleados)</td>
+                <td style="padding:5px 8px;text-align:center;color:#f57f17;font-weight:600">${fmtH(row.transitHrs * empCount)}</td>
+                <td style="padding:5px 8px;text-align:right;color:#f57f17">—</td>
+                <td style="padding:5px 8px;text-align:right;color:#f57f17;font-weight:600">$${fmt(adjCost / (row.totalHrs||1) * row.transitHrs * empCount)}</td>
+                <td></td>
+              </tr></tfoot>` : ''}
+              </table></div>`;
         });
 
         const pdfGrandNet = pdfGrandBilled - pdfGrandCost;
