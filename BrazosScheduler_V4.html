@@ -10749,19 +10749,22 @@ class Scheduler {
         }
 
         let groupsHTML='';
+        let pdfGrandCost = 0;
+        let pdfGrandBilled = 0;
         Object.keys(groupRows).sort().forEach(grp=>{
             const row=groupRows[grp];
-            const empEntries=Object.values(row.empHrs).filter(e=>e.hrs>0);
+            const grpId = grp.replace(/\s+/g,'_');
+            const empCountInp = document.getElementById('prodEmpCount_' + grpId);
+            const empCount = empCountInp ? (parseInt(empCountInp.value) || 1) : 1;
+            const adjCost = row.totalCost * empCount;
+            const adjHrs = row.totalHrs * empCount;
+            const adjNet = row.totalBilled - adjCost;
+            pdfGrandCost += adjCost;
+            pdfGrandBilled += row.totalBilled;
             groupsHTML+=`<div style="margin-bottom:18px;border:1px solid #ccc;border-radius:6px;overflow:hidden;page-break-inside:avoid">
               <div style="background:#0e7490;color:white;padding:8px 12px">
-                <strong>👥 ${grp}</strong> — ${row.doneCount} servicios · ${fmtH(row.totalHrs)} · Facturado: $${fmt(row.totalBilled)} · Costo: $${fmt(row.totalCost)} · <strong>Neto: $${fmt(row.totalBilled-row.totalCost)}</strong>
+                <strong>👥 ${grp} (${empCount} empleados)</strong> — ${row.doneCount} servicios · ${fmtH(adjHrs)} · Facturado: $${fmt(row.totalBilled)} · Costo MO: $${fmt(adjCost)} · <strong>Neto: $${fmt(adjNet)}</strong>
               </div>`;
-            if(empEntries.length){
-                groupsHTML+=`<div style="padding:8px 12px;background:#e0f2f1">
-                  <strong style="font-size:10px;color:#00695c">Desglose empleados:</strong>
-                  ${empEntries.map(e=>`<span style="margin-left:10px;font-size:10px">${e.name}: ${fmtH(e.hrs)} = $${fmt(e.cost)}</span>`).join('')}
-                </div>`;
-            }
             groupsHTML+=`<table style="width:100%;border-collapse:collapse;font-size:10px">
               <thead><tr style="background:#f5f5f5">
                 <th style="padding:5px 8px;text-align:left">Fecha</th><th style="padding:5px 8px;text-align:left">Cliente</th>
@@ -10782,6 +10785,7 @@ class Scheduler {
               </tbody></table></div>`;
         });
 
+        const pdfGrandNet = pdfGrandBilled - pdfGrandCost;
         const win=window.open('','_blank');
         win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reporte Producción Brazos</title>
         <style>body{font-family:Arial,sans-serif;margin:30px;color:#333}h1{color:#0e7490;margin-bottom:4px}@media print{.no-print{display:none}}</style></head><body>
@@ -10791,8 +10795,8 @@ class Scheduler {
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
           <div style="background:#e8f8f5;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#27ae60;font-weight:700;text-transform:uppercase">Servicios</div><div style="font-size:1.5rem;font-weight:700">${grandSvcs}</div></div>
           <div style="background:#eaf4fb;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#2980b9;font-weight:700;text-transform:uppercase">Horas</div><div style="font-size:1.5rem;font-weight:700">${fmtH(grandHrs)}</div></div>
-          <div style="background:#fef9e7;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#d4a017;font-weight:700;text-transform:uppercase">Facturado</div><div style="font-size:1.5rem;font-weight:700">$${fmt(grandBilled)}</div></div>
-          <div style="background:${grandNet>=0?'#e8f8f5':'#fdf2f8'};border-radius:8px;padding:10px;text-align:center;border:2px solid ${grandNet>=0?'#27ae60':'#e74c3c'}"><div style="font-size:10px;color:${grandNet>=0?'#27ae60':'#e74c3c'};font-weight:700;text-transform:uppercase">Ganancia Neta</div><div style="font-size:1.5rem;font-weight:700;color:${grandNet>=0?'#1e8449':'#922b21'}">${grandNet>=0?'+':''}$${fmt(grandNet)}</div></div>
+          <div style="background:#fef9e7;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#d4a017;font-weight:700;text-transform:uppercase">Facturado</div><div style="font-size:1.5rem;font-weight:700">$${fmt(pdfGrandBilled)}</div></div>
+          <div style="background:${pdfGrandNet>=0?'#e8f8f5':'#fdf2f8'};border-radius:8px;padding:10px;text-align:center;border:2px solid ${pdfGrandNet>=0?'#27ae60':'#e74c3c'}"><div style="font-size:10px;color:${pdfGrandNet>=0?'#27ae60':'#e74c3c'};font-weight:700;text-transform:uppercase">Ganancia Neta</div><div style="font-size:1.5rem;font-weight:700;color:${pdfGrandNet>=0?'#1e8449':'#922b21'}">${pdfGrandNet>=0?'+':''}$${fmt(pdfGrandNet)}</div></div>
         </div>
         ${weeklyTableHTML}${groupsHTML}
         </body></html>`);
