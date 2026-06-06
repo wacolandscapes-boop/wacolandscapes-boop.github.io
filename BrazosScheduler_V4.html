@@ -11443,28 +11443,137 @@ class Scheduler {
     }
 
     printNominaMaria() {
+        const empGroup = this.nmGetEmpGroup();
+        const groupIds = (this.grupos[empGroup] || []).filter(id => id && id.trim() !== '').map(String);
+        const groupEmps = this.emps.filter(e => groupIds.includes(String(e.id)));
+
+        if (groupEmps.length <= 1) {
+            // Solo un empleado — imprimir directo
+            this.printNominaForEmp(groupEmps[0] || null);
+            return;
+        }
+
+        // Varios empleados — mostrar selector
+        const existing = document.getElementById('nmPrintModal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.id = 'nmPrintModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+        modal.innerHTML = `
+            <div style="background:#1a1a2e;color:#e2e8f0;border-radius:12px;padding:24px;width:350px;font-family:'Barlow',sans-serif;">
+                <h3 style="margin:0 0 16px;color:#a78bfa;">🖨️ Selecciona Empleados</h3>
+                <p style="font-size:0.85rem;color:#94a3b8;margin:0 0 12px;">¿Para quiénes generar comprobante?</p>
+                <div id="nmPrintEmpList" style="margin-bottom:16px;">
+                    ${groupEmps.map(e => `
+                        <label style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:6px;cursor:pointer;background:#2d3748;margin-bottom:6px;">
+                            <input type="checkbox" value="${e.id}" checked style="width:16px;height:16px;cursor:pointer;">
+                            <span>${e.name}</span>
+                        </label>
+                    `).join('')}
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button onclick="app.generateComprobantes()" style="flex:1;background:#7c3aed;color:white;border:none;padding:10px;border-radius:8px;cursor:pointer;font-weight:700;">📄 Generar</button>
+                    <button onclick="document.getElementById('nmPrintModal').remove()" style="background:#374151;color:white;border:none;padding:10px 16px;border-radius:8px;cursor:pointer;">Cancelar</button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+    }
+
+    generateComprobantes() {
+        const checks = document.querySelectorAll('#nmPrintEmpList input[type=checkbox]:checked');
+        const selectedIds = [...checks].map(c => c.value);
+        document.getElementById('nmPrintModal').remove();
+        selectedIds.forEach(empId => {
+            const emp = this.emps.find(e => String(e.id) === String(empId));
+            this.printNominaForEmp(emp);
+        });
+    }
+
+    printNominaForEmp(emp) {
         const monStr = document.getElementById('nmWeekStart').value;
         const mon = new Date(monStr + 'T12:00:00');
         const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
         const fmt2 = d => d.toLocaleDateString('es-MX',{month:'short',day:'numeric',year:'numeric'});
-        const emp = this.emps.find(e => String(e.id) === String(this.nmGetEmpId()));
         const empName = emp ? emp.name : 'Empleado';
-        const summaryHTML = document.getElementById('nmSummary').innerHTML;
-        const tableHTML = document.getElementById('nmServicesTable').innerHTML;
+        const pct = parseFloat(document.getElementById('nmPct').value) || 60;
+        const rate = parseFloat(document.getElementById('nmRate').value) || 15;
+        const bonus = parseFloat(document.getElementById('nmBonus').value) || 0;
+
+        // Recopilar datos de la tabla
+        const tbl = document.getElementById('nmServicesTable');
+        const rows = tbl.querySelectorAll('tbody tr:not(:last-child)');
+        let tableRows = '';
+        let totalPago = 0;
+
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length < 5) return;
+            const dia = cells[0]?.textContent || '';
+            const cliente = cells[1]?.textContent || '';
+            const precio = cells[2]?.querySelector('input')?.value || '0';
+            const empCount = cells[3]?.querySelector('input')?.value || '1';
+            const isSoloHrs = cells[5]?.querySelector('input')?.checked;
+            const pagoBruto = isSoloHrs ? 0 : parseFloat(precio) * (pct/100);
+            const pagoEmp = isSoloHrs ? 0 : pagoBruto / parseInt(empCount);
+            totalPago += pagoEmp;
+            tableRows += `<tr>
+                <td>${dia}</td>
+                <td>${cliente}</td>
+                <td style="text-align:right;">$${parseFloat(precio).toFixed(2)}</td>
+                <td style="text-align:right;">$${pagoBruto.toFixed(2)}</td>
+                <td style="text-align:center;">${empCount}</td>
+                <td style="text-align:right;font-weight:bold;color:#7c3aed;">$${pagoEmp.toFixed(2)}</td>
+            </tr>`;
+        });
+
+        // Horas directas
+        let directHrs = 0;
+        for (let i = 0; i < 7; i++) {
+            const inp = document.getElementById('nmHrs_' + i);
+            directHrs += inp ? (parseFloat(inp.value) || 0) : 0;
+        }
+        const directPay = directHrs * rate;
+        const grandTotal = totalPago + directPay + bonus;
+
         const win = window.open('','_blank');
         win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-        <title>Nómina ${empName} ${monStr}</title>
-        <style>body{font-family:Arial,sans-serif;padding:20px;color:#222;}
-        h1{color:#7c3aed;}table{width:100%;border-collapse:collapse;}
-        td,th{padding:8px;border:1px solid #ddd;}th{background:#f3f4f6;}
-        .summary{background:#f9fafb;padding:16px;border-radius:8px;margin-top:16px;}
-        @media print{button{display:none}}</style></head>
+        <title>Comprobante ${empName} ${monStr}</title>
+        <style>
+            body{font-family:Arial,sans-serif;padding:20px;color:#222;max-width:700px;margin:0 auto;}
+            h1{color:#7c3aed;margin-bottom:4px;}
+            h3{color:#555;font-weight:normal;margin-top:0;}
+            table{width:100%;border-collapse:collapse;margin-top:16px;}
+            td,th{padding:8px 10px;border:1px solid #ddd;}
+            th{background:#f3f4f6;color:#555;font-size:0.85rem;}
+            .total-row{background:#f3f4f6;font-weight:bold;}
+            .summary{background:#f9fafb;padding:16px;border-radius:8px;margin-top:20px;border:1px solid #e5e7eb;}
+            .summary-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb;}
+            .grand-total{font-size:1.3rem;font-weight:bold;color:#7c3aed;text-align:right;margin-top:12px;}
+            @media print{button{display:none}}
+        </style></head>
         <body>
-        <h1>💰 Nómina — ${empName}</h1>
-        <h3>Semana: ${fmt2(mon)} — ${fmt2(sun)}</h3>
-        <div>${tableHTML}</div>
-        <div class="summary">${summaryHTML}</div>
-        <button onclick="window.print()" style="margin-top:16px;padding:10px 20px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;">🖨️ Imprimir</button>
+        <h1>💰 Comprobante de Nómina</h1>
+        <h3>${empName} &nbsp;|&nbsp; Semana: ${fmt2(mon)} — ${fmt2(sun)}</h3>
+        <table>
+            <thead><tr>
+                <th>Día</th><th>Cliente</th><th>Precio</th>
+                <th>${pct}% Bruto</th><th>÷ Emp</th><th>Tu Pago</th>
+            </tr></thead>
+            <tbody>
+                ${tableRows}
+                <tr class="total-row">
+                    <td colspan="5">Total Servicios</td>
+                    <td style="text-align:right;color:#7c3aed;">$${totalPago.toFixed(2)}</td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="summary">
+            ${directHrs > 0 ? `<div class="summary-row"><span>Horas directas (${directHrs}h × $${rate})</span><span>$${directPay.toFixed(2)}</span></div>` : ''}
+            ${bonus > 0 ? `<div class="summary-row"><span>Bonus</span><span>$${bonus.toFixed(2)}</span></div>` : ''}
+            <div class="grand-total">TOTAL: $${grandTotal.toFixed(2)}</div>
+        </div>
+        <button onclick="window.print()" style="margin-top:20px;padding:10px 24px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:1rem;">🖨️ Imprimir</button>
         </body></html>`);
         win.document.close();
     }
