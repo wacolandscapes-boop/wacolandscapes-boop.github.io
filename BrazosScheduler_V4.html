@@ -10717,6 +10717,8 @@ class Scheduler {
                 </tbody></table></div>`;
         });
         content.innerHTML=html;
+        // Guardar para PDF/CSV
+        this._lastProdRender={groupRows,dates,grandHrs,grandCost,grandSvcs,grandBilled,dailyTotals,view};
         // Recalcular MO para todos los grupos con valores iniciales
         Object.keys(groupRows).sort().forEach(grp=>{
             const row=groupRows[grp];
