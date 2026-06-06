@@ -788,7 +788,7 @@
                     🚨 Emergency
                 </button>
                         <button class="btn-action" onclick="app.openProductionReport()" style="background:#0e7490; color:white; padding:6px 12px; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">📊 Producción</button>
-                        <button class="btn-action" onclick="app.openNominaMaria()" style="background:#7c3aed; color:white; padding:6px 12px; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">💰 Nómina María</button>
+                        <button class="btn-action" onclick="app.openNominaMaria()" style="background:#7c3aed; color:white; padding:6px 12px; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">💰 Nómina x %</button>
             </div>
         </div>
         
@@ -11092,7 +11092,8 @@ class Scheduler {
             const opt = document.createElement('option');
             opt.value = grp;
             opt.dataset.group = grp;
-            opt.textContent = grp + ' (' + (this.grupos[grp]||[]).length + ' empleados)';
+            const activeCount = (this.grupos[grp]||[]).filter(id => id && id.trim() !== '').length;
+            opt.textContent = grp + ' (' + activeCount + ' empleado' + (activeCount !== 1 ? 's' : '') + ')';
             sel.appendChild(opt);
         });
 
@@ -12444,11 +12445,11 @@ document.addEventListener('click', function(e) {
 <div id="nominaMariaModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9000;overflow-y:auto;">
   <!-- Barra minimizada -->
   <div id="nmMinBar" onclick="app.toggleMinimizeNomina()" style="display:none;position:fixed;bottom:0;left:50%;transform:translateX(-50%);background:#7c3aed;color:white;padding:8px 20px;border-radius:8px 8px 0 0;cursor:pointer;font-weight:700;z-index:9001;">
-    💰 Nómina Empleado &nbsp; □ Expandir
+    💰 Nómina x % &nbsp; □ Expandir
   </div>
   <div id="nominaMariaContent" style="background:#1a1a2e;color:#e2e8f0;max-width:900px;margin:20px auto;border-radius:12px;padding:24px;font-family:'Barlow',sans-serif;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <h2 style="margin:0;color:#a78bfa;font-size:1.4rem;">💰 Nómina Empleado</h2>
+      <h2 style="margin:0;color:#a78bfa;font-size:1.4rem;">💰 Nómina x %</h2>
       <div style="display:flex;gap:8px;">
         <button id="nmMinBtn" onclick="app.toggleMinimizeNomina()" title="Minimizar" style="background:#374151;color:white;border:none;width:30px;height:30px;border-radius:6px;cursor:pointer;font-size:1rem;">─</button>
         <button onclick="app.closeNominaMaria()" style="background:#ef4444;color:white;border:none;width:30px;height:30px;border-radius:6px;cursor:pointer;font-size:1rem;">✕</button>
