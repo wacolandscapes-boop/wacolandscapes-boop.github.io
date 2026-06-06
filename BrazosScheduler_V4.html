@@ -10210,24 +10210,23 @@ class Scheduler {
         const empCount = parseInt(empCountInp.value) || 1;
         const totalCost = baseCost * empCount;
         const totalHrs = baseHrs * empCount;
-        const ratePerEmp = baseHrs > 0 ? baseCost / baseHrs : 0;
+        const ratePerHr = baseHrs > 0 ? (baseCost / baseHrs) * 60 : 0;
         const net = (totalBilled || 0) - totalCost;
         const fmt = n => n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
         const fmtH = m => {
-            // m is in minutes
             const totalMin = Math.round(m);
             const h = Math.floor(totalMin / 60);
             const min = totalMin % 60;
             const frac = (totalMin / 60).toFixed(2);
             const hStr = h > 0 ? (min > 0 ? h + 'h ' + min + 'min' : h + 'h') : (min + 'min');
-            return hStr + ' (' + frac + ')';
+            return hStr + ' (' + frac + ' hrs)';
         };
         const rateEl = document.getElementById('prodMORate_' + grpId);
         const hrsEl = document.getElementById('prodMOHrs_' + grpId);
         const costEl = document.getElementById('prodMOCost_' + grpId);
         const hdrCostEl = document.getElementById('prodHdrCost_' + grpId);
         const hdrNetEl = document.getElementById('prodHdrNet_' + grpId);
-        if (rateEl) rateEl.textContent = '$' + fmt(ratePerEmp * 60) + '/hr'; // rate per hour
+        if (rateEl) rateEl.textContent = '$' + fmt(ratePerHr) + '/hr';
         if (hrsEl) hrsEl.textContent = fmtH(totalHrs);
         if (costEl) costEl.textContent = '$' + fmt(totalCost);
         if (hdrCostEl) hdrCostEl.textContent = fmt(totalCost);
