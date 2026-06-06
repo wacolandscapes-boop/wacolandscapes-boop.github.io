@@ -10183,6 +10183,44 @@ class Scheduler {
 
 
     // ══ PRODUCTION REPORT ══
+    toggleMinimizeProd() {
+        const modal = document.getElementById('productionModal');
+        const content = modal.querySelector('div');
+        const minBar = document.getElementById('prodMinBar');
+        const isMin = modal.dataset.minimized === 'true';
+        if (isMin) {
+            modal.dataset.minimized = 'false';
+            modal.style.background = 'rgba(0,0,0,0.6)';
+            modal.style.pointerEvents = 'auto';
+            content.style.display = 'block';
+            minBar.style.display = 'none';
+        } else {
+            modal.dataset.minimized = 'true';
+            modal.style.background = 'transparent';
+            modal.style.pointerEvents = 'none';
+            content.style.display = 'none';
+            minBar.style.display = 'flex';
+            minBar.style.pointerEvents = 'auto';
+        }
+    }
+
+    recalcGroupMO(grpId, totalCost, totalHrs) {
+        const empCountInp = document.getElementById('prodEmpCount_' + grpId);
+        if (!empCountInp) return;
+        const empCount = parseInt(empCountInp.value) || 1;
+        const costPerEmp = totalCost / empCount;
+        const hrsPerEmp = totalHrs / empCount;
+        const ratePerEmp = hrsPerEmp > 0 ? costPerEmp / hrsPerEmp : 0;
+        const fmt = n => n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        const fmtH = m => { const h=Math.floor(m/60); const min=Math.round(m%60); return h>0?(min>0?h+'h '+min+'min':h+'h'):(min+'min'); };
+        const rateEl = document.getElementById('prodMORate_' + grpId);
+        const hrsEl = document.getElementById('prodMOHrs_' + grpId);
+        const costEl = document.getElementById('prodMOCost_' + grpId);
+        if (rateEl) rateEl.textContent = '$' + fmt(ratePerEmp) + '/hr';
+        if (hrsEl) hrsEl.textContent = fmtH(hrsPerEmp);
+        if (costEl) costEl.textContent = '$' + fmt(costPerEmp);
+    }
+
     openProductionReport() {
         // Sync rates from Nomina before opening report
         try {
@@ -10219,6 +10257,11 @@ class Scheduler {
 
     closeProductionReport() {
         document.getElementById('productionModal').style.display = 'none';
+        document.getElementById('productionModal').dataset.minimized = 'false';
+        const prodContent = document.querySelector('#productionModal > div');
+        if (prodContent) prodContent.style.display = 'block';
+        const prodMinBar = document.getElementById('prodMinBar');
+        if (prodMinBar) prodMinBar.style.display = 'none';
         // Re-renderizar calendario para mostrar check-ins/check-outs actualizados
         this.render();
     }
@@ -10439,7 +10482,9 @@ class Scheduler {
                                     svcPrice = (pfm * 12) / 52;
                                 } else if (freq === 'quincenal' || freq === 'cada3semanas') {
                                     svcPrice = (pfm * 12) / 26;
-                                } else if (freq === 'diario' || freq === '2xsemana') {
+                                } else if (freq === '2xsemana') {
+                                    svcPrice = (pfm * 12) / 104;
+                                } else if (freq === 'diario') {
                                     svcPrice = (pfm * 12) / 260;
                                 } else {
                                     // mensual — precio directo
@@ -10526,36 +10571,42 @@ class Scheduler {
         // ── GROUP SECTIONS ──
         Object.keys(groupRows).sort().forEach(grp=>{
             const row=groupRows[grp];
-            // Employee breakdown table rows
-            const empEntries=Object.values(row.empHrs).filter(e=>e.hrs>0);
-            const empBreakdownHTML=empEntries.length?`
+            const activeMembers = row.members.filter(e => e);
+            const defaultEmpCount = activeMembers.length || 1;
+            const grpId = grp.replace(/\s+/g,'_');
+
+            // Mano de Obra section - editable employee count
+            const moHTML=`
               <div style="margin:12px 16px;border:1px solid #b2dfdb;border-radius:8px;overflow:hidden">
-                <div style="background:#e0f2f1;padding:7px 12px;font-size:0.78rem;font-weight:700;color:#00695c">👷 Desglose por Empleado</div>
+                <div style="background:#0e7490;padding:7px 12px;font-size:0.78rem;font-weight:700;color:white;display:flex;justify-content:space-between;align-items:center;">
+                  <span>👷 Mano de Obra</span>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:0.75rem;opacity:0.9;">Empleados que trabajaron:</span>
+                    <input type="number" id="prodEmpCount_${grpId}" value="${defaultEmpCount}" min="1" max="10"
+                      style="width:45px;padding:2px 6px;border:none;border-radius:4px;background:rgba(255,255,255,0.2);color:white;text-align:center;font-size:0.85rem;font-weight:700;"
+                      oninput="app.recalcGroupMO('${grpId}', ${row.totalCost}, ${row.totalHrs})">
+                  </div>
+                </div>
                 <table style="width:100%;border-collapse:collapse;font-size:0.8rem">
                   <thead><tr style="background:#f1f8f7">
-                    <th style="padding:6px 12px;text-align:left;color:#555">Empleado</th>
-                    <th style="padding:6px 12px;text-align:center;color:#555">Tarifa</th>
-                    <th style="padding:6px 12px;text-align:center;color:#555">Horas</th>
-                    <th style="padding:6px 12px;text-align:right;color:#555">Costo</th>
+                    <th style="padding:6px 12px;text-align:left;color:#555">Empleados</th>
+                    <th style="padding:6px 12px;text-align:center;color:#555">Tarifa/hr</th>
+                    <th style="padding:6px 12px;text-align:center;color:#555">Horas totales</th>
+                    <th style="padding:6px 12px;text-align:right;color:#555">Costo Total MO</th>
                   </tr></thead><tbody>
-                  ${empEntries.map((e,i)=>`<tr style="border-top:1px solid #e8f5e9;background:${i%2===0?'#fff':'#f9fefe'}">
-                    <td style="padding:6px 12px;font-weight:600">${e.name}</td>
-                    <td style="padding:6px 12px;text-align:center;color:#666">$${fmt(e.rate)}/hr</td>
-                    <td style="padding:6px 12px;text-align:center;color:#2980b9;font-weight:600">${fmtH(e.hrs)}</td>
-                    <td style="padding:6px 12px;text-align:right;font-weight:700;color:#0e7490">$${fmt(e.cost)}</td>
-                  </tr>`).join('')}
-                  ${empEntries.length>1?`<tr style="background:#e0f2f1;font-weight:700;border-top:2px solid #b2dfdb">
-                    <td colspan="2" style="padding:6px 12px;color:#00695c">TOTAL GRUPO</td>
-                    <td style="padding:6px 12px;text-align:center;color:#2980b9">${fmtH(row.totalHrs)}</td>
-                    <td style="padding:6px 12px;text-align:right;color:#0e7490">$${fmt(row.totalCost)}</td>
-                  </tr>`:''}
+                  <tr style="border-top:1px solid #e8f5e9;">
+                    <td style="padding:6px 12px;font-weight:600">${activeMembers.map(e=>e.name).join(', ') || grp}</td>
+                    <td style="padding:6px 12px;text-align:center;color:#666" id="prodMORate_${grpId}">$${fmt(activeMembers.length > 0 ? row.totalCost / (row.totalHrs || 1) : 15)}/hr</td>
+                    <td style="padding:6px 12px;text-align:center;color:#2980b9;font-weight:600" id="prodMOHrs_${grpId}">${fmtH(row.totalHrs)}</td>
+                    <td style="padding:6px 12px;text-align:right;font-weight:700;color:#0e7490" id="prodMOCost_${grpId}">$${fmt(row.totalCost)}</td>
+                  </tr>
                   </tbody></table>
-              </div>`:'';
+              </div>`;
 
             html+=`<div style="border:1px solid #e9ecef;border-radius:12px;overflow:hidden;margin-bottom:16px">
               <div style="background:#0e7490;color:white;padding:10px 16px">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                  <strong>👥 ${grp} <span style="font-weight:400;font-size:0.82rem;opacity:.8">(${row.members.length} empleados)</span></strong>
+                  <strong>👥 ${grp} <span style="font-weight:400;font-size:0.82rem;opacity:.8">(${activeMembers.length} empleados)</span></strong>
                   <span style="font-size:0.82rem;opacity:.9">${row.doneCount} servicios completados</span>
                 </div>
                 <div style="display:flex;gap:16px;font-size:0.8rem;opacity:.9">
@@ -10566,7 +10617,7 @@ class Scheduler {
                 </div>
                 ${row.members.length?`<div style="font-size:0.75rem;opacity:.75;margin-top:3px">${row.members.map(e=>{const r=getRateForEmp(e);return e.name+' ($'+r.toFixed(2)+'/hr)';}).join(' · ')}</div>`:''}
               </div>
-              ${empBreakdownHTML}
+              ${moHTML}
               <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
                 <thead><tr style="background:#f8f9fa">
                   <th style="padding:8px 12px;text-align:left;color:#555">Fecha</th>
@@ -12556,11 +12607,19 @@ document.addEventListener('click', function(e) {
 
 
 <!-- ══ PRODUCTION REPORT MODAL ══ -->
+  <!-- Barra minimizada Producción -->
+  <div id="prodMinBar" onclick="app.toggleMinimizeProd()" style="display:none;position:fixed;bottom:0;left:50%;transform:translateX(-50%);background:#0e7490;color:white;padding:8px 20px;border-radius:8px 8px 0 0;cursor:pointer;font-weight:700;z-index:9001;">
+    📊 Producción □ Expandir
+  </div>
+
 <div id="productionModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;overflow-y:auto">
   <div style="background:#fff;border-radius:16px;max-width:860px;margin:30px auto;padding:0;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3)">
     <div style="background:#0e7490;color:white;padding:18px 24px;display:flex;justify-content:space-between;align-items:center">
       <h2 style="margin:0;font-size:1.3rem">📊 Reporte de Producción</h2>
-      <button onclick="app.closeProductionReport()" style="background:none;border:none;color:white;font-size:1.4rem;cursor:pointer">✕</button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button onclick="app.toggleMinimizeProd()" title="Minimizar" style="background:rgba(255,255,255,0.2);border:none;color:white;font-size:1.1rem;cursor:pointer;width:30px;height:30px;border-radius:50%;">—</button>
+        <button onclick="app.closeProductionReport()" style="background:none;border:none;color:white;font-size:1.4rem;cursor:pointer">✕</button>
+      </div>
     </div>
     <div style="padding:20px">
       <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:20px;padding:16px;background:#f8f9fa;border-radius:10px;border:1px solid #e9ecef">
