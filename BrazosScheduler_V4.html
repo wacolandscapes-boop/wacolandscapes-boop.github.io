@@ -11381,8 +11381,8 @@ class Scheduler {
         // Guardar datos de la semana
         if (monStr) this.nmSaveWeekData(monStr, { prices, soloHrs, hrs, bonus, emps });
 
-        // Total horas equivalentes
-        const hrsFromPct = rate > 0 ? totalPct / rate : 0;
+        // Total horas equivalentes — usar pago por empleado, no bruto total
+        const hrsFromPct = rate > 0 ? totalEmpPay / rate : 0;
         const totalHrs = hrsFromPct + directHrs;
 
         // Overtime (>40 hrs)
@@ -11394,7 +11394,7 @@ class Scheduler {
             regularPay = regularHrs * rate;
             otPay = otHrs * otRate;
         } else {
-            regularPay = totalPct + directPay;
+            regularPay = totalEmpPay + directPay;
             otPay = 0;
         }
 
