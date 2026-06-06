@@ -10204,21 +10204,26 @@ class Scheduler {
         }
     }
 
-    recalcGroupMO(grpId, totalCost, totalHrs) {
+    recalcGroupMO(grpId, totalCostPerEmp, totalHrsPerEmp, totalBilled) {
         const empCountInp = document.getElementById('prodEmpCount_' + grpId);
         if (!empCountInp) return;
         const empCount = parseInt(empCountInp.value) || 1;
-        const costPerEmp = totalCost / empCount;
-        const hrsPerEmp = totalHrs / empCount;
-        const ratePerEmp = hrsPerEmp > 0 ? costPerEmp / hrsPerEmp : 0;
+        const totalCost = totalCostPerEmp * empCount;
+        const totalHrs = totalHrsPerEmp * empCount;
+        const ratePerEmp = totalHrsPerEmp > 0 ? totalCostPerEmp / totalHrsPerEmp : 0;
+        const net = (totalBilled || 0) - totalCost;
         const fmt = n => n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
         const fmtH = m => { const h=Math.floor(m/60); const min=Math.round(m%60); return h>0?(min>0?h+'h '+min+'min':h+'h'):(min+'min'); };
         const rateEl = document.getElementById('prodMORate_' + grpId);
         const hrsEl = document.getElementById('prodMOHrs_' + grpId);
         const costEl = document.getElementById('prodMOCost_' + grpId);
+        const hdrCostEl = document.getElementById('prodHdrCost_' + grpId);
+        const hdrNetEl = document.getElementById('prodHdrNet_' + grpId);
         if (rateEl) rateEl.textContent = '$' + fmt(ratePerEmp) + '/hr';
-        if (hrsEl) hrsEl.textContent = fmtH(hrsPerEmp);
-        if (costEl) costEl.textContent = '$' + fmt(costPerEmp);
+        if (hrsEl) hrsEl.textContent = fmtH(totalHrs);
+        if (costEl) costEl.textContent = '$' + fmt(totalCost);
+        if (hdrCostEl) hdrCostEl.textContent = fmt(totalCost);
+        if (hdrNetEl) hdrNetEl.textContent = fmt(net);
     }
 
     openProductionReport() {
@@ -10584,7 +10589,7 @@ class Scheduler {
                     <span style="font-size:0.75rem;opacity:0.9;">Empleados que trabajaron:</span>
                     <input type="number" id="prodEmpCount_${grpId}" value="${defaultEmpCount}" min="1" max="10"
                       style="width:45px;padding:2px 6px;border:none;border-radius:4px;background:rgba(255,255,255,0.2);color:white;text-align:center;font-size:0.85rem;font-weight:700;"
-                      oninput="app.recalcGroupMO('${grpId}', ${row.totalCost}, ${row.totalHrs})">
+                      oninput="app.recalcGroupMO('${grpId}', ${defaultEmpCount > 0 ? row.totalCost/defaultEmpCount : row.totalCost}, ${defaultEmpCount > 0 ? row.totalHrs/defaultEmpCount : row.totalHrs}, ${row.totalBilled})">
                   </div>
                 </div>
                 <table style="width:100%;border-collapse:collapse;font-size:0.8rem">
@@ -10596,7 +10601,7 @@ class Scheduler {
                   </tr></thead><tbody>
                   <tr style="border-top:1px solid #e8f5e9;">
                     <td style="padding:6px 12px;font-weight:600">${activeMembers.map(e=>e.name).join(', ') || grp}</td>
-                    <td style="padding:6px 12px;text-align:center;color:#666" id="prodMORate_${grpId}">$${fmt(activeMembers.length > 0 ? row.totalCost / (row.totalHrs || 1) : 15)}/hr</td>
+                    <td style="padding:6px 12px;text-align:center;color:#666" id="prodMORate_${grpId}">$${fmt(row.totalHrs > 0 ? (row.totalCost/defaultEmpCount) / (row.totalHrs/defaultEmpCount) : 15)}/hr</td>
                     <td style="padding:6px 12px;text-align:center;color:#2980b9;font-weight:600" id="prodMOHrs_${grpId}">${fmtH(row.totalHrs)}</td>
                     <td style="padding:6px 12px;text-align:right;font-weight:700;color:#0e7490" id="prodMOCost_${grpId}">$${fmt(row.totalCost)}</td>
                   </tr>
@@ -10612,8 +10617,8 @@ class Scheduler {
                 <div style="display:flex;gap:16px;font-size:0.8rem;opacity:.9">
                   <span>⏱ ${fmtH(row.totalHrs)}</span>
                   <span>💰 Facturado: $${fmt(row.totalBilled)}</span>
-                  <span>👷 Costo: $${fmt(row.totalCost)}</span>
-                  <span style="font-weight:700">= Neto: $${fmt(row.totalBilled-row.totalCost)}</span>
+                  <span>👷 Costo: $<span id="prodHdrCost_${grpId}">${fmt(row.totalCost)}</span></span>
+                  <span style="font-weight:700">= Neto: $<span id="prodHdrNet_${grpId}">${fmt(row.totalBilled-row.totalCost)}</span></span>
                 </div>
                 ${row.members.length?`<div style="font-size:0.75rem;opacity:.75;margin-top:3px">${row.members.map(e=>{const r=getRateForEmp(e);return e.name+' ($'+r.toFixed(2)+'/hr)';}).join(' · ')}</div>`:''}
               </div>
