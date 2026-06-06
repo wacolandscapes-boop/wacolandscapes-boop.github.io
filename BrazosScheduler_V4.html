@@ -10214,35 +10214,45 @@ class Scheduler {
         const net = (totalBilled || 0) - totalCost;
         const fmt = n => n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
         const fmtH = m => {
+            // m is in minutes
             const totalMin = Math.round(m);
             const h = Math.floor(totalMin / 60);
             const min = totalMin % 60;
             const frac = (totalMin / 60).toFixed(2);
             const hStr = h > 0 ? (min > 0 ? h + 'h ' + min + 'min' : h + 'h') : (min + 'min');
-            return hStr + ' (' + frac + 'hrs)';
+            return hStr + ' (' + frac + ')';
         };
         const rateEl = document.getElementById('prodMORate_' + grpId);
         const hrsEl = document.getElementById('prodMOHrs_' + grpId);
         const costEl = document.getElementById('prodMOCost_' + grpId);
         const hdrCostEl = document.getElementById('prodHdrCost_' + grpId);
         const hdrNetEl = document.getElementById('prodHdrNet_' + grpId);
-        if (rateEl) rateEl.textContent = '$' + fmt(ratePerEmp) + '/hr';
+        if (rateEl) rateEl.textContent = '$' + fmt(ratePerEmp * 60) + '/hr'; // rate per hour
         if (hrsEl) hrsEl.textContent = fmtH(totalHrs);
         if (costEl) costEl.textContent = '$' + fmt(totalCost);
         if (hdrCostEl) hdrCostEl.textContent = fmt(totalCost);
         if (hdrNetEl) hdrNetEl.textContent = fmt(net);
-        // Actualizar resumen global sumando todos los grupos
-        let newGrandCost = 0;
+        // Actualizar resumen global
         if (this._lastProdRender) {
+            let newGrandCost = 0;
+            let newGrandBilled = 0;
             Object.keys(this._lastProdRender.groupRows).forEach(grp => {
                 const row = this._lastProdRender.groupRows[grp];
                 const gId = grp.replace(/\s+/g, '_');
                 const gInp = document.getElementById('prodEmpCount_' + gId);
                 const gCount = gInp ? (parseInt(gInp.value) || 1) : 1;
                 newGrandCost += row.totalCost * gCount;
+                newGrandBilled += row.totalBilled;
             });
             const summaryEl = document.getElementById('prodSummaryCost');
             if (summaryEl) summaryEl.textContent = '$' + fmt(newGrandCost);
+            // Actualizar Ganancia Neta global
+            const netEl = document.getElementById('prodSummaryNet');
+            if (netEl) {
+                const newNet = newGrandBilled - newGrandCost;
+                netEl.textContent = (newNet >= 0 ? '+' : '') + '$' + fmt(Math.abs(newNet));
+                netEl.style.color = newNet >= 0 ? '#1e8449' : '#922b21';
+            }
         }
     }
 
@@ -10549,7 +10559,7 @@ class Scheduler {
         </div>
         <div style="background:${grandNet>=0?'#e8f8f5':'#fdf2f8'};border-radius:10px;padding:14px;text-align:center;margin-bottom:20px;border:2px solid ${grandNet>=0?'#27ae60':'#e74c3c'}">
           <div style="font-size:0.75rem;color:${grandNet>=0?'#27ae60':'#e74c3c'};font-weight:700;text-transform:uppercase;letter-spacing:.5px">Ganancia neta (Facturado − Costo)</div>
-          <div style="font-size:2.2rem;font-weight:700;color:${grandNet>=0?'#1a6b4a':'#922b21'}">${grandNet>=0?'+':''}$${fmt(grandNet)}</div>
+          <div style="font-size:2.2rem;font-weight:700;color:${grandNet>=0?'#1a6b4a':'#922b21'}" id="prodSummaryNet">${grandNet>=0?'+':''}$${fmt(grandNet)}</div>
         </div>`;
 
         // ── WEEKLY DAILY TOTALS BAR ──
