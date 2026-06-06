@@ -11407,7 +11407,7 @@ class Scheduler {
                 <div>
                     <div style="color:#94a3b8;font-size:0.8rem;margin-bottom:8px;">RESUMEN SEMANA</div>
                     <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
-                        <span>Pago bruto (${Math.round(pct*100)}%)</span><span style="color:#86efac;">${fmt(totalPct)}</span>
+                        <span>Pago por empleado (${Math.round(pct*100)}%)</span><span style="color:#86efac;">${fmt(totalEmpPay)}</span>
                     </div>
                     <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #374151;">
                         <span>Horas directas (${directHrs.toFixed(2)} hrs × ${fmt(rate)})</span><span style="color:#86efac;">${fmt(directPay)}</span>
@@ -11484,13 +11484,95 @@ class Scheduler {
         const checks = document.querySelectorAll('#nmPrintEmpList input[type=checkbox]:checked');
         const selectedIds = [...checks].map(c => c.value);
         document.getElementById('nmPrintModal').remove();
-        // Usar setTimeout para evitar que el browser bloquee múltiples window.open
-        selectedIds.forEach((empId, idx) => {
-            setTimeout(() => {
-                const emp = this.emps.find(e => String(e.id) === String(empId));
-                this.printNominaForEmp(emp);
-            }, idx * 800);
+        
+        const monStr = document.getElementById('nmWeekStart').value;
+        const mon = new Date(monStr + 'T12:00:00');
+        const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
+        const fmt2 = d => d.toLocaleDateString('es-MX',{month:'short',day:'numeric',year:'numeric'});
+        const pct = parseFloat(document.getElementById('nmPct').value) || 60;
+        const rate = parseFloat(document.getElementById('nmRate').value) || 15;
+        const bonus = parseFloat(document.getElementById('nmBonus').value) || 0;
+
+        // Recopilar datos de la tabla una sola vez
+        const tbl = document.getElementById('nmServicesTable');
+        const rows = tbl.querySelectorAll('tbody tr:not(:last-child)');
+        const serviciosData = [];
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length < 6) return;
+            const dia = cells[0]?.textContent?.trim() || '';
+            const cliente = cells[1]?.textContent?.trim() || '';
+            const precio = parseFloat(cells[2]?.querySelector('input')?.value || 0);
+            const empCount = parseInt(cells[4]?.querySelector('input')?.value || 1);
+            const isSoloHrs = cells[6]?.querySelector('input')?.checked;
+            const pagoBruto = isSoloHrs ? 0 : precio * (pct/100);
+            const pagoEmp = isSoloHrs ? 0 : pagoBruto / empCount;
+            serviciosData.push({ dia, cliente, precio, empCount, isSoloHrs, pagoBruto, pagoEmp });
         });
+
+        let directHrs = 0;
+        for (let i = 0; i < 7; i++) {
+            const inp = document.getElementById('nmHrs_' + i);
+            directHrs += inp ? (parseFloat(inp.value) || 0) : 0;
+        }
+        const directPay = directHrs * rate;
+
+        // Generar una sola ventana con todos los comprobantes
+        let allHTML = '';
+        selectedIds.forEach((empId, idx) => {
+            const emp = this.emps.find(e => String(e.id) === String(empId));
+            const empName = emp ? emp.name : 'Empleado';
+            let tableRows = '';
+            let totalPago = 0;
+            serviciosData.forEach(s => {
+                totalPago += s.pagoEmp;
+                tableRows += `<tr>
+                    <td>${s.dia}</td><td>${s.cliente}</td>
+                    <td style="text-align:right;">$${s.precio.toFixed(2)}</td>
+                    <td style="text-align:right;">$${s.pagoBruto.toFixed(2)}</td>
+                    <td style="text-align:center;">${s.empCount}</td>
+                    <td style="text-align:right;font-weight:bold;color:#7c3aed;">$${s.pagoEmp.toFixed(2)}</td>
+                </tr>`;
+            });
+            const grandTotal = totalPago + directPay + bonus;
+            allHTML += `
+                ${idx > 0 ? '<div style="page-break-before:always;"></div>' : ''}
+                <h1 style="color:#7c3aed;">💰 Comprobante de Nómina</h1>
+                <h3 style="color:#555;font-weight:normal;">${empName} &nbsp;|&nbsp; Semana: ${fmt2(mon)} — ${fmt2(sun)}</h3>
+                <table>
+                    <thead><tr style="background:#f3f4f6;">
+                        <th>Día</th><th>Cliente</th><th>Precio</th>
+                        <th>${pct}% Bruto</th><th>÷ Emp</th><th>Tu Pago</th>
+                    </tr></thead>
+                    <tbody>
+                        ${tableRows}
+                        <tr style="background:#f3f4f6;font-weight:bold;">
+                            <td colspan="5">Total Servicios</td>
+                            <td style="text-align:right;color:#7c3aed;">$${totalPago.toFixed(2)}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div style="background:#f9fafb;padding:16px;border-radius:8px;margin-top:16px;border:1px solid #e5e7eb;">
+                    ${directHrs > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #e5e7eb;"><span>Horas directas (${directHrs}h × $${rate})</span><span>$${directPay.toFixed(2)}</span></div>` : ''}
+                    ${bonus > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #e5e7eb;"><span>Bonus</span><span>$${bonus.toFixed(2)}</span></div>` : ''}
+                    <div style="font-size:1.3rem;font-weight:bold;color:#7c3aed;text-align:right;margin-top:8px;">TOTAL: $${grandTotal.toFixed(2)}</div>
+                </div>`;
+        });
+
+        const win = window.open('','_blank');
+        win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+            <title>Comprobantes ${monStr}</title>
+            <style>
+                body{font-family:Arial,sans-serif;padding:20px;color:#222;max-width:700px;margin:0 auto;}
+                table{width:100%;border-collapse:collapse;margin-top:16px;}
+                td,th{padding:8px 10px;border:1px solid #ddd;}
+                @media print{button{display:none}.no-print{display:none}}
+            </style></head>
+            <body>
+            ${allHTML}
+            <button onclick="window.print()" class="no-print" style="margin-top:20px;padding:10px 24px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:1rem;display:block;">🖨️ Imprimir todos</button>
+            </body></html>`);
+        win.document.close();
     }
 
     printNominaForEmp(emp) {
