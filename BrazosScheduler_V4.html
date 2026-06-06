@@ -11216,7 +11216,7 @@ class Scheduler {
         document.querySelector('#nominaMariaContent h2').textContent = '💰 Nómina % — ' + empName;
         document.getElementById('nmMinBar').textContent = '💰 Nómina ' + empName.split(' ')[0] + ' □ Expandir';
 
-        const groupIds = (this.grupos[empGroup] || []).map(String);
+        const groupIds = (this.grupos[empGroup] || []).filter(id => id && id.trim() !== '').map(String);
         const weekServs = this.servs.filter(s =>
             !s.cancelled &&
             weekDates.includes(s.date) &&
