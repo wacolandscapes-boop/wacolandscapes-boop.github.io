@@ -3253,9 +3253,9 @@ class Scheduler {
         const rescheduleN = parseInt(document.getElementById('cancelRescheduleN').value) || 0;
 
         data.deductIncome = descontar;
-        // Actualizar servicio
-        const idx = this.servs.findIndex(x => x.id == data.id);
-        if (idx >= 0) this.servs[idx] = data;
+        // Eliminar original y re-insertar para evitar duplicados
+        this.servs = this.servs.filter(x => String(x.id) !== String(data.id));
+        this.servs.push(data);
 
         this.save();
         this.render();
