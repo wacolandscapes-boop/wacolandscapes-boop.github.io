@@ -2677,15 +2677,26 @@ class Scheduler {
         if (!unique.length) {
             dropdown.innerHTML = '<div style="padding:10px;color:#999;font-size:0.85rem;">Sin resultados</div>';
         } else {
-            dropdown.innerHTML = unique.map(c =>
-                `<div onclick="app._selectCalendarCli('${c.id}','${c.name.replace(/'/g,"\'")}','${val}')"
-                    style="padding:8px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid #f1f3f5;"
-                    onmouseover="this.style.background='#f0f7ff'" onmouseout="this.style.background=''"
-                >${c.name}${c.city?' · '+c.city:''}</div>`
-            ).join('') + `<div onclick="app._selectCalendarCli('all','TODOS','')"
-                style="padding:8px 12px;cursor:pointer;font-size:0.85rem;color:#888;background:#f8f9fa;"
-                onmouseover="this.style.background='#e9ecef'" onmouseout="this.style.background='#f8f9fa'"
-            >✕ Ver todos</div>`;
+            window._cliMapId = window._cliMapId||{};
+            window._cliMapName = window._cliMapName||{};
+            let dHtml = '';
+            unique.forEach(function(c) {
+                var ck = 'sc_'+String(c.id).replace(/[^a-zA-Z0-9]/g,'_');
+                window._cliMapId[ck] = String(c.id);
+                window._cliMapName[ck] = c.name;
+                dHtml += '<div data-ck="'+ck+'" class="cli-dd-item" style="padding:8px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid #f1f3f5;">'+c.name+(c.city?' · '+c.city:'')+'</div>';
+            });
+            dHtml += '<div data-ck="all" class="cli-dd-item" style="padding:8px 12px;cursor:pointer;font-size:0.85rem;color:#888;background:#f8f9fa;">✕ Ver todos</div>';
+            dropdown.innerHTML = dHtml;
+            dropdown.querySelectorAll('.cli-dd-item').forEach(function(el) {
+                el.addEventListener('mouseover', function(){ this.style.background='#f0f7ff'; });
+                el.addEventListener('mouseout', function(){ this.style.background=''; });
+                el.addEventListener('click', function() {
+                    var ck = this.dataset.ck;
+                    if(ck === 'all') { app._selectCalendarCli('all','TODOS',''); }
+                    else { app._selectCalendarCli(window._cliMapId[ck], window._cliMapName[ck], ''); }
+                });
+            });
         }
         dropdown.style.display = 'block';
     }
