@@ -10618,8 +10618,6 @@ class Scheduler {
             const activeEmpCount=activeMembers.length||1;
             const avgRateForGroup=activeMembers.reduce((s,e)=>s+getRateForEmp(e),0)/activeEmpCount;
             const baseCostPerEmp=row.totalHrs>0?avgRateForGroup*row.totalHrs:row.totalCost/activeEmpCount;
-            const empInp2=document.getElementById('prodEmpCount_'+grpId);
-            if(empInp2){empInp2.dataset.baseCostPerEmp=baseCostPerEmp;empInp2.dataset.baseHrs=row.totalHrs;empInp2.dataset.totalBilled=row.totalBilled;}
             const moHTML=`
               <div style="margin:16px;border:2px solid #0e7490;border-radius:10px;overflow:hidden">
                 <div style="background:#0e7490;padding:10px 16px;font-size:0.85rem;font-weight:700;color:white;display:flex;justify-content:space-between;align-items:center;">
@@ -10627,6 +10625,9 @@ class Scheduler {
                   <div style="display:flex;align-items:center;gap:8px;">
                     <span style="font-size:0.78rem;opacity:0.9;">Empleados que trabajaron:</span>
                     <input type="number" id="prodEmpCount_${grpId}" value="${defaultEmpCount}" min="1" max="10"
+                      data-base-cost-per-emp="${baseCostPerEmp}"
+                      data-base-hrs="${row.totalHrs}"
+                      data-total-billed="${row.totalBilled}"
                       style="width:48px;padding:3px 6px;border:none;border-radius:4px;background:rgba(255,255,255,0.2);color:white;text-align:center;font-size:0.9rem;font-weight:700;"
                       oninput="app.recalcGroupMO('${grpId}', parseFloat(this.dataset.baseCostPerEmp||0), parseFloat(this.dataset.baseHrs||0), parseFloat(this.dataset.totalBilled||0))">
                   </div>
@@ -10712,18 +10713,17 @@ class Scheduler {
         // Guardar para PDF/CSV
         this._lastProdRender={groupRows,dates,grandHrs,grandCost,grandSvcs,grandBilled,dailyTotals,view};
         // Recalcular MO — calcular baseCostPerEmp aquí donde el DOM ya existe
-        const nominaEmps2=JSON.parse(localStorage.getItem('brazos_employees')||'[]');
-        const getRate2=emp=>{if(!emp)return 15;if(parseFloat(emp.rate)>0)return parseFloat(emp.rate);const ne=nominaEmps2.find(n=>n.name&&emp.name&&n.name.trim().toLowerCase()===emp.name.trim().toLowerCase());return parseFloat(ne?.rate||ne?.payRate||ne?.hourlyRate||15);};
+        // Recalcular MO — dataset ya está en el HTML del input
         Object.keys(groupRows).sort().forEach(grp=>{
             const row=groupRows[grp];
             const grpId=grp.replace(/\s+/g,'_');
-            const am=row.members.filter(e=>e);
-            const ec=am.length||1;
-            const avgR=am.reduce((s,e)=>s+getRate2(e),0)/ec;
-            const bcp=row.totalHrs>0?avgR*row.totalHrs:row.totalCost/ec;
             const inp=document.getElementById('prodEmpCount_'+grpId);
-            if(inp){inp.dataset.baseCostPerEmp=bcp;inp.dataset.baseHrs=row.totalHrs;inp.dataset.totalBilled=row.totalBilled;}
-            this.recalcGroupMO(grpId, bcp, row.totalHrs, row.totalBilled);
+            if(inp){
+                const bcp=parseFloat(inp.dataset.baseCostPerEmp||0);
+                const bh=parseFloat(inp.dataset.baseHrs||0);
+                const tb=parseFloat(inp.dataset.totalBilled||0);
+                this.recalcGroupMO(grpId, bcp, bh, tb);
+            }
         });
     }
 
@@ -10866,7 +10866,8 @@ class Scheduler {
 
     async descargarHorariosGrupos() {
         // Ahora descarga archivos por fecha en lugar de por grupo
-        if (!this.driveConnected || !this.driveFolderId) return;
+        if (!this.driveConnected || !this.driveFolderId) { console.log('❌ descargarHorariosGrupos: no conectado o sin folderId'); return; }
+        console.log('📥 descargarHorariosGrupos iniciado, folderId:', this.driveFolderId);
         const today = new Date();
         const dates = [];
         for (let i = -14; i <= 14; i++) {
@@ -10886,20 +10887,21 @@ class Scheduler {
                 );
                 const sd = await sr.json();
                 if (!sd.files || !sd.files.length) return;
+                console.log('📄 Encontrado:', fname);
                 const fr = await fetch(
                     `https://www.googleapis.com/drive/v3/files/${sd.files[0].id}?alt=media`,
                     { headers: { Authorization: `Bearer ${this.driveToken}` } }
                 );
                 const dayData = await fr.json();
                 localStorage.setItem(key, JSON.stringify(dayData));
-                // dayData estructura: {empId: {empId, empName, group, services:[]}}
                 if (!this._prodReports[date]) this._prodReports[date] = {};
                 Object.keys(dayData).forEach(empId => {
                     this._prodReports[date][empId] = dayData[empId];
                 });
                 updated = true;
-            } catch(e) {}
+            } catch(e) { console.log('❌ Error en fecha', date, e.message); }
         }));
+        console.log('✅ descargarHorariosGrupos terminado, updated:', updated);
         if (updated) {
             this.render();
             const now = new Date();
