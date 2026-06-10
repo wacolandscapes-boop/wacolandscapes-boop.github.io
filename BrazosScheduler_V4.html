@@ -10204,14 +10204,22 @@ class Scheduler {
         }
     }
 
-    recalcGroupMO(grpId, baseCost, baseHrs, totalBilled) {
+    recalcGroupMO(grpId, baseCostPerEmp, baseHrs, totalBilled) {
         const empCountInp = document.getElementById('prodEmpCount_' + grpId);
         if (!empCountInp) return;
         const empCount = parseInt(empCountInp.value) || 1;
-        const totalCost = baseCost * empCount;
-        const totalHrs = baseHrs * empCount;
-        const ratePerHr = baseHrs > 0 ? baseCost / baseHrs : 0;
-        const net = (totalBilled || 0) - totalCost;
+        const totalCost = baseCostPerEmp * empCount;
+        const totalHrs = baseHrs;
+        const ratePerHr = baseHrs > 0 ? baseCostPerEmp / baseHrs : 0;
+        // Calcular costos de traslado con tarifa real
+        let transitCost = 0;
+        let shopTransitCost = 0;
+        if (this._lastProdRender) {
+            const row = this._lastProdRender.groupRows[Object.keys(this._lastProdRender.groupRows).find(g => g.replace(/\s+/g,'_') === grpId)];
+            if (row && row.transitHrs > 0) transitCost = ratePerHr * row.transitHrs * empCount;
+            if (row && row.shopTransitHrs > 0) shopTransitCost = ratePerHr * row.shopTransitHrs * empCount;
+        }
+        const totalCostConTraslado = totalCost + transitCost + shopTransitCost;
         const fmt = n => n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
         const fmtH = hrs => {
             const h = Math.floor(hrs);
@@ -10228,16 +10236,23 @@ class Scheduler {
         if (rateEl) rateEl.textContent = '$' + fmt(ratePerHr) + '/hr';
         if (hrsEl) hrsEl.textContent = fmtH(totalHrs);
         if (costEl) costEl.textContent = '$' + fmt(totalCost);
-        if (hdrCostEl) hdrCostEl.textContent = fmt(totalCost);
-        if (hdrNetEl) hdrNetEl.textContent = fmt(net);
-        // Update transit cost
+        if (hdrCostEl) hdrCostEl.textContent = fmt(totalCostConTraslado);
+        if (hdrNetEl) hdrNetEl.textContent = fmt((totalBilled || 0) - totalCostConTraslado);
+        // Update transit cost display
         const transitCostEl = document.getElementById('prodTransitCost_' + grpId);
-        if (transitCostEl && this._lastProdRender) {
-            const row = this._lastProdRender.groupRows[Object.keys(this._lastProdRender.groupRows).find(g => g.replace(/\s+/g,'_') === grpId)];
-            if (row && row.transitHrs > 0) {
-                const transitCost = ratePerHr * row.transitHrs * empCount;
-                transitCostEl.textContent = '$' + fmt(transitCost);
-            }
+        if (transitCostEl) {
+            if (transitCost > 0) transitCostEl.textContent = '$' + fmt(transitCost);
+        }
+        // Update shop transit cost display
+        const shopTransitEl = document.getElementById('prodShopTransitCost_' + grpId);
+        if (shopTransitEl) {
+            if (shopTransitCost > 0) shopTransitEl.textContent = '$' + fmt(shopTransitCost);
+        }
+        // Update total MO display and store in dataset for grandCost
+        const totalMOEl = document.getElementById('prodMOTotal_' + grpId);
+        if (totalMOEl) {
+            totalMOEl.textContent = '$' + fmt(totalCostConTraslado);
+            totalMOEl.dataset.totalCost = totalCostConTraslado;
         }
         // Actualizar resumen global
         if (this._lastProdRender) {
@@ -10246,19 +10261,79 @@ class Scheduler {
             Object.keys(this._lastProdRender.groupRows).forEach(grp => {
                 const row = this._lastProdRender.groupRows[grp];
                 const gId = grp.replace(/\s+/g, '_');
-                const gInp = document.getElementById('prodEmpCount_' + gId);
-                const gCount = gInp ? (parseInt(gInp.value) || 1) : 1;
-                newGrandCost += row.totalCost * gCount;
+                const totalEl = document.getElementById('prodMOTotal_' + gId);
+                if (totalEl && totalEl.dataset.totalCost) {
+                    newGrandCost += parseFloat(totalEl.dataset.totalCost);
+                } else {
+                    const gInp = document.getElementById('prodEmpCount_' + gId);
+                    const gCount = gInp ? (parseInt(gInp.value) || 1) : 1;
+                    newGrandCost += row.totalCost * gCount;
+                }
                 newGrandBilled += row.totalBilled;
             });
-            const summaryEl = document.getElementById('prodSummaryCost');
-            if (summaryEl) summaryEl.textContent = '$' + fmt(newGrandCost);
-            // Actualizar Ganancia Neta global
-            const netEl = document.getElementById('prodSummaryNet');
-            if (netEl) {
-                const newNet = newGrandBilled - newGrandCost;
-                netEl.textContent = (newNet >= 0 ? '+' : '') + '$' + fmt(Math.abs(newNet));
-                netEl.style.color = newNet >= 0 ? '#1e8449' : '#922b21';
+            // Summary cards removidos — sin actualización global necesaria
+            // Renderizar tabla semanal con costos reales ya calculados
+            if (this._weeklyPendingRender) {
+                const {dates, dailyTotals, grandSvcs, grandHrs, grandBilled, groupRows, fmt, fmtH, fmtDate} = this._weeklyPendingRender;
+                const dayNames=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+                const realDailyCost = {};
+                dates.forEach(dt => { realDailyCost[dt] = 0; });
+                Object.keys(groupRows).forEach(grp => {
+                    const row = groupRows[grp];
+                    const gId = grp.replace(/\s+/g,'_');
+                    const totalMOEl = document.getElementById('prodMOTotal_' + gId);
+                    const totalCost = totalMOEl ? parseFloat(totalMOEl.dataset.totalCost||0) : row.totalCost;
+                    const totalHrs = row.totalHrs || 1;
+                    row.services.filter(s=>s.status==='done'&&s.hrs>0).forEach(s=>{
+                        if (realDailyCost[s.date] !== undefined) {
+                            realDailyCost[s.date] += (s.hrs / totalHrs) * totalCost;
+                        }
+                    });
+                });
+                let grandRealCost = 0;
+                dates.forEach(dt => { grandRealCost += realDailyCost[dt]||0; });
+                const grandRealNet = grandBilled - grandRealCost;
+                const tableEl = document.getElementById('prodWeeklyTable');
+                if (tableEl) {
+                    tableEl.innerHTML = `<div style="margin-bottom:20px;border:1px solid #e9ecef;border-radius:12px;overflow:hidden">
+                      <div style="background:#374151;color:white;padding:10px 16px;font-weight:700;font-size:0.88rem">📅 Totales por Día</div>
+                      <div style="overflow-x:auto">
+                      <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+                        <thead><tr style="background:#f8f9fa">
+                          <th style="padding:8px 12px;text-align:left;color:#555">Día</th>
+                          <th style="padding:8px 12px;text-align:center;color:#555">Fecha</th>
+                          <th style="padding:8px 12px;text-align:center;color:#555">Servicios</th>
+                          <th style="padding:8px 12px;text-align:center;color:#555">Horas</th>
+                          <th style="padding:8px 12px;text-align:right;color:#555">Facturado</th>
+                          <th style="padding:8px 12px;text-align:right;color:#555">Costo MO</th>
+                          <th style="padding:8px 12px;text-align:right;color:#555">Neto</th>
+                        </tr></thead><tbody>
+                        \${dates.map((dt,i)=>{
+                            const d=dailyTotals[dt];
+                            const rc=realDailyCost[dt]||0;
+                            const net=d.billed-rc;
+                            const hasData=d.svcs>0;
+                            return \`<tr style="border-top:1px solid #f1f3f5;background:\${hasData?(i%2===0?'#fff':'#fafafa'):'#fafafa'}">
+                              <td style="padding:8px 12px;font-weight:700;color:#374151">\${dayNames[i]}</td>
+                              <td style="padding:8px 12px;text-align:center;color:#666">\${fmtDate(dt)}</td>
+                              <td style="padding:8px 12px;text-align:center;font-weight:600;color:\${hasData?'#27ae60':'#bbb'}">\${hasData?d.svcs:'—'}</td>
+                              <td style="padding:8px 12px;text-align:center;color:\${hasData?'#2980b9':'#bbb'}">\${hasData?fmtH(d.hrs):'—'}</td>
+                              <td style="padding:8px 12px;text-align:right;font-weight:600;color:\${hasData?'#9a7d0a':'#bbb'}">\${hasData?'\$'+fmt(d.billed):'—'}</td>
+                              <td style="padding:8px 12px;text-align:right;color:\${hasData?'#0e7490':'#bbb'}">\${hasData?'\$'+fmt(rc):'—'}</td>
+                              <td style="padding:8px 12px;text-align:right;font-weight:700;color:\${!hasData?'#bbb':net>=0?'#1e8449':'#922b21'}">\${hasData?(net>=0?'+':'')+'\$'+fmt(net):'—'}</td>
+                            </tr>\`;
+                        }).join('')}
+                        <tr style="background:#374151;color:white;font-weight:700;border-top:2px solid #1f2937">
+                          <td colspan="2" style="padding:8px 12px">TOTAL SEMANA</td>
+                          <td style="padding:8px 12px;text-align:center">\${grandSvcs}</td>
+                          <td style="padding:8px 12px;text-align:center">\${fmtH(grandHrs)}</td>
+                          <td style="padding:8px 12px;text-align:right">\$\${fmt(grandBilled)}</td>
+                          <td style="padding:8px 12px;text-align:right">\$\${fmt(grandRealCost)}</td>
+                          <td style="padding:8px 12px;text-align:right;color:\${grandRealNet>=0?'#6ee7b7':'#fca5a5'}">\${grandRealNet>=0?'+':''}\$\${fmt(grandRealNet)}</td>
+                        </tr>
+                      </tbody></table></div></div>`;
+                }
+                this._weeklyPendingRender = null;
             }
         }
     }
@@ -10292,9 +10367,8 @@ class Scheduler {
         });
         // Siempre recargar horarios frescos desde localStorage y Drive
         this._prodReports = null;
-        localStorage.removeItem('qt_bra_reports');
-        if (this.driveConnected) { this.loadProductionFromDrive(); }
-        else { this.loadProductionLocal(); }
+        // Horarios ya están en localStorage (descargados por descargarHorariosGrupos al sincronizar)
+        this.loadProductionLocal();
     }
 
     closeProductionReport() {
@@ -10508,6 +10582,9 @@ class Scheduler {
                 if(emp && !groupRows[grp].empHrs[emp.id]){
                     groupRows[grp].empHrs[emp.id]={name:emp.name||empData.empName,hrs:0,cost:0,rate:getRateForEmp(emp)};
                 }
+                // Guardar shopOut/shopBack
+                if(gd.shopOut && !groupRows[grp].shopOut) groupRows[grp].shopOut = gd.shopOut;
+                if(gd.shopBack && !groupRows[grp].shopBack) groupRows[grp].shopBack = gd.shopBack;
                 (gd.services||[]).slice().sort((a,b)=>{const ta=a.scheduledStart||'',tb=b.scheduledStart||'';if(ta&&tb)return ta.localeCompare(tb);if(ta)return -1;if(tb)return 1;return 0;}).forEach(svc=>{
                     let hrs=0;
                     if(svc.checkin&&svc.checkout){const[sh,sm]=svc.checkin.split(':').map(Number),[eh,em]=svc.checkout.split(':').map(Number);hrs=Math.max(0,((eh*60+em)-(sh*60+sm))/60);}
@@ -10574,63 +10651,33 @@ class Scheduler {
                 }
             });
             row.transitHrs = totalTransitHrs;
+            // Calcular traslado Shop
+            let shopTransitHrs = 0;
+            if (row.shopOut && row.shopBack) {
+                const [soh,som] = row.shopOut.split(':').map(Number);
+                const [sbh,sbm] = row.shopBack.split(':').map(Number);
+                const jornadaMin = (sbh*60+sbm)-(soh*60+som);
+                shopTransitHrs = Math.max(0,(jornadaMin - row.totalHrs*60 - totalTransitHrs*60)/60);
+            } else if (row.shopOut) {
+                const first = row.services.filter(s=>s.checkin).sort((a,b)=>a.checkin.localeCompare(b.checkin))[0];
+                if(first){const [soh,som]=row.shopOut.split(':').map(Number);const [fh,fm]=first.checkin.split(':').map(Number);shopTransitHrs=Math.max(0,((fh*60+fm)-(soh*60+som))/60);}
+            }
+            row.shopTransitHrs = shopTransitHrs;
         });
 
         if(!Object.keys(groupRows).length){content.innerHTML='<p style="color:#888;text-align:center;padding:40px">Sin datos para este período.</p>';return;}
         const grandNet=grandBilled-grandCost;
 
-        // ── SUMMARY CARDS ──
-        let html=`<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:20px">
-          <div style="background:#e8f8f5;border-radius:10px;padding:12px;text-align:center"><div style="font-size:0.72rem;color:#27ae60;font-weight:600;text-transform:uppercase">Servicios completados</div><div style="font-size:1.8rem;font-weight:700;color:#1a6b4a">${grandSvcs}</div></div>
-          <div style="background:#eaf4fb;border-radius:10px;padding:12px;text-align:center"><div style="font-size:0.72rem;color:#2980b9;font-weight:600;text-transform:uppercase">Horas en campo</div><div style="font-size:1.8rem;font-weight:700;color:#1a5276">${fmtH(grandHrs)}</div></div>
-          <div style="background:#fef9e7;border-radius:10px;padding:12px;text-align:center"><div style="font-size:0.72rem;color:#d4a017;font-weight:600;text-transform:uppercase">Total facturado</div><div style="font-size:1.8rem;font-weight:700;color:#9a7d0a">$${fmt(grandBilled)}</div></div>
-          <div style="background:#e0f7fa;border-radius:10px;padding:12px;text-align:center"><div style="font-size:0.72rem;color:#0e7490;font-weight:600;text-transform:uppercase">Costo mano de obra</div><div style="font-size:1.8rem;font-weight:700;color:#0e7490" id="prodSummaryCost">$${fmt(grandCost)}</div></div>
-        </div>
-        <div style="background:${grandNet>=0?'#e8f8f5':'#fdf2f8'};border-radius:10px;padding:14px;text-align:center;margin-bottom:20px;border:2px solid ${grandNet>=0?'#27ae60':'#e74c3c'}">
-          <div style="font-size:0.75rem;color:${grandNet>=0?'#27ae60':'#e74c3c'};font-weight:700;text-transform:uppercase;letter-spacing:.5px">Ganancia neta (Facturado − Costo)</div>
-          <div style="font-size:2.2rem;font-weight:700;color:${grandNet>=0?'#1a6b4a':'#922b21'}" id="prodSummaryNet">${grandNet>=0?'+':''}$${fmt(grandNet)}</div>
-        </div>`;
+        // ── SIN SUMMARY CARDS — info en recuadro azul de cada grupo ──
+        const netLabel = dates.length === 1 ? 'Ingresos Netos del Día' : 'Ingresos Netos del Período';
+        let html=view==='week'?`<div id="prodWeeklyTable"></div>`:``;
 
-        // ── WEEKLY DAILY TOTALS BAR ──
+        // ── WEEKLY DAILY TOTALS BAR — se renderiza después de recalcGroupMO ──
         if(view==='week'){
-            const dayNames=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
-            html+=`<div style="margin-bottom:20px;border:1px solid #e9ecef;border-radius:12px;overflow:hidden">
-              <div style="background:#374151;color:white;padding:10px 16px;font-weight:700;font-size:0.88rem">📅 Totales por Día</div>
-              <div style="overflow-x:auto">
-              <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
-                <thead><tr style="background:#f8f9fa">
-                  <th style="padding:8px 12px;text-align:left;color:#555">Día</th>
-                  <th style="padding:8px 12px;text-align:center;color:#555">Fecha</th>
-                  <th style="padding:8px 12px;text-align:center;color:#555">Servicios</th>
-                  <th style="padding:8px 12px;text-align:center;color:#555">Horas</th>
-                  <th style="padding:8px 12px;text-align:right;color:#555">Facturado</th>
-                  <th style="padding:8px 12px;text-align:right;color:#555">Costo MO</th>
-                  <th style="padding:8px 12px;text-align:right;color:#555">Neto</th>
-                </tr></thead><tbody>
-                ${dates.map((dt,i)=>{
-                    const d=dailyTotals[dt];
-                    const net=d.billed-d.cost;
-                    const hasData=d.svcs>0;
-                    return `<tr style="border-top:1px solid #f1f3f5;background:${hasData?(i%2===0?'#fff':'#fafafa'):'#fafafa'}">
-                      <td style="padding:8px 12px;font-weight:700;color:#374151">${dayNames[i]}</td>
-                      <td style="padding:8px 12px;text-align:center;color:#666">${fmtDate(dt)}</td>
-                      <td style="padding:8px 12px;text-align:center;font-weight:600;color:${hasData?'#27ae60':'#bbb'}">${hasData?d.svcs:'—'}</td>
-                      <td style="padding:8px 12px;text-align:center;color:${hasData?'#2980b9':'#bbb'}">${hasData?fmtH(d.hrs):'—'}</td>
-                      <td style="padding:8px 12px;text-align:right;font-weight:600;color:${hasData?'#9a7d0a':'#bbb'}">${hasData?'$'+fmt(d.billed):'—'}</td>
-                      <td style="padding:8px 12px;text-align:right;color:${hasData?'#0e7490':'#bbb'}">${hasData?'$'+fmt(d.cost):'—'}</td>
-                      <td style="padding:8px 12px;text-align:right;font-weight:700;color:${!hasData?'#bbb':net>=0?'#1e8449':'#922b21'}">${hasData?(net>=0?'+':'')+'$'+fmt(net):'—'}</td>
-                    </tr>`;
-                }).join('')}
-                <tr style="background:#374151;color:white;font-weight:700;border-top:2px solid #1f2937">
-                  <td colspan="2" style="padding:8px 12px">TOTAL SEMANA</td>
-                  <td style="padding:8px 12px;text-align:center">${grandSvcs}</td>
-                  <td style="padding:8px 12px;text-align:center">${fmtH(grandHrs)}</td>
-                  <td style="padding:8px 12px;text-align:right">$${fmt(grandBilled)}</td>
-                  <td style="padding:8px 12px;text-align:right">$${fmt(grandCost)}</td>
-                  <td style="padding:8px 12px;text-align:right;color:${grandNet>=0?'#6ee7b7':'#fca5a5'}">${grandNet>=0?'+':''}$${fmt(grandNet)}</td>
-                </tr>
-              </tbody></table></div></div>`;
+            this._weeklyPendingRender = {dates, dailyTotals, grandSvcs, grandHrs, grandBilled, groupRows, grandNet, fmt, fmtH, fmtDate};
         }
+
+
 
         // ── GROUP SECTIONS ──
         Object.keys(groupRows).sort().forEach(grp=>{
@@ -10639,54 +10686,68 @@ class Scheduler {
             const defaultEmpCount = activeMembers.length || 1;
             const grpId = grp.replace(/\s+/g,'_');
 
-            // Mano de Obra section - editable employee count
+            // Mano de Obra section - rediseñado
             const moHTML=`
-              <div style="margin:12px 16px;border:1px solid #b2dfdb;border-radius:8px;overflow:hidden">
-                <div style="background:#0e7490;padding:7px 12px;font-size:0.78rem;font-weight:700;color:white;display:flex;justify-content:space-between;align-items:center;">
+              <div style="margin:16px;border:2px solid #0e7490;border-radius:10px;overflow:hidden">
+                <div style="background:#0e7490;padding:10px 16px;font-size:0.85rem;font-weight:700;color:white;display:flex;justify-content:space-between;align-items:center;">
                   <span>👷 Mano de Obra</span>
                   <div style="display:flex;align-items:center;gap:8px;">
-                    <span style="font-size:0.75rem;opacity:0.9;">Empleados que trabajaron:</span>
+                    <span style="font-size:0.78rem;opacity:0.9;">Empleados que trabajaron:</span>
                     <input type="number" id="prodEmpCount_${grpId}" value="${defaultEmpCount}" min="1" max="10"
-                      style="width:45px;padding:2px 6px;border:none;border-radius:4px;background:rgba(255,255,255,0.2);color:white;text-align:center;font-size:0.85rem;font-weight:700;"
-                      oninput="app.recalcGroupMO('${grpId}', ${row.totalCost}, ${row.totalHrs}, ${row.totalBilled})">
+                      style="width:48px;padding:3px 6px;border:none;border-radius:4px;background:rgba(255,255,255,0.2);color:white;text-align:center;font-size:0.9rem;font-weight:700;"
+                      oninput="app.recalcGroupMO('${grpId}', parseFloat(this.dataset.baseCostPerEmp||0), parseFloat(this.dataset.baseHrs||0), parseFloat(this.dataset.totalBilled||0))">
                   </div>
                 </div>
-                <table style="width:100%;border-collapse:collapse;font-size:0.8rem">
-                  <thead><tr style="background:#f1f8f7">
-                    <th style="padding:6px 12px;text-align:left;color:#555">Empleados</th>
-                    <th style="padding:6px 12px;text-align:center;color:#555">Tarifa/hr</th>
-                    <th style="padding:6px 12px;text-align:center;color:#555">Horas totales</th>
-                    <th style="padding:6px 12px;text-align:right;color:#555">Costo Total MO</th>
-                  </tr></thead><tbody>
-                  <tr style="border-top:1px solid #e8f5e9;">
-                    <td style="padding:6px 12px;font-weight:600">${activeMembers.map(e=>e.name).join(', ') || grp}</td>
-                    <td style="padding:6px 12px;text-align:center;color:#666" id="prodMORate_${grpId}">$${fmt(row.totalHrs > 0 ? (row.totalCost/defaultEmpCount) / (row.totalHrs/defaultEmpCount) : 15)}/hr</td>
-                    <td style="padding:6px 12px;text-align:center;color:#2980b9;font-weight:600" id="prodMOHrs_${grpId}">${fmtH(row.totalHrs)}</td>
-                    <td style="padding:6px 12px;text-align:right;font-weight:700;color:#0e7490" id="prodMOCost_${grpId}">$${fmt(row.totalCost)}</td>
-                  </tr>
-                  ${row.transitHrs > 0 ? `<tr style="border-top:1px solid #e8f5e9;background:#fffde7;">
-                    <td style="padding:6px 12px;color:#f57f17;font-style:italic;">🚗 Traslado entre servicios</td>
-                    <td style="padding:6px 12px;text-align:center;color:#f57f17">${fmtH(row.transitHrs)}</td>
-                    <td style="padding:6px 12px;text-align:center;color:#f57f17;font-weight:600">${fmtH(row.transitHrs)}</td>
-                    <td style="padding:6px 12px;text-align:right;color:#f57f17;font-weight:600" id="prodTransitCost_${grpId}">—</td>
-                  </tr>` : ''}
-                  </tbody></table>
+                <div style="background:#e0f7fa;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #b2dfdb;">
+                  <div style="font-size:0.78rem;color:#555;margin-bottom:2px">${activeMembers.map(e=>{const r=getRateForEmp(e);return e.name+' ($'+r.toFixed(2)+'/hr)';}).join(' · ') || grp}</div>
+                  <div style="font-size:0.78rem;color:#555;">Tarifa prom: <strong id="prodMORate_${grpId}" style="color:#0e7490">—</strong></div>
+                </div>
+                <div style="padding:12px 16px;background:#fff;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span style="font-size:0.85rem;color:#444;">⏱ Trabajo en campo</span>
+                      <span style="font-size:0.82rem;color:#2980b9;font-weight:600" id="prodMOHrs_${grpId}">${fmtH(row.totalHrs)}</span>
+                    </div>
+                    <span style="font-size:1rem;font-weight:700;color:#0e7490" id="prodMOCost_${grpId}">$${fmt(row.totalCost)}</span>
+                  </div>
+                  ${row.transitHrs > 0 ? `
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:6px 10px;background:#fffde7;border-radius:6px;border-left:3px solid #f57f17;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span style="font-size:0.85rem;color:#f57f17;">🚗 Traslado entre servicios</span>
+                      <span style="font-size:0.82rem;color:#f57f17;font-weight:600">${fmtH(row.transitHrs)}</span>
+                    </div>
+                    <span style="font-size:1rem;font-weight:700;color:#f57f17" id="prodTransitCost_${grpId}">—</span>
+                  </div>` : ''}
+                  ${row.shopTransitHrs > 0 ? `
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:6px 10px;background:#fce4ec;border-radius:6px;border-left:3px solid #e91e63;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span style="font-size:0.85rem;color:#e91e63;">🏠 Traslado Shop (${row.shopOut||''}→${row.shopBack||''})</span>
+                      <span style="font-size:0.82rem;color:#e91e63;font-weight:600">${fmtH(row.shopTransitHrs)}</span>
+                    </div>
+                    <span style="font-size:1rem;font-weight:700;color:#e91e63" id="prodShopTransitCost_${grpId}">—</span>
+                  </div>` : ''}
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:2px solid #0e7490;margin-top:4px;">
+                    <span style="font-size:0.9rem;font-weight:700;color:#0e7490;">💰 Total Costo MO</span>
+                    <span style="font-size:1.2rem;font-weight:700;color:#0e7490;" id="prodMOTotal_${grpId}" data-total-cost="0">$${fmt(row.totalCost)}</span>
+                  </div>
+                </div>
               </div>`;
 
             html+=`<div style="border:1px solid #e9ecef;border-radius:12px;overflow:hidden;margin-bottom:16px">
               <div style="background:#0e7490;color:white;padding:10px 16px">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                  <strong>👥 ${grp} <span style="font-weight:400;font-size:0.82rem;opacity:.8">(${activeMembers.length} empleados)</span></strong>
-                  <span style="font-size:0.82rem;opacity:.9">${row.doneCount} servicios completados</span>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                  <strong style="font-size:1rem;">👥 ${grp} <span style="font-weight:700;font-size:0.82rem;">(${activeMembers.length} empleados)</span></strong>
+                  <strong style="font-size:0.82rem;">${row.doneCount} servicios completados</strong>
                 </div>
-                <div style="display:flex;gap:16px;font-size:0.8rem;opacity:.9">
-                  <span>⏱ ${fmtH(row.totalHrs)}</span>
-                  <span>🚗 Traslado: ${row.transitHrs > 0 ? fmtH(row.transitHrs) : '—'}</span>
-                  <span>💰 Facturado: $${fmt(row.totalBilled)}</span>
-                  <span>👷 Costo: $<span id="prodHdrCost_${grpId}">${fmt(row.totalCost)}</span></span>
-                  <span style="font-weight:700">= Neto: $<span id="prodHdrNet_${grpId}">${fmt(row.totalBilled-row.totalCost)}</span></span>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center;margin-bottom:10px;">
+                  <div><div style="font-size:0.7rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">⏱ Trabajo en Campo</div><div style="font-size:1rem;font-weight:700;">${fmtH(row.totalHrs)}</div></div>
+                  <div><div style="font-size:0.7rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">🚗 Traslado</div><div style="font-size:1rem;font-weight:700;">${row.transitHrs > 0 ? fmtH(row.transitHrs) : '—'}</div></div>
+                  <div><div style="font-size:0.7rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">💰 Facturado</div><div style="font-size:1rem;font-weight:700;">$${fmt(row.totalBilled)}</div></div>
+                  <div><div style="font-size:0.7rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">👷 Costo MO</div><div style="font-size:1rem;font-weight:700;">$<span id="prodHdrCost_${grpId}">${fmt(row.totalCost)}</span></div></div>
                 </div>
-                ${row.members.length?`<div style="font-size:0.75rem;opacity:.75;margin-top:3px">${row.members.map(e=>{const r=getRateForEmp(e);return e.name+' ($'+r.toFixed(2)+'/hr)';}).join(' · ')}</div>`:''}
+                <div style="border-top:1px solid rgba(255,255,255,0.3);padding-top:8px;text-align:center;font-size:1.05rem;font-weight:700;">
+                  ${netLabel}: $<span id="prodHdrNet_${grpId}">${fmt(row.totalBilled-row.totalCost)}</span>
+                </div>
               </div>
               ${moHTML}
               <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
@@ -10697,7 +10758,6 @@ class Scheduler {
                   <th style="padding:8px 12px;text-align:center;color:#555">Salida</th>
                   <th style="padding:8px 12px;text-align:center;color:#555">Horas</th>
                   <th style="padding:8px 12px;text-align:right;color:#555">Facturado</th>
-                  <th style="padding:8px 12px;text-align:right;color:#555">Costo MO</th>
                   <th style="padding:8px 12px;text-align:center;color:#555">Estado</th>
                 </tr></thead><tbody>
                 ${row.services.map((s,i)=>`<tr style="border-top:1px solid #f1f3f5;background:${i%2===0?'#fff':'#fafafa'}">
@@ -10711,7 +10771,6 @@ class Scheduler {
                   <td style="padding:8px 12px;text-align:center">${s.checkout?fmtT(s.checkout):'—'}</td>
                   <td style="padding:8px 12px;text-align:center;font-weight:600;color:#2980b9">${s.hrs>0?fmtH(s.hrs):'—'}</td>
                   <td style="padding:8px 12px;text-align:right;font-weight:600;color:#9a7d0a">${s.price>0?'$'+fmt(s.price):'—'}</td>
-                  <td style="padding:8px 12px;text-align:right;font-weight:600;color:#0e7490">${s.cost>0?'$'+fmt(s.cost):'—'}</td>
                   <td style="padding:8px 12px;text-align:center"><span style="padding:2px 8px;border-radius:12px;font-size:0.75rem;font-weight:600;background:${s.status==='done'?'#d5f5e3':s.status==='active'?'#fef9e7':'#f2f3f4'};color:${s.status==='done'?'#1e8449':s.status==='active'?'#d4ac0d':'#777'}">${s.status==='done'?'✅ Terminado':s.status==='active'?'⏳ En servicio':'🔜 Pendiente'}</span></td>
                 </tr>`).join('')}
                 </tbody></table></div>`;
@@ -10723,7 +10782,19 @@ class Scheduler {
         Object.keys(groupRows).sort().forEach(grp=>{
             const row=groupRows[grp];
             const grpId=grp.replace(/\s+/g,'_');
-            this.recalcGroupMO(grpId, row.totalCost, row.totalHrs, row.totalBilled);
+            // Guardar shopOut/shopBack
+            if(!groupRows[grp].shopOut) groupRows[grp].shopOut = null;
+            if(!groupRows[grp].shopBack) groupRows[grp].shopBack = null;
+            const activeEmpCount = activeMembers.length || 1;
+            const avgRateForGroup = activeMembers.reduce((s,e)=>s+getRateForEmp(e),0)/activeEmpCount;
+            const baseCostPerEmp = row.totalHrs > 0 ? avgRateForGroup * row.totalHrs : row.totalCost / activeEmpCount;
+            const empInp2 = document.getElementById('prodEmpCount_' + grpId);
+            if (empInp2) {
+                empInp2.dataset.baseCostPerEmp = baseCostPerEmp;
+                empInp2.dataset.baseHrs = row.totalHrs;
+                empInp2.dataset.totalBilled = row.totalBilled;
+            }
+            this.recalcGroupMO(grpId, baseCostPerEmp, row.totalHrs, row.totalBilled);
         });
     }
 
@@ -10793,62 +10864,89 @@ class Scheduler {
         let pdfGrandBilled = 0;
         Object.keys(groupRows).sort().forEach(grp=>{
             const row=groupRows[grp];
-            const grpId = grp.replace(/\s+/g,'_');
-            const empCountInp = document.getElementById('prodEmpCount_' + grpId);
-            const empCount = empCountInp ? (parseInt(empCountInp.value) || 1) : 1;
-            const adjCost = parseFloat(document.getElementById('prodMOCost_' + grpId)?.textContent?.replace(/[$,]/g,'') || row.totalCost);
-            const adjHrs = row.totalHrs * empCount;
-            const transitCostEl = document.getElementById('prodTransitCost_' + grpId);
-            const transitCost = transitCostEl ? parseFloat(transitCostEl.textContent.replace(/[$,—]/g,'') || 0) : 0;
-            const adjNet = row.totalBilled - adjCost;
-            pdfGrandCost += adjCost;
-            pdfGrandBilled += row.totalBilled;
-            groupsHTML+=`<div style="margin-bottom:18px;border:1px solid #ccc;border-radius:6px;overflow:hidden;page-break-inside:avoid">
-              <div style="background:#0e7490;color:white;padding:8px 12px">
-                <strong>👥 ${grp} (${empCount} empleados)</strong> — ${row.doneCount} servicios · ${fmtH(adjHrs)}${row.transitHrs > 0 ? ' + 🚗 ' + fmtH(row.transitHrs * empCount) + ' traslado' : ''} · Facturado: $${fmt(row.totalBilled)} · Costo MO: $${fmt(adjCost)} · <strong>Neto: $${fmt(adjNet)}</strong>
-              </div>`;
-            groupsHTML+=`<table style="width:100%;border-collapse:collapse;font-size:10px">
-              <thead><tr style="background:#f5f5f5">
-                <th style="padding:5px 8px;text-align:left">Fecha</th><th style="padding:5px 8px;text-align:left">Cliente</th>
-                <th style="padding:5px 8px;text-align:center">Llegada</th><th style="padding:5px 8px;text-align:center">Salida</th>
-                <th style="padding:5px 8px;text-align:center">Horas</th><th style="padding:5px 8px;text-align:right">Facturado</th>
-                <th style="padding:5px 8px;text-align:right">Costo MO</th><th style="padding:5px 8px;text-align:center">Estado</th>
-              </tr></thead><tbody>
-              ${row.services.map((s,i)=>`<tr style="border-top:1px solid #f0f0f0;background:${i%2===0?'#fff':'#fafafa'}">
-                <td style="padding:5px 8px;color:#666">${fmtDate(s.date)}</td>
-                <td style="padding:5px 8px"><strong>${s.clientName}</strong><br><span style="color:#999;font-size:9px">${s.address}</span></td>
-                <td style="padding:5px 8px;text-align:center">${s.checkin?fmtT(s.checkin):'—'}</td>
-                <td style="padding:5px 8px;text-align:center">${s.checkout?fmtT(s.checkout):'—'}</td>
-                <td style="padding:5px 8px;text-align:center;font-weight:600;color:#2980b9">${s.hrs>0?fmtH(s.hrs):'—'}</td>
-                <td style="padding:5px 8px;text-align:right;color:#9a7d0a">${s.price>0?'$'+fmt(s.price):'—'}</td>
-                <td style="padding:5px 8px;text-align:right;color:#0e7490">${s.cost>0?'$'+fmt(s.cost):'—'}</td>
-                <td style="padding:5px 8px;text-align:center;font-size:9px">${s.status==='done'?'✅ Terminado':s.status==='active'?'⏳ Activo':'🔜 Pendiente'}</td>
-              </tr>`).join('')}
-              </tbody>
-              ${row.transitHrs > 0 ? `<tfoot><tr style="background:#fffde7;border-top:2px solid #f57f17;">
-                <td colspan="4" style="padding:5px 8px;color:#f57f17;font-style:italic;">🚗 Traslado entre servicios (${empCount} empleados)</td>
-                <td style="padding:5px 8px;text-align:center;color:#f57f17;font-weight:600">${fmtH(row.transitHrs * empCount)}</td>
-                <td style="padding:5px 8px;text-align:right;color:#f57f17">—</td>
-                <td style="padding:5px 8px;text-align:right;color:#f57f17;font-weight:600">${transitCost > 0 ? '$' + fmt(transitCost) : '—'}</td>
-                <td></td>
-              </tr></tfoot>` : ''}
-              </table></div>`;
+            const grpId=grp.replace(/\s+/g,'_');
+            const activeMembers=row.members.filter(e=>e);
+            const empCountInp=document.getElementById('prodEmpCount_'+grpId);
+            const empCount=empCountInp?(parseInt(empCountInp.value)||1):(activeMembers.length||1);
+            const totalMOEl=document.getElementById('prodMOTotal_'+grpId);
+            const adjCost=totalMOEl?parseFloat(totalMOEl.dataset.totalCost||0):row.totalCost;
+            const transitCostEl=document.getElementById('prodTransitCost_'+grpId);
+            const transitCost=transitCostEl?parseFloat(transitCostEl.textContent.replace(/[$,—]/g,'')||0):0;
+            const shopTransitCost=(row.shopTransitHrs||0)>0?(adjCost-transitCost)*(row.shopTransitHrs/(row.totalHrs+(row.shopTransitHrs||0)+(row.transitHrs||0))):0;
+            const baseCost=adjCost-transitCost-shopTransitCost;
+            const ratePerHr=row.totalHrs>0?baseCost/(row.totalHrs*empCount):0;
+            const adjNet=row.totalBilled-adjCost;
+            pdfGrandCost+=adjCost; pdfGrandBilled+=row.totalBilled;
+            groupsHTML+=`<div style="margin-bottom:18px;border:2px solid #0e7490;border-radius:10px;overflow:hidden;page-break-inside:avoid">
+              <div style="background:#0e7490;color:white;padding:12px 16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                  <strong style="font-size:1rem;">👥 ${grp} (${activeMembers.length} empleados)</strong>
+                  <strong style="font-size:0.85rem;">${row.doneCount} servicios completados</strong>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center;margin-bottom:10px;">
+                  <div><div style="font-size:0.65rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">⏱ Trabajo en Campo</div><div style="font-size:0.95rem;font-weight:700;">${fmtH(row.totalHrs)}</div></div>
+                  <div><div style="font-size:0.65rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">🚗 Traslado</div><div style="font-size:0.95rem;font-weight:700;">${row.transitHrs>0?fmtH(row.transitHrs):'—'}</div></div>
+                  <div><div style="font-size:0.65rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">💰 Facturado</div><div style="font-size:0.95rem;font-weight:700;">$${fmt(row.totalBilled)}</div></div>
+                  <div><div style="font-size:0.65rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">👷 Costo MO</div><div style="font-size:0.95rem;font-weight:700;">$${fmt(adjCost)}</div></div>
+                </div>
+                <div style="border-top:1px solid rgba(255,255,255,0.3);padding-top:8px;text-align:center;font-size:1rem;font-weight:700;">
+                  ${netLabel}: $${fmt(adjNet)}
+                </div>
+              </div>
+              <div style="margin:12px 16px;border:2px solid #0e7490;border-radius:8px;overflow:hidden;">
+                <div style="background:#0e7490;padding:8px 14px;font-size:0.8rem;font-weight:700;color:white;display:flex;justify-content:space-between;">
+                  <span>👷 Mano de Obra</span><span>Empleados: ${empCount}</span>
+                </div>
+                <div style="background:#e0f7fa;padding:8px 14px;font-size:0.8rem;border-bottom:1px solid #b2dfdb;">
+                  <div style="color:#0e7490;font-weight:600;margin-bottom:2px">${activeMembers.map(e=>{const r=parseFloat(e.rate)||15;return e.name+' ($'+r.toFixed(2)+'/hr)';}).join(' · ')}</div>
+                  <div style="color:#555;font-size:0.75rem;">Tarifa prom: <strong>$${fmt(ratePerHr)}/hr</strong></div>
+                </div>
+                <div style="padding:10px 14px;background:#fff;">
+                  <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+                    <span style="font-size:0.85rem;color:#444;">⏱ Trabajo en campo &nbsp;<strong style="color:#2980b9">${fmtH(row.totalHrs)}</strong></span>
+                    <strong style="color:#0e7490;">$${fmt(baseCost)}</strong>
+                  </div>
+                  ${transitCost>0?`<div style="display:flex;justify-content:space-between;margin-bottom:6px;padding:5px 8px;background:#fffde7;border-radius:4px;border-left:3px solid #f57f17;">
+                    <span style="font-size:0.85rem;color:#f57f17;">🚗 Traslado entre servicios &nbsp;<strong>${fmtH(row.transitHrs)}</strong></span>
+                    <strong style="color:#f57f17;">$${fmt(transitCost)}</strong>
+                  </div>`:''}
+                  ${shopTransitCost>0?`<div style="display:flex;justify-content:space-between;margin-bottom:6px;padding:5px 8px;background:#fce4ec;border-radius:4px;border-left:3px solid #e91e63;">
+                    <span style="font-size:0.85rem;color:#e91e63;">🏠 Traslado Shop (${row.shopOut||''}→${row.shopBack||''}) &nbsp;<strong>${fmtH(row.shopTransitHrs)}</strong></span>
+                    <strong style="color:#e91e63;">$${fmt(shopTransitCost)}</strong>
+                  </div>`:''}
+                  <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:2px solid #0e7490;">
+                    <strong style="color:#0e7490;">💰 Total Costo MO</strong>
+                    <strong style="font-size:1.1rem;color:#0e7490;">$${fmt(adjCost)}</strong>
+                  </div>
+                </div>
+              </div>
+              <table style="width:100%;border-collapse:collapse;font-size:10px;margin:0 0 12px;">
+                <thead><tr style="background:#f5f5f5">
+                  <th style="padding:5px 8px;text-align:left">Fecha</th><th style="padding:5px 8px;text-align:left">Cliente</th>
+                  <th style="padding:5px 8px;text-align:center">Llegada</th><th style="padding:5px 8px;text-align:center">Salida</th>
+                  <th style="padding:5px 8px;text-align:center">Horas</th><th style="padding:5px 8px;text-align:right">Facturado</th>
+                  <th style="padding:5px 8px;text-align:center">Estado</th>
+                </tr></thead><tbody>
+                ${row.services.map((s,i)=>`<tr style="border-top:1px solid #f0f0f0;background:${i%2===0?'#fff':'#fafafa'}">
+                  <td style="padding:5px 8px;color:#666">${fmtDate(s.date)}</td>
+                  <td style="padding:5px 8px"><strong>${s.clientName}</strong><br><span style="color:#999;font-size:9px">${s.address}</span></td>
+                  <td style="padding:5px 8px;text-align:center">${s.checkin?fmtT(s.checkin):'—'}</td>
+                  <td style="padding:5px 8px;text-align:center">${s.checkout?fmtT(s.checkout):'—'}</td>
+                  <td style="padding:5px 8px;text-align:center;font-weight:600;color:#2980b9">${s.hrs>0?fmtH(s.hrs):'—'}</td>
+                  <td style="padding:5px 8px;text-align:right;color:#9a7d0a">${s.price>0?'$'+fmt(s.price):'—'}</td>
+                  <td style="padding:5px 8px;text-align:center;font-size:9px">${s.status==='done'?'✅ Terminado':s.status==='active'?'⏳ Activo':'🔜 Pendiente'}</td>
+                </tr>`).join('')}
+                </tbody></table>
+            </div>`;
         });
-
-        const pdfGrandNet = pdfGrandBilled - pdfGrandCost;
+        const pdfGrandNet=pdfGrandBilled-pdfGrandCost;
         const win=window.open('','_blank');
-        win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reporte Producción Brazos</title>
-        <style>body{font-family:Arial,sans-serif;margin:30px;color:#333}h1{color:#0e7490;margin-bottom:4px}@media print{.no-print{display:none}}</style></head><body>
+        win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reporte Producción Brazos Cleaning</title>
+        <style>body{font-family:Arial,sans-serif;margin:30px;color:#333}@media print{.no-print{display:none}}</style></head><body>
         <div class="no-print" style="margin-bottom:16px"><button onclick="window.print()" style="background:#0e7490;color:white;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-size:1rem">🖨️ Imprimir</button></div>
-        <h1>📊 Reporte de Producción — Brazos Cleaning</h1>
-        <p style="color:#666;margin:0 0 16px">Período: ${periodo} &nbsp;·&nbsp; Generado: ${new Date().toLocaleString('es-MX')}</p>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
-          <div style="background:#e8f8f5;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#27ae60;font-weight:700;text-transform:uppercase">Servicios</div><div style="font-size:1.5rem;font-weight:700">${grandSvcs}</div></div>
-          <div style="background:#eaf4fb;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#2980b9;font-weight:700;text-transform:uppercase">Horas</div><div style="font-size:1.5rem;font-weight:700">${fmtH(grandHrs)}</div></div>
-          <div style="background:#fef9e7;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#d4a017;font-weight:700;text-transform:uppercase">Facturado</div><div style="font-size:1.5rem;font-weight:700">$${fmt(pdfGrandBilled)}</div></div>
-          <div style="background:${pdfGrandNet>=0?'#e8f8f5':'#fdf2f8'};border-radius:8px;padding:10px;text-align:center;border:2px solid ${pdfGrandNet>=0?'#27ae60':'#e74c3c'}"><div style="font-size:10px;color:${pdfGrandNet>=0?'#27ae60':'#e74c3c'};font-weight:700;text-transform:uppercase">Ganancia Neta</div><div style="font-size:1.5rem;font-weight:700;color:${pdfGrandNet>=0?'#1e8449':'#922b21'}">${pdfGrandNet>=0?'+':''}$${fmt(pdfGrandNet)}</div></div>
-        </div>
-        ${weeklyTableHTML}${groupsHTML}
+        <h1 style="font-size:1.2rem;text-align:center;margin:0 0 4px">📊 Reporte de Producción — Brazos Cleaning Services</h1>
+        <p style="color:#666;margin:0 0 20px;text-align:center;font-size:0.82rem">Período: ${periodo} &nbsp;·&nbsp; Generado: ${new Date().toLocaleString('es-MX')}</p>
+        ${groupsHTML}
         </body></html>`);
         win.document.close();
     }
@@ -12733,11 +12831,7 @@ document.addEventListener('click', function(e) {
             <option value="all">Todos los grupos</option>
           </select>
         </div>
-        <button onclick="app.loadProductionFromDrive()" style="padding:8px 16px;background:#3498db;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">🔄 Recargar Drive</button>
-        <button onclick="app.loadProductionLocal()" style="padding:8px 16px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">📱 QuikTrack Local</button>
-        <button onclick="app.loadProductionDemo()" style="padding:8px 16px;background:#e67e22;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">🧪 Datos demo</button>
-        <div style="margin-left:auto;display:flex;gap:8px">
-          <button onclick="app.exportProductionCSV()" style="padding:8px 16px;background:#6f42c1;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">📥 Exportar CSV</button>
+        <div style="margin-left:auto;">
           <button onclick="app.printProductionPDF()" style="padding:8px 16px;background:#0e7490;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">🖨️ Imprimir PDF</button>
         </div>
       </div>
