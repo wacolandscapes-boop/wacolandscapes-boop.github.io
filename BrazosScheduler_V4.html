@@ -4533,7 +4533,7 @@ class Scheduler {
                         <div style="display:flex;gap:4px;flex-wrap:wrap;">
                             <button onclick="app.regenerateInvoice(${index})" class="btn" style="background: #1A4FCC; color: white; padding: 5px 8px; font-size: 0.75rem;">🔄 Regenerar</button>
                             <button onclick="app.openInvoiceForEdit(${index})" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
-                            <button onclick="app.editInvoiceNumber('${inv.id}', '${inv.clientName}', ${inv.invoiceNumber})" class="btn" style="background: #6c757d; color: white; padding: 5px 8px; font-size: 0.75rem;"># Nº</button>
+                            <button onclick="app.editInvoiceNumber('${inv.id}', ${inv.invoiceNumber})" class="btn" style="background: #6c757d; color: white; padding: 5px 8px; font-size: 0.75rem;"># Nº</button>
                         </div>` : '<span style="color:#95a5a6;font-size:0.8rem">—</span>'}
                 </td>
             </tr>`;
@@ -4704,7 +4704,9 @@ class Scheduler {
         a.click();
     }
 
-    editInvoiceNumber(id, clientName, currentNumber) {
+    editInvoiceNumber(id, currentNumber) {
+        const inv2 = this.generatedInvoices ? this.generatedInvoices.find(i => String(i.id) === String(id)) : null;
+        const clientName = inv2 ? inv2.clientName : '';
         const newNum = prompt(`Editar número de factura para ${clientName}:\nNúmero actual: ${currentNumber}`, currentNumber);
         if (!newNum || isNaN(parseInt(newNum))) return;
         const num = parseInt(newNum);
@@ -8494,7 +8496,7 @@ class Scheduler {
                     <button onclick="app.printPDF('${pdfUrl}')" class="btn" style="background: #1A4FCC; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         🖨️ Imprimir
                     </button>
-                    <button onclick="app.savePDF(${pdfData.invoiceNumber}, '${client.name}', '${startDate}')" class="btn" style="background: #27ae60; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                    <button onclick="app.savePDF(window.currentPDFData.invoiceNumber, window.currentPDFData.client.id, window.currentPDFData.startDate)" class="btn" style="background: #27ae60; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         💾 Guardar
                     </button>
                     ${client.email ? `<button onclick="app.sendInvoiceByGmail(window.currentPDFData.blob, window.currentPDFData.client, window.currentPDFData.invoiceNumber, window.currentPDFData.total || 0, window.currentPDFData.startDate || '${startDate}', window.currentPDFData.endDate || '${endDate}')" class="btn" style="background: #ea4335; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
@@ -8627,7 +8629,13 @@ class Scheduler {
         }
     }
     
-    async savePDF(invoiceNumber, clientName, startDate) {
+    async savePDF(invoiceNumber, clientIdOrName, startDate) {
+        // Accept either clientId or clientName for backwards compatibility
+        let clientName = clientIdOrName;
+        if (this.clis) {
+            const cli = this.clis.find(c => String(c.id) === String(clientIdOrName));
+            if (cli) clientName = cli.name;
+        }
         const pdfData = window.currentPDFData;
 
         // ── VALIDACIÓN DE DUPLICADOS ──
