@@ -4162,16 +4162,27 @@ class Scheduler {
                 clients.some(c => c.id == s.cliId) && !s.cancelled &&
                 s.date >= thisMonthStart && s.date <= thisMonthEnd
             );
-            // perservice → facturar el día del servicio
+            // perservice → facturar el día del servicio (toda la semana actual)
             if (billingPeriod === 'perservice') {
-                const todayServs = thisMonthServs.filter(s => s.date === todayStr);
-                if (todayServs.length === 0) return;
-                todayServs.forEach(svc => {
+                // Calcular lunes de la semana actual
+                const weekStart = new Date(today);
+                weekStart.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+                const weekEnd = new Date(weekStart);
+                weekEnd.setDate(weekStart.getDate() + 6);
+                const weekStartStr = weekStart.toISOString().split('T')[0];
+                const weekEndStr = weekEnd.toISOString().split('T')[0];
+
+                const weekServs = thisMonthServs.filter(s => s.date >= weekStartStr && s.date <= weekEndStr);
+                if (weekServs.length === 0) return;
+
+                weekServs.forEach(svc => {
                     const svcKey = `${clientName}-perservice-${svc.date}-${svc.id}`;
                     if (this.pendingInvoices.some(p => p.periodKey === svcKey)) return;
                     if ((this.generatedInvoices || []).some(g =>
                         g.clientName === clientName && g.startDate === svc.date)) return;
                     const total = parseFloat(cli.price || 0);
+                    const isToday = svc.date === todayStr;
+                    const isPast = svc.date < todayStr;
                     this.pendingInvoices.push({
                         id: Date.now() + Math.random(),
                         periodKey: svcKey,
@@ -4184,8 +4195,10 @@ class Scheduler {
                         endDate: svc.date,
                         serviceCount: 1,
                         total,
-                        urgency: 'high',
-                        reason: '📧 Servicio hoy — Enviar factura',
+                        urgency: isToday ? 'high' : (isPast ? 'overdue' : 'normal'),
+                        reason: isToday ? '📧 Servicio hoy — Enviar factura' : 
+                                isPast ? `⚠️ Servicio del ${svc.date} — Pendiente de enviar` :
+                                `📅 Servicio el ${svc.date} — Preparar factura`,
                         createdAt: today.toISOString()
                     });
                 });
@@ -4293,15 +4306,16 @@ class Scheduler {
             }
             
             const isUrgent = pending.urgency === 'high';
-            const cardBorder = isUrgent ? '#e74c3c' : '#f39c12';
-            const cardBg = isUrgent ? '#fff5f5' : 'white';
+            const isOverdue = pending.urgency === 'overdue';
+            const cardBorder = isOverdue ? '#c0392b' : isUrgent ? '#e74c3c' : '#f39c12';
+            const cardBg = isOverdue ? '#fde8e8' : isUrgent ? '#fff5f5' : 'white';
             html += `
                 <div style="background: ${cardBg}; border: 2px solid ${cardBorder}; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
                     <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: start;">
                         <div>
                             <h3 style="margin: 0 0 10px 0; color: #2c3e50; display:flex; align-items:center; gap:8px;">
                                 ${serviceTypeIcon} ${pending.clientName}
-                                ${isUrgent ? '<span style="background:#e74c3c; color:white; font-size:0.7rem; padding:2px 8px; border-radius:20px; font-weight:700;">⚡ HOY</span>' : ''}
+                                ${isOverdue ? '<span style="background:#c0392b; color:white; font-size:0.7rem; padding:2px 8px; border-radius:20px; font-weight:700;">⚠️ ATRASADA</span>' : isUrgent ? '<span style="background:#e74c3c; color:white; font-size:0.7rem; padding:2px 8px; border-radius:20px; font-weight:700;">⚡ HOY</span>' : ''}
                             </h3>
                             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; color: #666; font-size: 0.9rem;">
                                 <div><strong>Tipo:</strong> ${pending.type.toUpperCase()}</div>
