@@ -761,7 +761,7 @@
                             📋 Pendientes
                             <span id="pendingBadge" style="display: none; position: absolute; top: 50%; transform: translateY(-50%); right: 10px; background: #e74c3c; color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; font-weight: bold; line-height: 18px; text-align: center;"></span>
                         </button>
-                        <button onclick="app.openGeneratedInvoices(); closeAllDropdowns();">📑 Generadas</button>
+                        <button onclick="app.openGeneratedInvoices(); closeAllDropdowns();">📑 Enviadas</button>
                         <button onclick="app.openCobros(); closeAllDropdowns();" style="position:relative">
                             💰 Cobros
                             <span id="cobrosBadge" style="display:none; position:absolute; top:50%; transform:translateY(-50%); right:10px; background:#e74c3c; color:white; border-radius:50%; width:18px; height:18px; font-size:10px; font-weight:bold; line-height:18px; text-align:center;"></span>
@@ -4287,8 +4287,16 @@ class Scheduler {
             return;
         }
         
+        const pendingSearch = (document.getElementById('pendingSearch')?.value || '').toLowerCase().trim();
+        const filteredPending = pendingSearch
+            ? this.pendingInvoices.filter(p =>
+                (p.clientName || '').toLowerCase().includes(pendingSearch) ||
+                (p.startDate || '').includes(pendingSearch) ||
+                (p.reason || '').toLowerCase().includes(pendingSearch))
+            : this.pendingInvoices;
+
         let html = '';
-        this.pendingInvoices.forEach((pending, index) => {
+        filteredPending.forEach((pending, index) => {
             const [startYear, startMonth, startDay] = pending.startDate.split('-');
             const [endYear, endMonth, endDay] = pending.endDate.split('-');
             const startFormatted = `${startMonth}/${startDay}/${startYear}`;
@@ -4511,6 +4519,7 @@ class Scheduler {
         const clientFilter = document.getElementById('genInvClient').value;
         const statusFilter = document.getElementById('genInvStatus')?.value || 'all';
         const periodFilter = document.getElementById('genInvPeriod')?.value || 'all';
+        const searchTerm = (document.getElementById('genInvSearch')?.value || '').toLowerCase().trim();
         
         if (!this.generatedInvoices) {
             this.generatedInvoices = [];
@@ -4526,6 +4535,13 @@ class Scheduler {
                 const invStart = inv.startDate || '';
                 const invEnd = inv.endDate || '';
                 if (!invStart.startsWith(periodFilter) && !invEnd.startsWith(periodFilter)) return false;
+            }
+            if (searchTerm) {
+                const numMatch = String(inv.invoiceNumber).includes(searchTerm);
+                const nameMatch = (inv.clientName || '').toLowerCase().includes(searchTerm);
+                const statusMatch = (inv.status || '').toLowerCase().includes(searchTerm);
+                const emailMatch = (inv.clientEmail || '').toLowerCase().includes(searchTerm);
+                if (!numMatch && !nameMatch && !statusMatch && !emailMatch) return false;
             }
             return true;
         });
@@ -4584,7 +4600,7 @@ class Scheduler {
         
         if (filtered.length === 0) {
             html = `<tr><td colspan="9" style="text-align: center; padding: 40px; color: #95a5a6;">
-                No hay facturas generadas en este período
+                No hay facturas en este período
             </td></tr>`;
         }
         
@@ -8643,6 +8659,48 @@ class Scheduler {
         printWindow.onload = function() {
             printWindow.print();
         };
+        // Registrar en historial al imprimir
+        this._registerInvoiceFromPDF('pendiente');
+    }
+
+    _registerInvoiceFromPDF(status) {
+        const pdfData = window.currentPDFData;
+        if (!pdfData || !pdfData.invoiceNumber) return;
+        if (!this.generatedInvoices) this.generatedInvoices = [];
+        const invoiceNumber = parseInt(pdfData.invoiceNumber);
+        const clientName = pdfData.client?.name || '';
+        const alreadyExists = this.generatedInvoices.find(i => i.invoiceNumber === invoiceNumber);
+        if (alreadyExists) {
+            if (status === 'enviada') { alreadyExists.status = 'enviada'; alreadyExists.sentAt = new Date().toISOString().split('T')[0]; }
+            this.save();
+            return;
+        }
+        const cli = this.clis ? this.clis.find(c => c.name === clientName) : null;
+        this.generatedInvoices.push({
+            id: Date.now() + Math.random(),
+            invoiceNumber,
+            generatedDate: new Date().toISOString().split('T')[0],
+            clientName,
+            clientEmail: cli?.email || '',
+            type: cli?.type || 'mensual',
+            startDate: pdfData.startDate || '',
+            endDate: pdfData.endDate || '',
+            serviceCount: pdfData.serviceCount || 0,
+            total: pdfData.total || 0,
+            status,
+            sentAt: status === 'enviada' ? new Date().toISOString().split('T')[0] : null,
+            paidAt: null, paidAmount: null, notes: '',
+            invoiceConfig: pdfData.invoiceConfig || null
+        });
+        // Eliminar de pendientes
+        if (this.pendingInvoices) {
+            this.pendingInvoices = this.pendingInvoices.filter(p =>
+                !(p.clientName === clientName && p.startDate === pdfData.startDate)
+            );
+        }
+        localStorage.setItem('lastInvoiceNumber', invoiceNumber.toString());
+        this.save();
+        this.updatePendingBadge();
     }
 
     async sendInvoiceByGmail(pdfBlob, client, invoiceNumber, total, startDate, endDate) {
@@ -8690,6 +8748,7 @@ class Scheduler {
             if (genInv) {
                 genInv.status = 'enviada';
                 genInv.sentAt = new Date().toLocaleDateString('en-CA');
+                this._registerInvoiceFromPDF('enviada');
             } else {
                 // Crear registro en generadas
                 this.generatedInvoices.push({
@@ -12432,11 +12491,11 @@ document.addEventListener('click', function(e) {
     </div>
 </div>
 
-<!-- Modal Facturas Generadas -->
+<!-- Modal Facturas Enviadas -->
 <div id="generatedInvoicesModal" class="modal">
     <div class="modal-content" style="width: 95%; max-width: none;">
         <h2 style="background: #16a085; color: white; padding: 15px 20px; margin: -20px -20px 20px -20px; border-radius: 8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;">
-            📑 Historial de Facturas Generadas
+            📑 Historial de Facturas Enviadas
             <span id="genInvBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.9rem;">0 facturas</span>
         </h2>
         
@@ -12469,6 +12528,12 @@ document.addEventListener('click', function(e) {
                         <option value="2025-10">Oct 2025</option>
                     </select>
                 </div>
+            </div>
+            <div style="margin-top:10px;">
+                <label style="font-size:0.8rem;font-weight:600;">🔍 Buscar (# factura, nombre, estado)</label>
+                <input type="text" id="genInvSearch" onkeyup="app.refreshGeneratedInvoices()" 
+                    placeholder="Ej: 7522, Yowell, pagada..."
+                    style="width:100%; padding:7px 12px; border:1px solid #ced4da; border-radius:6px; font-size:0.9rem; margin-top:4px;">
             </div>
         </div>
         
@@ -12531,6 +12596,11 @@ document.addEventListener('click', function(e) {
             </div>
         </h2>
         
+        <div style="padding: 10px 0 15px 0;">
+            <input type="text" id="pendingSearch" oninput="app.renderPendingInvoices()"
+                placeholder="🔍 Buscar por nombre o fecha..."
+                style="width:100%; padding:8px 12px; border:1px solid #ced4da; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
+        </div>
         <div id="pendingInvoicesList" style="max-height: 600px; overflow-y: auto;">
             <!-- Lista de facturas pendientes se carga dinámicamente -->
         </div>
