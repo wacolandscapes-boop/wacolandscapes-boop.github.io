@@ -8695,7 +8695,7 @@ class Scheduler {
         // Eliminar de pendientes
         if (this.pendingInvoices) {
             this.pendingInvoices = this.pendingInvoices.filter(p =>
-                !(p.clientName === clientName && p.startDate === pdfData.startDate)
+                !(p.clientName === clientName)
             );
         }
         localStorage.setItem('lastInvoiceNumber', invoiceNumber.toString());
@@ -8770,7 +8770,7 @@ class Scheduler {
             // Eliminar de pendingInvoices
             if (this.pendingInvoices) {
                 this.pendingInvoices = this.pendingInvoices.filter(p => 
-                    !(p.clientName === client.name && p.startDate === startDate && p.endDate === endDate)
+                    !(p.clientName === client.name)
                 );
             }
             this.save();
