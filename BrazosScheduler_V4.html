@@ -4151,8 +4151,49 @@ class Scheduler {
                 return;
             }
 
-            // ── REGLA 3: RECURRENTES (semanal/quincenal/mensual) → día 15 ──
-            if (currentDay < 15) return; // Solo mostrar a partir del día 15
+            // ── REGLA 3: RECURRENTES (semanal/quincenal/mensual) ──
+            // Mensual con 1 visita/mes → el día del servicio
+            // Semanal/Quincenal/Mensual con múltiples visitas → día 15
+
+            // Verificar si es mensual con 1 sola visita este mes
+            const thisMonthStart = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
+            const thisMonthEnd = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
+            const thisMonthServs = this.servs.filter(s =>
+                clients.some(c => c.id == s.cliId) && !s.cancelled &&
+                s.date >= thisMonthStart && s.date <= thisMonthEnd
+            );
+            const isSingleMonthly = cliType === 'mensual' && thisMonthServs.length === 1;
+
+            if (isSingleMonthly) {
+                // Mostrar en pendientes el día del servicio
+                const svc = thisMonthServs[0];
+                if (svc.date !== todayStr) return; // Solo el día del servicio
+                const svcKey = `${clientName}-mensual-single-${svc.date}`;
+                if (this.pendingInvoices.some(p => p.periodKey === svcKey)) return;
+                if ((this.generatedInvoices || []).some(g =>
+                    g.clientName === clientName && g.startDate === svc.date)) return;
+                const total = parseFloat(cli.price || 0);
+                this.pendingInvoices.push({
+                    id: Date.now() + Math.random(),
+                    periodKey: svcKey,
+                    clientName,
+                    clientEmail: cli.email || '',
+                    clientIds: clients.map(c => c.id),
+                    type: cliType,
+                    billingPeriod,
+                    startDate: svc.date,
+                    endDate: svc.date,
+                    serviceCount: 1,
+                    total,
+                    urgency: 'high',
+                    reason: '📧 Servicio hoy — Enviar factura',
+                    createdAt: today.toISOString()
+                });
+                return;
+            }
+
+            // Recurrentes con múltiples visitas → día 15
+            if (currentDay < 15) return;
 
             // Período del mes anterior
             const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
