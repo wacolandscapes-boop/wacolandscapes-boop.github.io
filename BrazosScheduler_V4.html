@@ -938,9 +938,6 @@
                 <div>
                     <label>Grupo</label>
                     <select id="mEmp" required onchange="document.getElementById('groupSuggestion').style.display='none'">
-                        <option value="Grupo A">Grupo A</option><option value="Grupo B">Grupo B</option>
-                        <option value="Grupo C">Grupo C</option><option value="Grupo D">Grupo D</option>
-                        <option value="Grupo E">Grupo E</option>
                     </select>
                     <div id="groupSuggestion" style="display:none; margin-top:5px; padding:6px 10px; border-radius:6px; font-size:0.78rem; border:1px solid #a5d6a7;"></div>
                 </div>
@@ -1225,6 +1222,12 @@
                     <div id="unassignedList" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
                 </div>
 
+                <!-- Agregar grupo -->
+                <div style="margin-bottom:14px; display:flex; align-items:center; gap:10px;">
+                    <input type="text" id="newGrupoName" placeholder="Ej: Grupo F" maxlength="30"
+                        style="padding:7px 12px; border:1px solid #ced4da; border-radius:6px; font-size:0.9rem; width:160px;">
+                    <button onclick="app.addGrupo()" class="btn" style="background:var(--success); color:white; padding:7px 16px;">➕ Agregar Grupo</button>
+                </div>
                 <!-- Resumen de grupos -->
                 <div id="gruposResumen" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px;"></div>
             </div>
@@ -1524,7 +1527,7 @@ class Scheduler {
         this.clis = JSON.parse(localStorage.getItem('v35_clis')) || [];
         this.servs = JSON.parse(localStorage.getItem('v35_servs')) || [];
         this.grupos = JSON.parse(localStorage.getItem('v35_grupos')) || {
-            "Grupo A":["","","","",""], "Grupo B":["","","","",""], "Grupo C":["","","","",""], "Grupo D":["","","","",""], "Grupo E":["","","","",""]
+            "Grupo A":["","","","",""], "Grupo B":["","","","",""]
         };
         this.gastos = JSON.parse(localStorage.getItem('v35_gastos')) || [];
         this.nominaTotales = JSON.parse(localStorage.getItem('v35_nominaTotales')) || [];
@@ -2995,9 +2998,28 @@ class Scheduler {
     moveDate(n) { if(this.view==='day') this.curDate.setDate(this.curDate.getDate()+n); else if(this.view==='week') this.curDate.setDate(this.curDate.getDate()+(n*7)); else this.curDate.setMonth(this.curDate.getMonth()+n); this.render(); }
     goToday() { this.curDate = new Date(); this.render(); }
     
+    getGrupoColors() {
+        const palette = ['#0D2B8E','#27ae60','#8e44ad','#e67e22','#e74c3c','#16a085','#d35400','#2c3e50','#1abc9c','#c0392b'];
+        const colors = {};
+        Object.keys(this.grupos).forEach((g, i) => { colors[g] = palette[i % palette.length]; });
+        return colors;
+    }
+
+    populateGroupDropdowns(selectedValue) {
+        const groups = Object.keys(this.grupos);
+        ['mEmp'].forEach(id => {
+            const sel = document.getElementById(id);
+            if (!sel) return;
+            const cur = selectedValue !== undefined ? selectedValue : sel.value;
+            sel.innerHTML = groups.map(g => `<option value="${g}">${g}</option>`).join('');
+            if (cur && groups.includes(cur)) sel.value = cur;
+        });
+    }
+
     openModal(s, d, g) { 
         this.editing = s; 
-        document.getElementById('serviceModal').style.display='block'; 
+        document.getElementById('serviceModal').style.display='block';
+        this.populateGroupDropdowns(g || (s ? s.empId : Object.keys(this.grupos)[0])); 
         
         if(s) { 
             // EDITAR servicio existente — ocultar bloque de repetición
@@ -4012,215 +4034,177 @@ class Scheduler {
     
     detectPendingInvoices() {
         const today = new Date();
-        const currentMonth = today.getMonth();
+        const todayStr = today.toISOString().split('T')[0];
+        const currentDay = today.getDate();
+        const currentMonth = today.getMonth(); // 0-based
         const currentYear = today.getFullYear();
-        
-        // Inicializar array de pendientes
-        if (!this.pendingInvoices) {
-            this.pendingInvoices = [];
-        }
-        
+        const dayOfWeek = today.getDay(); // 0=domingo, 1=lunes
+
+        if (!this.pendingInvoices) this.pendingInvoices = [];
+
         // Limpiar pendientes antiguos (más de 60 días)
         this.pendingInvoices = this.pendingInvoices.filter(p => {
-            const createdDate = new Date(p.createdAt);
-            const daysDiff = (today - createdDate) / (1000 * 60 * 60 * 24);
+            const daysDiff = (today - new Date(p.createdAt)) / (1000 * 60 * 60 * 24);
             return daysDiff < 60;
         });
-        
-        // Agrupar clientes por nombre (para AirBnb/Único)
+
+        // Agrupar clientes por nombre (para multi-propiedad)
         const clientGroups = {};
         this.clis.forEach(c => {
-            if (!clientGroups[c.name]) {
-                clientGroups[c.name] = [];
-            }
+            if (!clientGroups[c.name]) clientGroups[c.name] = [];
             clientGroups[c.name].push(c);
         });
-        
-        // Detectar servicios del MES ANTERIOR que no tienen factura
+
         Object.keys(clientGroups).forEach(clientName => {
             const clients = clientGroups[clientName];
-            const mainClient = clients[0];
-            
-            let startDate, endDate, reason;
-            const billingPeriod = mainClient.billingPeriod || 'monthly';
-            
-            // DEBUG: Ver qué período tiene cada cliente
-            console.log(`🔍 Cliente: ${clientName}, Recurrencia: ${mainClient.type}, Facturación: ${billingPeriod}`);
-            
-            switch(billingPeriod) {
-                case 'monthly':
-                    // Verificar si ya existe factura mensual
-                    const monthlyKey = `${clientName}-${currentYear}-${currentMonth - 1}-monthly`;
-                    const monthlyPending = this.pendingInvoices.some(p => p.periodKey === monthlyKey);
-                    const monthlyGenerated = (this.generatedInvoices || []).some(g => g.periodKey === monthlyKey);
-                    if (monthlyPending || monthlyGenerated) return;
-                    
-                    // Detectar servicios del mes anterior
-                    startDate = new Date(currentYear, currentMonth - 1, 1);
-                    endDate = new Date(currentYear, currentMonth, 0);
-                    reason = 'Servicios del mes anterior pendientes de facturar';
-                    
-                    // Contar servicios
-                    const monthlyServices = this.servs.filter(s => {
-                        const serviceDate = s.date;
-                        return clients.some(c => c.id == s.cliId) && 
-                               serviceDate >= startDate.toISOString().split('T')[0] && 
-                               serviceDate <= endDate.toISOString().split('T')[0];
-                    });
-                    
-                    if (monthlyServices.length > 0) {
-                        // Pago fijo mensual — usar precio del cliente, NO multiplicar por servicios
-                        const total = parseFloat(mainClient.price || 0);
-                        
-                        this.pendingInvoices.push({
-                            id: Date.now() + Math.random(),
-                            periodKey: monthlyKey,
-                            clientName: clientName,
-                            clientEmail: mainClient.email || '',
-                            clientIds: clients.map(c => c.id),
-                            type: mainClient.type,
-                            serviceType: mainClient.serviceType,
-                            billingPeriod: mainClient.billingPeriod,
-                            startDate: startDate.toISOString().split('T')[0],
-                            endDate: endDate.toISOString().split('T')[0],
-                            serviceCount: monthlyServices.length,
-                            total: total,
-                            reason: reason,
-                            createdAt: today.toISOString()
-                        });
-                    }
-                    return; // Salir después de procesar mensual
-                    
-                case 'biweekly':
-                    // Detectar quincenas del mes anterior
-                    // Primera quincena
-                    const firstHalfStart = new Date(currentYear, currentMonth - 1, 1);
-                    const firstHalfEnd = new Date(currentYear, currentMonth - 1, 15);
-                    const firstHalfKey = `${clientName}-${currentYear}-${currentMonth - 1}-1`;
-                    
-                    if (!this.pendingInvoices.some(p => p.periodKey === firstHalfKey) && 
-                        !(this.generatedInvoices || []).some(g => g.periodKey === firstHalfKey)) {
-                        const firstHalfServices = this.servs.filter(s => {
-                            const serviceDate = s.date;
-                            return clients.some(c => c.id == s.cliId) && 
-                                   serviceDate >= firstHalfStart.toISOString().split('T')[0] && 
-                                   serviceDate <= firstHalfEnd.toISOString().split('T')[0];
-                        });
-                        
-                        if (firstHalfServices.length > 0) {
-                            // Precio fijo quincenal = precio mensual / 2
-                            const total = parseFloat(mainClient.price || 0) / 2;
-                            
-                            this.pendingInvoices.push({
-                                id: Date.now() + Math.random(),
-                                periodKey: firstHalfKey,
-                                clientName: clientName,
-                                clientIds: clients.map(c => c.id),
-                                type: mainClient.type,
-                                serviceType: mainClient.serviceType,
-                                billingPeriod: mainClient.billingPeriod,
-                                startDate: firstHalfStart.toISOString().split('T')[0],
-                                endDate: firstHalfEnd.toISOString().split('T')[0],
-                                serviceCount: firstHalfServices.length,
-                                total: total,
-                                reason: 'Primera quincena del mes anterior',
-                                createdAt: today.toISOString()
-                            });
-                        }
-                    }
-                    
-                    // Segunda quincena
-                    const secondHalfStart = new Date(currentYear, currentMonth - 1, 16);
-                    const secondHalfEnd = new Date(currentYear, currentMonth, 0);
-                    const secondHalfKey = `${clientName}-${currentYear}-${currentMonth - 1}-2`;
-                    
-                    if (!this.pendingInvoices.some(p => p.periodKey === secondHalfKey) && 
-                        !(this.generatedInvoices || []).some(g => g.periodKey === secondHalfKey)) {
-                        const secondHalfServices = this.servs.filter(s => {
-                            const serviceDate = s.date;
-                            return clients.some(c => c.id == s.cliId) && 
-                                   serviceDate >= secondHalfStart.toISOString().split('T')[0] && 
-                                   serviceDate <= secondHalfEnd.toISOString().split('T')[0];
-                        });
-                        
-                        if (secondHalfServices.length > 0) {
-                            // Precio fijo quincenal = precio mensual / 2
-                            const total = parseFloat(mainClient.price || 0) / 2;
-                            
-                            this.pendingInvoices.push({
-                                id: Date.now() + Math.random(),
-                                periodKey: secondHalfKey,
-                                clientName: clientName,
-                                clientIds: clients.map(c => c.id),
-                                type: mainClient.type,
-                                serviceType: mainClient.serviceType,
-                                billingPeriod: mainClient.billingPeriod,
-                                startDate: secondHalfStart.toISOString().split('T')[0],
-                                endDate: secondHalfEnd.toISOString().split('T')[0],
-                                serviceCount: secondHalfServices.length,
-                                total: total,
-                                reason: 'Segunda quincena del mes anterior',
-                                createdAt: today.toISOString()
-                            });
-                        }
-                    }
-                    return; // Salir después de procesar quincenal
-                    
-                case 'weekly':
-                    // Verificar si ya existe factura semanal
-                    const weeklyKey = `${clientName}-${currentYear}-${currentMonth - 1}-weekly`;
-                    const weeklyPending = this.pendingInvoices.some(p => p.periodKey === weeklyKey);
-                    const weeklyGenerated = (this.generatedInvoices || []).some(g => g.periodKey === weeklyKey);
-                    if (weeklyPending || weeklyGenerated) return;
-                    
-                    // Detectar semanas del mes anterior
-                    startDate = new Date(currentYear, currentMonth - 1, 1);
-                    endDate = new Date(currentYear, currentMonth, 0);
-                    reason = 'Semanas del mes anterior';
-                    
-                    // Contar servicios
-                    const weeklyServices = this.servs.filter(s => {
-                        const serviceDate = s.date;
-                        return clients.some(c => c.id == s.cliId) && 
-                               serviceDate >= startDate.toISOString().split('T')[0] && 
-                               serviceDate <= endDate.toISOString().split('T')[0];
-                    });
-                    
-                    if (weeklyServices.length > 0) {
-                        let total = 0;
-                        weeklyServices.forEach(s => {
-                            const client = this.clis.find(c => c.id == s.cliId);
-                            if (client) total += parseFloat(client.price || 0);
-                        });
-                        
-                        this.pendingInvoices.push({
-                            id: Date.now() + Math.random(),
-                            periodKey: weeklyKey,
-                            clientName: clientName,
-                            clientEmail: mainClient.email || '',
-                            clientIds: clients.map(c => c.id),
-                            type: mainClient.type,
-                            serviceType: mainClient.serviceType,
-                            billingPeriod: mainClient.billingPeriod,
-                            startDate: startDate.toISOString().split('T')[0],
-                            endDate: endDate.toISOString().split('T')[0],
-                            serviceCount: weeklyServices.length,
-                            total: total,
-                            reason: reason,
-                            createdAt: today.toISOString()
-                        });
-                    }
-                    return; // Salir después de procesar semanal
-                    
-                case 'perservice':
-                    // No auto-detectar, se factura por servicio individual
-                    return;
-                    
-                default:
-                    return; // No procesar tipos desconocidos
+            const cli = clients[0];
+            const cliType = cli.type || 'mensual';
+            const billingPeriod = cli.billingPeriod || 'monthly';
+
+            // ── REGLA 1: AIRBNB → cada lunes, factura de la semana pasada ──
+            if (cliType === 'airbnb') {
+                if (dayOfWeek !== 1) return; // Solo lunes
+                // Semana anterior: lunes a domingo
+                const lastMonday = new Date(today);
+                lastMonday.setDate(today.getDate() - 7);
+                const lastSunday = new Date(today);
+                lastSunday.setDate(today.getDate() - 1);
+                const weekStart = lastMonday.toISOString().split('T')[0];
+                const weekEnd = lastSunday.toISOString().split('T')[0];
+                const weekKey = `${clientName}-airbnb-${weekStart}`;
+
+                if (this.pendingInvoices.some(p => p.periodKey === weekKey)) return;
+                if ((this.generatedInvoices || []).some(g => g.clientName === clientName &&
+                    g.startDate === weekStart)) return;
+
+                const weekServs = this.servs.filter(s =>
+                    clients.some(c => c.id == s.cliId) &&
+                    !s.cancelled &&
+                    s.date >= weekStart && s.date <= weekEnd
+                );
+                if (weekServs.length === 0) return;
+
+                const total = weekServs.reduce((sum, s) => {
+                    const c = this.clis.find(c => c.id == s.cliId);
+                    return sum + parseFloat(c?.price || 0);
+                }, 0);
+
+                this.pendingInvoices.push({
+                    id: Date.now() + Math.random(),
+                    periodKey: weekKey,
+                    clientName,
+                    clientEmail: cli.email || '',
+                    clientIds: clients.map(c => c.id),
+                    type: cliType,
+                    billingPeriod,
+                    startDate: weekStart,
+                    endDate: weekEnd,
+                    serviceCount: weekServs.length,
+                    total,
+                    urgency: 'high',
+                    reason: '🏠 AirBnB — Enviar factura hoy (martes)',
+                    createdAt: today.toISOString()
+                });
+                return;
             }
+
+            // ── REGLA 2: SERVICIO ÚNICO → el día del servicio ──
+            if (cliType === 'unico' || cliType === 'construccion') {
+                // Buscar servicios de hoy o esta semana sin factura
+                const weekAhead = new Date(today);
+                weekAhead.setDate(today.getDate() + 6);
+                const weekAheadStr = weekAhead.toISOString().split('T')[0];
+
+                const upcomingServs = this.servs.filter(s =>
+                    clients.some(c => c.id == s.cliId) &&
+                    !s.cancelled &&
+                    s.date >= todayStr && s.date <= weekAheadStr
+                );
+
+                upcomingServs.forEach(s => {
+                    const svcKey = `${clientName}-unico-${s.date}-${s.id}`;
+                    if (this.pendingInvoices.some(p => p.periodKey === svcKey)) return;
+                    if ((this.generatedInvoices || []).some(g =>
+                        g.clientName === clientName && g.startDate === s.date)) return;
+
+                    const c = this.clis.find(c => c.id == s.cliId);
+                    const total = parseFloat(c?.price || 0);
+                    const isToday = s.date === todayStr;
+
+                    this.pendingInvoices.push({
+                        id: Date.now() + Math.random(),
+                        periodKey: svcKey,
+                        clientName,
+                        clientEmail: cli.email || '',
+                        clientIds: [s.cliId],
+                        type: cliType,
+                        billingPeriod,
+                        startDate: s.date,
+                        endDate: s.date,
+                        serviceCount: 1,
+                        total,
+                        urgency: isToday ? 'high' : 'normal',
+                        reason: isToday ? '📧 Servicio hoy — Enviar factura' : `📅 Servicio el ${s.date} — Preparar factura`,
+                        createdAt: today.toISOString()
+                    });
+                });
+                return;
+            }
+
+            // ── REGLA 3: RECURRENTES (semanal/quincenal/mensual) → día 15 ──
+            if (currentDay < 15) return; // Solo mostrar a partir del día 15
+
+            // Período del mes anterior
+            const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+            const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+            const periodStart = new Date(prevYear, prevMonth, 1).toISOString().split('T')[0];
+            const periodEnd = new Date(prevYear, prevMonth + 1, 0).toISOString().split('T')[0];
+            const periodKey = `${clientName}-${prevYear}-${String(prevMonth+1).padStart(2,'0')}-recurrente`;
+
+            if (this.pendingInvoices.some(p => p.periodKey === periodKey)) return;
+            if ((this.generatedInvoices || []).some(g =>
+                g.clientName === clientName &&
+                g.startDate >= periodStart && g.startDate <= periodEnd)) return;
+
+            const monthServs = this.servs.filter(s =>
+                clients.some(c => c.id == s.cliId) &&
+                !s.cancelled &&
+                s.date >= periodStart && s.date <= periodEnd
+            );
+            if (monthServs.length === 0) return;
+
+            // Calcular total según tipo de facturación
+            let total = 0;
+            if (billingPeriod === 'monthly' || billingPeriod === 'biweekly') {
+                total = parseFloat(cli.price || 0);
+            } else {
+                total = monthServs.reduce((sum, s) => {
+                    const c = this.clis.find(c => c.id == s.cliId);
+                    return sum + parseFloat(c?.price || 0);
+                }, 0);
+            }
+
+            const typeLabel = cliType === 'semanal' ? 'Semanal' :
+                              cliType === 'quincenal' ? 'Quincenal' : 'Mensual';
+
+            this.pendingInvoices.push({
+                id: Date.now() + Math.random(),
+                periodKey,
+                clientName,
+                clientEmail: cli.email || '',
+                clientIds: clients.map(c => c.id),
+                type: cliType,
+                billingPeriod,
+                startDate: periodStart,
+                endDate: periodEnd,
+                serviceCount: monthServs.length,
+                total,
+                urgency: 'normal',
+                reason: `📋 ${typeLabel} — Verificar y facturar mes anterior`,
+                createdAt: today.toISOString()
+            });
         });
-        
+
         // Actualizar badge
         this.updatePendingBadge();
     }
@@ -4267,12 +4251,16 @@ class Scheduler {
                 case 'construccion': serviceTypeIcon = '🏗️'; break;
             }
             
+            const isUrgent = pending.urgency === 'high';
+            const cardBorder = isUrgent ? '#e74c3c' : '#f39c12';
+            const cardBg = isUrgent ? '#fff5f5' : 'white';
             html += `
-                <div style="background: white; border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
+                <div style="background: ${cardBg}; border: 2px solid ${cardBorder}; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
                     <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: start;">
                         <div>
-                            <h3 style="margin: 0 0 10px 0; color: #2c3e50;">
+                            <h3 style="margin: 0 0 10px 0; color: #2c3e50; display:flex; align-items:center; gap:8px;">
                                 ${serviceTypeIcon} ${pending.clientName}
+                                ${isUrgent ? '<span style="background:#e74c3c; color:white; font-size:0.7rem; padding:2px 8px; border-radius:20px; font-weight:700;">⚡ HOY</span>' : ''}
                             </h3>
                             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; color: #666; font-size: 0.9rem;">
                                 <div><strong>Tipo:</strong> ${pending.type.toUpperCase()}</div>
@@ -4280,8 +4268,8 @@ class Scheduler {
                                 <div><strong>Servicios:</strong> ${pending.serviceCount}</div>
                                 <div><strong>Total:</strong> <span style="color: #27ae60; font-weight: bold; font-size: 1.1rem;">$${pending.total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span></div>
                             </div>
-                            <div style="margin-top: 10px; padding: 8px 12px; background: #fff3cd; border-left: 3px solid #f39c12; border-radius: 4px; font-size: 0.85rem; color: #856404;">
-                                <strong>Razón:</strong> ${pending.reason}
+                            <div style="margin-top: 10px; padding: 8px 12px; background: ${isUrgent ? '#fde8e8' : '#fff3cd'}; border-left: 3px solid ${isUrgent ? '#e74c3c' : '#f39c12'}; border-radius: 4px; font-size: 0.85rem; color: ${isUrgent ? '#c0392b' : '#856404'};">
+                                ${pending.reason}
                             </div>
                         </div>
                         <div style="display: flex; flex-direction: column; gap: 8px;">
@@ -4849,20 +4837,24 @@ class Scheduler {
         });
 
         // Generar PDF con el mismo número de factura
+        // Si invoiceConfig es null, usar la config actual de empresa
+        const currentConfig = JSON.parse(localStorage.getItem('invoiceConfig') || '{}');
+        const iCfg = invoice.invoiceConfig || currentConfig;
         const pdfData = this.createPDFBlob(
             client, services,
             invoice.startDate, invoice.endDate,
-            invoice.invoiceConfig?.template || 'brazos',
-            invoice.invoiceConfig?.paymentDue || '',
-            invoice.invoiceConfig?.showDetails !== undefined ? invoice.invoiceConfig.showDetails : true,
-            invoice.invoiceConfig?.applyTax || false,
-            invoice.invoiceConfig?.taxRate || 0,
+            iCfg.template || currentConfig.template || 'modern',
+            iCfg.paymentDue || currentConfig.paymentDue || '',
+            iCfg.showDetails !== undefined ? iCfg.showDetails : (currentConfig.showDetails !== undefined ? currentConfig.showDetails : true),
+            iCfg.applyTax || currentConfig.applyTax || false,
+            iCfg.taxRate || currentConfig.taxRate || 0,
             invoice.invoiceNumber
         );
         if (!pdfData || !pdfData.blob) { alert('Error al generar PDF'); return; }
 
-        window.currentPDFData = { ...pdfData, client, blob: pdfData.blob, serviceCount: services.length, invoiceConfig: invoice.invoiceConfig };
-        this.displayPDFPreview(pdfData, client, invoice.startDate, invoice.endDate);
+        const regenConfig = { template: iCfg.template || 'modern', paymentDue: iCfg.paymentDue || '', showDetails: iCfg.showDetails !== undefined ? iCfg.showDetails : true, applyTax: iCfg.applyTax || false, taxRate: iCfg.taxRate || 0 };
+        window.currentPDFData = { ...pdfData, client, blob: pdfData.blob, serviceCount: services.length, invoiceConfig: regenConfig };
+        this.displayPDFPreview(pdfData, client, invoice.startDate, invoice.endDate, regenConfig);
     }
 
 
@@ -6372,17 +6364,51 @@ class Scheduler {
                 const emp = this.emps.find(e => e.id == id);
                 return emp ? emp.name.split(' ')[0] : '?';
             });
+            const hasServices = this.servs && this.servs.some(s => s.empId === gName);
             return `
                 <div style="background:#f8f9fa; border-radius:8px; padding:12px; border:1px solid #dee2e6;">
-                    <div style="font-weight:700; color:var(--primary); margin-bottom:8px;">${gName}</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <div style="font-weight:700; color:var(--primary);">${gName}</div>
+                        ${!hasServices ? `<button onclick="app.deleteGrupo('${gName}')" title="Eliminar grupo" style="background:none; border:none; cursor:pointer; color:#e74c3c; font-size:1rem; padding:0 4px;">🗑</button>` : ''}
+                    </div>
                     ${memberNames.length === 0 
                         ? '<div style="color:#aaa; font-size:0.8rem;">Sin miembros</div>'
                         : memberNames.map(n => `<div style="font-size:0.85rem; padding:2px 0; color:#333;">• ${n}</div>`).join('')
                     }
-                    <div style="margin-top:8px; font-size:0.75rem; color:#888;">${validMembers.length} de 5 slots</div>
+                    <div style="margin-top:8px; font-size:0.75rem; color:#888;">${validMembers.length} empleado(s)</div>
                 </div>`;
         }).join('');
     }
+    addGrupo() {
+        const inp = document.getElementById('newGrupoName');
+        const name = (inp.value || '').trim();
+        if (!name) { alert('Escribe el nombre del grupo'); return; }
+        if (this.grupos[name]) { alert('Ya existe un grupo con ese nombre'); return; }
+        this.grupos[name] = ['', '', '', '', ''];
+        inp.value = '';
+        this.save();
+        this.renderGruposSection();
+        // Refresh group dropdowns everywhere
+        if (typeof this.populateGroupDropdowns === 'function') this.populateGroupDropdowns();
+        alert('✅ Grupo "' + name + '" creado. Ahora asigna empleados en la sección de Empleados.');
+    }
+
+    deleteGrupo(name) {
+        if (!this.grupos[name]) return;
+        const hasServices = this.servs && this.servs.some(s => s.empId === name);
+        if (hasServices) { alert('No se puede eliminar "' + name + '" porque tiene servicios asignados.'); return; }
+        const members = (this.grupos[name] || []).filter(id => id && id.trim() !== '');
+        if (members.length > 0) {
+            if (!confirm('El grupo "' + name + '" tiene ' + members.length + ' empleado(s). ¿Eliminar grupo? (los empleados quedarán sin grupo)')) return;
+        } else {
+            if (!confirm('¿Eliminar grupo "' + name + '"?')) return;
+        }
+        delete this.grupos[name];
+        this.save();
+        this.renderGruposSection();
+        if (typeof this.populateGroupDropdowns === 'function') this.populateGroupDropdowns();
+    }
+
     toggleRep() { 
         const isRep = document.getElementById('mRep').value==='yes';
         document.getElementById('untilContainer').style.display = isRep ? 'block' : 'none';
@@ -7956,7 +7982,7 @@ class Scheduler {
         text += `${startDate.getDate()} - ${new Date(startDate.getTime() + 6*24*60*60*1000).getDate()} ${monthNames[startDate.getMonth()]} ${startDate.getFullYear()}\n`;
         text += `${'='.repeat(40)}\n\n`;
         
-        const allGroups = ['Grupo A', 'Grupo B', 'Grupo C', 'Grupo D', 'Grupo E'];
+        const allGroups = Object.keys(this.grupos);
         
         allGroups.forEach(groupName => {
             text += `\n▼ ${groupName.toUpperCase()} ▼\n`;
@@ -8469,7 +8495,7 @@ class Scheduler {
         this.displayPDFPreview(pdfData, client, startDate, endDate);
     }    
 
-   displayPDFPreview(pdfData, client, startDate, endDate) {
+   displayPDFPreview(pdfData, client, startDate, endDate, invoiceConfigOverride) {
         // Crear URL del PDF
         const pdfUrl = URL.createObjectURL(pdfData.blob);
         
@@ -8516,7 +8542,21 @@ class Scheduler {
         window.currentPDFData.startDate = startDate;
         window.currentPDFData.endDate = endDate;
         window.currentPDFData.serviceCount = pdfData.services ? pdfData.services.length : (typeof allServices !== 'undefined' ? allServices.length : 0);
-        window.currentPDFData.invoiceConfig = { template, paymentDue, showDetails, applyTax, taxRate };
+        // Use override if provided (from regenerate), else capture from modal vars
+        if (invoiceConfigOverride) {
+            window.currentPDFData.invoiceConfig = invoiceConfigOverride;
+        } else {
+            try {
+                const _t = typeof template !== 'undefined' ? template : (document.querySelector('input[name="invoiceTemplate"]:checked')?.value || 'modern');
+                const _pd = typeof paymentDue !== 'undefined' ? paymentDue : '';
+                const _sd = typeof showDetails !== 'undefined' ? showDetails : true;
+                const _at = typeof applyTax !== 'undefined' ? applyTax : false;
+                const _tr = typeof taxRate !== 'undefined' ? taxRate : 0;
+                window.currentPDFData.invoiceConfig = { template: _t, paymentDue: _pd, showDetails: _sd, applyTax: _at, taxRate: _tr };
+            } catch(e) {
+                window.currentPDFData.invoiceConfig = { template: 'modern', paymentDue: '', showDetails: true, applyTax: false, taxRate: 0 };
+            }
+        }
     }
     
     async sendPendingInvoiceByGmail(invId) {
@@ -8683,6 +8723,34 @@ class Scheduler {
 
         // Guardar el número de factura
         localStorage.setItem('lastInvoiceNumber', invoiceNumber.toString());
+
+        // Registrar en historial de Generadas
+        if (!this.generatedInvoices) this.generatedInvoices = [];
+        const cli = this.clis ? this.clis.find(c => c.name === clientName) : null;
+        const pdfInvConfig = window.currentPDFData?.invoiceConfig || null;
+        const endDate = window.currentPDFData?.endDate || startDate;
+        const alreadyExists = this.generatedInvoices.find(i => i.invoiceNumber === invoiceNumber);
+        if (!alreadyExists) {
+            this.generatedInvoices.push({
+                id: Date.now() + Math.random(),
+                invoiceNumber: invoiceNumber,
+                generatedDate: new Date().toISOString().split('T')[0],
+                clientName: clientName,
+                clientEmail: cli?.email || '',
+                type: cli?.type || 'mensual',
+                startDate: startDate || '',
+                endDate: endDate || '',
+                serviceCount: window.currentPDFData?.serviceCount || 0,
+                total: window.currentPDFData?.total || 0,
+                status: 'pendiente',
+                sentAt: null,
+                paidAt: null,
+                paidAmount: null,
+                notes: '',
+                invoiceConfig: pdfInvConfig
+            });
+            this.save();
+        }
 
         // Cargar el blob y descargarlo
         const filename = `Factura_${clientName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
@@ -11321,8 +11389,9 @@ class Scheduler {
 
     nmGetEmpGroup() {
         const sel = document.getElementById('nmEmpSel');
-        if (!sel || !sel.selectedOptions[0]) return '';
-        return sel.selectedOptions[0].dataset.group || sel.value || '';
+        if (!sel) return '';
+        // value is always the group name (e.g. "Grupo C")
+        return sel.value || '';
     }
 
     nmGetPriceCatalog() {
@@ -11383,6 +11452,7 @@ class Scheduler {
         document.getElementById('nmMinBar').textContent = '💰 Nómina ' + empName.split(' ')[0] + ' □ Expandir';
 
         const groupIds = (this.grupos[empGroup] || []).filter(id => id && id.trim() !== '').map(String);
+        console.log('🔢 empGroup:', empGroup, '| raw slots:', (this.grupos[empGroup]||[]).length, '| groupIds filtered:', groupIds.length, groupIds);
         const weekServs = this.servs.filter(s =>
             !s.cancelled &&
             weekDates.includes(s.date) &&
