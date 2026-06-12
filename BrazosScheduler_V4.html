@@ -4162,32 +4162,32 @@ class Scheduler {
                 clients.some(c => c.id == s.cliId) && !s.cancelled &&
                 s.date >= thisMonthStart && s.date <= thisMonthEnd
             );
-            const isSingleMonthly = cliType === 'mensual' && thisMonthServs.length === 1;
-
-            if (isSingleMonthly) {
-                // Mostrar en pendientes el día del servicio
-                const svc = thisMonthServs[0];
-                if (svc.date !== todayStr) return; // Solo el día del servicio
-                const svcKey = `${clientName}-mensual-single-${svc.date}`;
-                if (this.pendingInvoices.some(p => p.periodKey === svcKey)) return;
-                if ((this.generatedInvoices || []).some(g =>
-                    g.clientName === clientName && g.startDate === svc.date)) return;
-                const total = parseFloat(cli.price || 0);
-                this.pendingInvoices.push({
-                    id: Date.now() + Math.random(),
-                    periodKey: svcKey,
-                    clientName,
-                    clientEmail: cli.email || '',
-                    clientIds: clients.map(c => c.id),
-                    type: cliType,
-                    billingPeriod,
-                    startDate: svc.date,
-                    endDate: svc.date,
-                    serviceCount: 1,
-                    total,
-                    urgency: 'high',
-                    reason: '📧 Servicio hoy — Enviar factura',
-                    createdAt: today.toISOString()
+            // perservice → facturar el día del servicio
+            if (billingPeriod === 'perservice') {
+                const todayServs = thisMonthServs.filter(s => s.date === todayStr);
+                if (todayServs.length === 0) return;
+                todayServs.forEach(svc => {
+                    const svcKey = `${clientName}-perservice-${svc.date}-${svc.id}`;
+                    if (this.pendingInvoices.some(p => p.periodKey === svcKey)) return;
+                    if ((this.generatedInvoices || []).some(g =>
+                        g.clientName === clientName && g.startDate === svc.date)) return;
+                    const total = parseFloat(cli.price || 0);
+                    this.pendingInvoices.push({
+                        id: Date.now() + Math.random(),
+                        periodKey: svcKey,
+                        clientName,
+                        clientEmail: cli.email || '',
+                        clientIds: clients.map(c => c.id),
+                        type: cliType,
+                        billingPeriod,
+                        startDate: svc.date,
+                        endDate: svc.date,
+                        serviceCount: 1,
+                        total,
+                        urgency: 'high',
+                        reason: '📧 Servicio hoy — Enviar factura',
+                        createdAt: today.toISOString()
+                    });
                 });
                 return;
             }
