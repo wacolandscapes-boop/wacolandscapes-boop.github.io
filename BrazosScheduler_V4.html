@@ -4327,7 +4327,7 @@ class Scheduler {
             const isOverdue = pending.urgency === 'overdue';
             const cardBorder = isOverdue ? '#c0392b' : isUrgent ? '#e74c3c' : '#f39c12';
             const cardBg = isOverdue ? '#fde8e8' : isUrgent ? '#fff5f5' : 'white';
-            html += `
+            return `
                 <div style="background: ${cardBg}; border: 2px solid ${cardBorder}; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
                     <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: start;">
                         <div>
