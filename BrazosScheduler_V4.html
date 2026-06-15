@@ -4109,7 +4109,7 @@ class Scheduler {
                     serviceCount: weekServs.length,
                     total,
                     urgency: 'high',
-                    reason: '🏠 AirBnB — Enviar factura hoy (martes)',
+                    reason: `🏠 AirBnB — Factura lista, enviar ${new Date(today.getTime() + 86400000).toLocaleDateString('es-MX', {weekday:'long'})}`,  
                     createdAt: today.toISOString()
                 });
                 return;
@@ -4169,6 +4169,42 @@ class Scheduler {
                 clients.some(c => c.id == s.cliId) && !s.cancelled &&
                 s.date >= thisMonthStart && s.date <= thisMonthEnd
             );
+            // monthly con 1 visita/semana → verificar fin de mes, no urgente
+            if (billingPeriod === 'monthly') {
+                const weekStart = new Date(today);
+                weekStart.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+                const weekEnd = new Date(weekStart);
+                weekEnd.setDate(weekStart.getDate() + 6);
+                const weekStartStr = weekStart.toISOString().split('T')[0];
+                const weekEndStr = weekEnd.toISOString().split('T')[0];
+                const weekServs = thisMonthServs.filter(s => s.date >= weekStartStr && s.date <= weekEndStr);
+                if (weekServs.length === 0) return;
+                weekServs.forEach(svc => {
+                    const svcKey = `${clientName}-monthly-${svc.date}-${svc.id}`;
+                    if (this.pendingInvoices.some(p => p.periodKey === svcKey)) return;
+                    if ((this.generatedInvoices || []).some(g =>
+                        g.clientName === clientName && g.startDate >= weekStartStr && g.startDate <= weekEndStr)) return;
+                    const total = parseFloat(cli.price || 0);
+                    this.pendingInvoices.push({
+                        id: Date.now() + Math.random(),
+                        periodKey: svcKey,
+                        clientName,
+                        clientEmail: cli.email || '',
+                        clientIds: clients.map(c => c.id),
+                        type: cliType,
+                        billingPeriod,
+                        startDate: svc.date,
+                        endDate: svc.date,
+                        serviceCount: 1,
+                        total,
+                        urgency: 'normal',
+                        reason: '📋 Verificar servicio — Facturar a fin de mes',
+                        createdAt: today.toISOString()
+                    });
+                });
+                return;
+            }
+
             // perservice → facturar el día del servicio (toda la semana actual)
             if (billingPeriod === 'perservice') {
                 // Calcular lunes de la semana actual
