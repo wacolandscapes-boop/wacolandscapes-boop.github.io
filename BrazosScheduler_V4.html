@@ -4068,10 +4068,45 @@ class Scheduler {
             const cliType = cli.type || 'mensual';
             const billingPeriod = cli.billingPeriod || 'monthly';
 
-            // ── REGLA 1: AIRBNB → cada lunes, factura de la semana pasada ──
+            // ── REGLA 1: AIRBNB ──
             if (cliType === 'airbnb') {
-                if (dayOfWeek !== 1) return; // Solo lunes
-                // Semana anterior: lunes a domingo
+                const airbnbBilling = cli.billingPeriod || billingPeriod;
+
+                // AirBnB Mensual → último día del mes, columna Programadas
+                if (airbnbBilling === 'monthly' || airbnbBilling === 'fixed_monthly') {
+                    if (currentDay < 15) return; // Mostrar a partir del día 15
+                    const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+                    const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+                    const periodStart = new Date(prevYear, prevMonth, 1).toISOString().split('T')[0];
+                    const periodEnd = new Date(prevYear, prevMonth + 1, 0).toISOString().split('T')[0];
+                    const monthKey = `${clientName}-airbnb-monthly-${prevYear}-${prevMonth}`;
+                    if (this.pendingInvoices.some(p => p.periodKey === monthKey)) return;
+                    if ((this.generatedInvoices || []).some(g => g.clientName === clientName &&
+                        g.startDate >= periodStart && g.startDate <= periodEnd)) return;
+                    const monthServs = this.servs.filter(s =>
+                        clients.some(c => c.id == s.cliId) && !s.cancelled &&
+                        s.date >= periodStart && s.date <= periodEnd
+                    );
+                    if (monthServs.length === 0) return;
+                    const total = parseFloat(cli.price || 0);
+                    const lastDay = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
+                    this.pendingInvoices.push({
+                        id: Date.now() + Math.random(),
+                        periodKey: monthKey,
+                        clientName, clientEmail: cli.email || '',
+                        clientIds: clients.map(c => c.id),
+                        type: cliType, billingPeriod: airbnbBilling,
+                        startDate: periodStart, endDate: periodEnd,
+                        serviceCount: monthServs.length, total,
+                        urgency: 'normal',
+                        reason: `🏠 AirBnB Mensual — Enviar el ${lastDay}`,
+                        createdAt: today.toISOString()
+                    });
+                    return;
+                }
+
+                // AirBnB Semanal → cada lunes, columna Urgentes
+                if (dayOfWeek !== 1) return;
                 const lastMonday = new Date(today);
                 lastMonday.setDate(today.getDate() - 7);
                 const lastSunday = new Date(today);
@@ -4079,37 +4114,28 @@ class Scheduler {
                 const weekStart = lastMonday.toISOString().split('T')[0];
                 const weekEnd = lastSunday.toISOString().split('T')[0];
                 const weekKey = `${clientName}-airbnb-${weekStart}`;
-
                 if (this.pendingInvoices.some(p => p.periodKey === weekKey)) return;
                 if ((this.generatedInvoices || []).some(g => g.clientName === clientName &&
                     g.startDate === weekStart)) return;
-
                 const weekServs = this.servs.filter(s =>
-                    clients.some(c => c.id == s.cliId) &&
-                    !s.cancelled &&
+                    clients.some(c => c.id == s.cliId) && !s.cancelled &&
                     s.date >= weekStart && s.date <= weekEnd
                 );
                 if (weekServs.length === 0) return;
-
                 const total = weekServs.reduce((sum, s) => {
                     const c = this.clis.find(c => c.id == s.cliId);
                     return sum + parseFloat(c?.price || 0);
                 }, 0);
-
                 this.pendingInvoices.push({
                     id: Date.now() + Math.random(),
                     periodKey: weekKey,
-                    clientName,
-                    clientEmail: cli.email || '',
+                    clientName, clientEmail: cli.email || '',
                     clientIds: clients.map(c => c.id),
-                    type: cliType,
-                    billingPeriod,
-                    startDate: weekStart,
-                    endDate: weekEnd,
-                    serviceCount: weekServs.length,
-                    total,
+                    type: cliType, billingPeriod: airbnbBilling,
+                    startDate: weekStart, endDate: weekEnd,
+                    serviceCount: weekServs.length, total,
                     urgency: 'high',
-                    reason: `🏠 AirBnB — Factura lista, enviar ${new Date(today.getTime() + 86400000).toLocaleDateString('es-MX', {weekday:'long'})}`,  
+                    reason: '🏠 AirBnB — Lista para enviar mañana',
                     createdAt: today.toISOString()
                 });
                 return;
@@ -4409,7 +4435,7 @@ class Scheduler {
                 </div>
                 <div>
                     <div style="background:#f39c12; color:white; padding:8px 14px; border-radius:8px 8px 0 0; font-weight:700; font-size:0.9rem; margin-bottom:8px;">
-                        📋 Programadas — Hay Tiempo
+                        📋 Programadas — Enviar el ${(() => { const d = new Date(today.getFullYear(), today.getMonth()+1, 0); return d.toLocaleDateString('es-MX', {day:'numeric', month:'long'}); })()}
                         <span style="background:white; color:#f39c12; border-radius:20px; padding:1px 8px; margin-left:8px; font-size:0.8rem;">${programadas.length}</span>
                     </div>
                     ${programadasHtml || '<div style="text-align:center; padding:30px; color:#aaa; font-size:0.85rem;">Sin facturas programadas</div>'}
