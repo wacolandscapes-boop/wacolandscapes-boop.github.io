@@ -4421,6 +4421,8 @@ class Scheduler {
         };
 
         // Build 2-column layout
+        const _now = new Date();
+        const lastDayLabel = new Date(_now.getFullYear(), _now.getMonth()+1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
         let urgentesHtml = urgentes.map((p, i) => buildCard(p, this.pendingInvoices.indexOf(p))).join('');
         let programadasHtml = programadas.map((p, i) => buildCard(p, this.pendingInvoices.indexOf(p))).join('');
 
@@ -4435,7 +4437,7 @@ class Scheduler {
                 </div>
                 <div>
                     <div style="background:#f39c12; color:white; padding:8px 14px; border-radius:8px 8px 0 0; font-weight:700; font-size:0.9rem; margin-bottom:8px;">
-                        📋 Programadas — Enviar el ${(() => { const d = new Date(today.getFullYear(), today.getMonth()+1, 0); return d.toLocaleDateString('es-MX', {day:'numeric', month:'long'}); })()}
+                        📋 Programadas — Enviar el ${lastDayLabel}
                         <span style="background:white; color:#f39c12; border-radius:20px; padding:1px 8px; margin-left:8px; font-size:0.8rem;">${programadas.length}</span>
                     </div>
                     ${programadasHtml || '<div style="text-align:center; padding:30px; color:#aaa; font-size:0.85rem;">Sin facturas programadas</div>'}
