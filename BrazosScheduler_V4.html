@@ -1191,6 +1191,13 @@
                             <option value="fixed_monthly">📌 Mensual Fijo (monto fijo sin importar visitas)</option>
                             <option value="perservice">🧾 Por Servicio (factura cada visita)</option>
                         </select>
+                        <label style="font-size:0.8rem; color:#555; margin-top:6px; display:block; grid-column:span 2;">⏱️ Términos de Pago</label>
+                        <select id="cliPaymentTerms" style="grid-column:span 2">
+                            <option value="0">⚡ Inmediato</option>
+                            <option value="7">Net 7 (7 días)</option>
+                            <option value="15" selected>Net 15 (15 días)</option>
+                            <option value="30">Net 30 (30 días)</option>
+                        </select>
                     </div>
                     <div id="regenBlock" style="display:none; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:10px; margin-bottom:8px;">
                         <div style="font-size:0.8rem; font-weight:700; color:#856404; margin-bottom:6px;">🔄 Regenerar serie al guardar</div>
@@ -4295,8 +4302,11 @@ class Scheduler {
                 (p.reason || '').toLowerCase().includes(pendingSearch))
             : this.pendingInvoices;
 
-        let html = '';
-        filteredPending.forEach((pending, index) => {
+        // Separar en urgentes y programadas
+        const urgentes = filteredPending.filter(p => p.urgency === 'high' || p.urgency === 'overdue');
+        const programadas = filteredPending.filter(p => p.urgency !== 'high' && p.urgency !== 'overdue');
+
+        const buildCard = (pending, index) => {
             const [startYear, startMonth, startDay] = pending.startDate.split('-');
             const [endYear, endMonth, endDay] = pending.endDate.split('-');
             const startFormatted = `${startMonth}/${startDay}/${startYear}`;
@@ -4346,9 +4356,30 @@ class Scheduler {
                     </div>
                 </div>
             `;
-        });
-        
-        container.innerHTML = html;
+        };
+
+        // Build 2-column layout
+        let urgentesHtml = urgentes.map((p, i) => buildCard(p, this.pendingInvoices.indexOf(p))).join('');
+        let programadasHtml = programadas.map((p, i) => buildCard(p, this.pendingInvoices.indexOf(p))).join('');
+
+        container.innerHTML = `
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start;">
+                <div>
+                    <div style="background:#e74c3c; color:white; padding:8px 14px; border-radius:8px 8px 0 0; font-weight:700; font-size:0.9rem; margin-bottom:8px;">
+                        ⚡ Urgentes — Enviar Hoy
+                        <span style="background:white; color:#e74c3c; border-radius:20px; padding:1px 8px; margin-left:8px; font-size:0.8rem;">${urgentes.length}</span>
+                    </div>
+                    ${urgentesHtml || '<div style="text-align:center; padding:30px; color:#aaa; font-size:0.85rem;">Sin facturas urgentes</div>'}
+                </div>
+                <div>
+                    <div style="background:#f39c12; color:white; padding:8px 14px; border-radius:8px 8px 0 0; font-weight:700; font-size:0.9rem; margin-bottom:8px;">
+                        📋 Programadas — Hay Tiempo
+                        <span style="background:white; color:#f39c12; border-radius:20px; padding:1px 8px; margin-left:8px; font-size:0.8rem;">${programadas.length}</span>
+                    </div>
+                    ${programadasHtml || '<div style="text-align:center; padding:30px; color:#aaa; font-size:0.85rem;">Sin facturas programadas</div>'}
+                </div>
+            </div>
+        `;
     }
     
     previewPendingInvoice(index) {
@@ -6817,6 +6848,7 @@ class Scheduler {
                     existingProps.forEach(c => {
                         c.name = name; c.price = price; c.tel = tel; c.email = email;
                         c.address = address; c.city = city; c.zip = zip;
+                        c.paymentTerms = payTerms;
                         c.type = type; c.serviceType = serviceType;
                         c.billingPeriod = billingPeriod; c.invoicingType = invoicingType;
                     });
@@ -6977,6 +7009,8 @@ class Scheduler {
             document.getElementById('cliBillingPeriod').value = cli.billingPeriod || 'monthly';
             if (document.getElementById('cliInvoicingType')) {
                 document.getElementById('cliInvoicingType').value = cli.invoicingType || 'monthly';
+                if (document.getElementById('cliPaymentTerms'))
+                    document.getElementById('cliPaymentTerms').value = cli.paymentTerms !== undefined ? String(cli.paymentTerms) : '15';
             }
             document.getElementById('editCliId').value = cli.id;
             // Bloque de regeneración
@@ -8151,6 +8185,18 @@ class Scheduler {
         dueDateInput.disabled = false;
     }
     
+    autoSetPaymentTerms() {
+        const clientId = document.getElementById('invoiceClient').value;
+        if (!clientId) return;
+        const cli = this.clis.find(c => String(c.id) === String(clientId));
+        if (!cli || cli.paymentTerms === undefined) return;
+        const offsetSel = document.getElementById('invoicePaymentDueOffset');
+        if (offsetSel) {
+            offsetSel.value = String(cli.paymentTerms);
+            this.updatePaymentDueDate();
+        }
+    }
+
     toggleTaxField() {
         const checkbox = document.getElementById('invoiceApplyTax');
         const container = document.getElementById('taxFieldContainer');
@@ -12177,7 +12223,7 @@ document.addEventListener('click', function(e) {
         <div id="invoiceTabGenerar" style="display: grid; gap: 12px;">
             <div>
                 <label style="font-weight: bold; display: block; margin-bottom: 5px; font-size: 0.9rem;">Cliente:</label>
-                <select id="invoiceClient" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem;">
+                <select id="invoiceClient" onchange="app.autoSetPaymentTerms()" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem;">
                     <option value="">-- Selecciona Cliente --</option>
                 </select>
             </div>
