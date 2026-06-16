@@ -4253,12 +4253,12 @@ class Scheduler {
                 const pEnd = new Date(pYear, pMonth + 1, 0).toISOString().split('T')[0];
                 const pKey = `${clientName}-${pYear}-${String(pMonth+1).padStart(2,'0')}-recurrente`;
 
-                // Si ya está en pendientes, parar
+                // Si ya está en pendientes, no duplicar
                 if (this.pendingInvoices.some(p => p.periodKey === pKey)) break;
-                // Si ya tiene factura generada, parar
+                // Si ya tiene factura ese mes, continuar al siguiente
                 if ((this.generatedInvoices || []).some(g =>
                     g.clientName === clientName &&
-                    g.startDate >= pStart && g.startDate <= pEnd)) break;
+                    g.startDate >= pStart && g.startDate <= pEnd)) continue;
 
                 // Ver si tiene servicios ese mes
                 const mServs = this.servs.filter(s =>
