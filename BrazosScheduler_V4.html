@@ -4070,7 +4070,7 @@ class Scheduler {
 
             // ── REGLA 1: AIRBNB ──
             if (cliType === 'airbnb') {
-                const airbnbBilling = cli.invoicingType || cli.billingPeriod || billingPeriod;
+                const airbnbBilling = cli.billingPeriod || billingPeriod;
 
                 // AirBnB Mensual → último día del mes, columna Programadas
                 if (airbnbBilling === 'monthly' || airbnbBilling === 'fixed_monthly') {
@@ -4107,10 +4107,13 @@ class Scheduler {
 
                 // AirBnB Semanal → cada lunes, columna Urgentes
                 if (dayOfWeek !== 1 && dayOfWeek !== 2) return; // Lunes y martes
-                const lastMonday = new Date(today);
-                lastMonday.setDate(today.getDate() - 7);
-                const lastSunday = new Date(today);
-                lastSunday.setDate(today.getDate() - 1);
+                // Calcular lunes de esta semana, luego restar 7 días para semana pasada
+                const thisMonday = new Date(today);
+                thisMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+                const lastMonday = new Date(thisMonday);
+                lastMonday.setDate(thisMonday.getDate() - 7);
+                const lastSunday = new Date(thisMonday);
+                lastSunday.setDate(thisMonday.getDate() - 1);
                 const weekStart = lastMonday.toISOString().split('T')[0];
                 const weekEnd = lastSunday.toISOString().split('T')[0];
                 const weekKey = `${clientName}-airbnb-${weekStart}`;
