@@ -4244,24 +4244,37 @@ class Scheduler {
             // Recurrentes con múltiples visitas → día 15
             if (currentDay < 15) return;
 
-            // Período del mes anterior
-            const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-            const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-            const periodStart = new Date(prevYear, prevMonth, 1).toISOString().split('T')[0];
-            const periodEnd = new Date(prevYear, prevMonth + 1, 0).toISOString().split('T')[0];
-            const periodKey = `${clientName}-${prevYear}-${String(prevMonth+1).padStart(2,'0')}-recurrente`;
+            // Buscar el mes más reciente sin facturar (hasta 3 meses atrás)
+            let foundPeriod = null;
+            for (let mBack = 1; mBack <= 3; mBack++) {
+                const pMonth = currentMonth - mBack < 0 ? 12 + (currentMonth - mBack) : currentMonth - mBack;
+                const pYear = currentMonth - mBack < 0 ? currentYear - 1 : currentYear;
+                const pStart = new Date(pYear, pMonth, 1).toISOString().split('T')[0];
+                const pEnd = new Date(pYear, pMonth + 1, 0).toISOString().split('T')[0];
+                const pKey = `${clientName}-${pYear}-${String(pMonth+1).padStart(2,'0')}-recurrente`;
 
-            if (this.pendingInvoices.some(p => p.periodKey === periodKey)) return;
-            if ((this.generatedInvoices || []).some(g =>
-                g.clientName === clientName &&
-                g.startDate >= periodStart && g.startDate <= periodEnd)) return;
+                // Si ya está en pendientes, parar
+                if (this.pendingInvoices.some(p => p.periodKey === pKey)) break;
+                // Si ya tiene factura generada, parar
+                if ((this.generatedInvoices || []).some(g =>
+                    g.clientName === clientName &&
+                    g.startDate >= pStart && g.startDate <= pEnd)) break;
 
-            const monthServs = this.servs.filter(s =>
-                clients.some(c => c.id == s.cliId) &&
-                !s.cancelled &&
-                s.date >= periodStart && s.date <= periodEnd
-            );
-            if (monthServs.length === 0) return;
+                // Ver si tiene servicios ese mes
+                const mServs = this.servs.filter(s =>
+                    clients.some(c => c.id == s.cliId) &&
+                    !s.cancelled &&
+                    s.date >= pStart && s.date <= pEnd
+                );
+                if (mServs.length > 0) {
+                    foundPeriod = { pStart, pEnd, pKey, pMonth, pYear, mServs };
+                    break;
+                }
+            }
+
+            if (!foundPeriod) return;
+
+            const { pStart: periodStart, pEnd: periodEnd, pKey: periodKey, mServs: monthServs } = foundPeriod;
 
             // Calcular total según tipo de facturación
             let total = 0;
@@ -4276,6 +4289,7 @@ class Scheduler {
 
             const typeLabel = cliType === 'semanal' ? 'Semanal' :
                               cliType === 'quincenal' ? 'Quincenal' : 'Mensual';
+            const periodLabel = new Date(periodStart + 'T12:00:00').toLocaleDateString('es-MX', {month:'long', year:'numeric'});
 
             this.pendingInvoices.push({
                 id: Date.now() + Math.random(),
@@ -4290,7 +4304,7 @@ class Scheduler {
                 serviceCount: monthServs.length,
                 total,
                 urgency: 'normal',
-                reason: `📋 ${typeLabel} — Verificar y facturar mes anterior`,
+                reason: `📋 ${typeLabel} — Facturar ${periodLabel}`,
                 createdAt: today.toISOString()
             });
         });
