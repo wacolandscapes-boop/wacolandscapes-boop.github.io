@@ -4106,7 +4106,7 @@ class Scheduler {
                 }
 
                 // AirBnB Semanal → cada lunes, columna Urgentes
-                if (dayOfWeek !== 1) return;
+                if (dayOfWeek !== 1 && dayOfWeek !== 2) return; // Lunes y martes
                 const lastMonday = new Date(today);
                 lastMonday.setDate(today.getDate() - 7);
                 const lastSunday = new Date(today);
