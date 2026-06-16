@@ -4440,6 +4440,8 @@ class Scheduler {
             document.getElementById('invoiceClient').value = pending.clientIds[0];
             document.getElementById('invoiceStart').value = pending.startDate;
             document.getElementById('invoiceEnd').value = pending.endDate;
+            // Autocompletar términos de pago del cliente
+            this.autoSetPaymentTerms();
             
             // Mostrar botón de volver
             document.getElementById('btnBackToPending').style.display = 'block';
