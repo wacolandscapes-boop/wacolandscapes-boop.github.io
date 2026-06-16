@@ -4241,44 +4241,27 @@ class Scheduler {
                 return;
             }
 
-            // Recurrentes con múltiples visitas → día 15
+            // Recurrentes → mostrar a partir del día 15 con servicios del mes actual
             if (currentDay < 15) return;
 
-            // Buscar el mes más reciente sin facturar (hasta 3 meses atrás)
-            let foundPeriod = null;
-            for (let mBack = 1; mBack <= 3; mBack++) {
-                const pMonth = currentMonth - mBack < 0 ? 12 + (currentMonth - mBack) : currentMonth - mBack;
-                const pYear = currentMonth - mBack < 0 ? currentYear - 1 : currentYear;
-                const pStart = new Date(pYear, pMonth, 1).toISOString().split('T')[0];
-                const pEnd = new Date(pYear, pMonth + 1, 0).toISOString().split('T')[0];
-                const pKey = `${clientName}-${pYear}-${String(pMonth+1).padStart(2,'0')}-recurrente`;
+            const periodStart = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
+            const periodEnd = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
+            const periodKey = `${clientName}-${currentYear}-${String(currentMonth+1).padStart(2,'0')}-recurrente`;
 
-                // Si ya está en pendientes, no duplicar
-                if (this.pendingInvoices.some(p => p.periodKey === pKey)) break;
-                // Si ya tiene factura ese mes, continuar al siguiente
-                if ((this.generatedInvoices || []).some(g =>
-                    g.clientName === clientName &&
-                    g.startDate >= pStart && g.startDate <= pEnd)) continue;
+            if (this.pendingInvoices.some(p => p.periodKey === periodKey)) return;
+            if ((this.generatedInvoices || []).some(g =>
+                g.clientName === clientName &&
+                g.startDate >= periodStart && g.startDate <= periodEnd)) return;
 
-                // Ver si tiene servicios ese mes
-                const mServs = this.servs.filter(s =>
-                    clients.some(c => c.id == s.cliId) &&
-                    !s.cancelled &&
-                    s.date >= pStart && s.date <= pEnd
-                );
-                if (mServs.length > 0) {
-                    foundPeriod = { pStart, pEnd, pKey, pMonth, pYear, mServs };
-                    break;
-                }
-            }
+            const monthServs = this.servs.filter(s =>
+                clients.some(c => c.id == s.cliId) &&
+                !s.cancelled &&
+                s.date >= periodStart && s.date <= periodEnd
+            );
+            if (monthServs.length === 0) return;
 
-            if (!foundPeriod) return;
-
-            const { pStart: periodStart, pEnd: periodEnd, pKey: periodKey, mServs: monthServs } = foundPeriod;
-
-            // Calcular total según tipo de facturación
             let total = 0;
-            if (billingPeriod === 'monthly' || billingPeriod === 'biweekly') {
+            if (billingPeriod === 'monthly' || billingPeriod === 'fixed_monthly' || billingPeriod === 'biweekly') {
                 total = parseFloat(cli.price || 0);
             } else {
                 total = monthServs.reduce((sum, s) => {
@@ -4289,7 +4272,7 @@ class Scheduler {
 
             const typeLabel = cliType === 'semanal' ? 'Semanal' :
                               cliType === 'quincenal' ? 'Quincenal' : 'Mensual';
-            const periodLabel = new Date(periodStart + 'T12:00:00').toLocaleDateString('es-MX', {month:'long', year:'numeric'});
+            const lastDay = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
 
             this.pendingInvoices.push({
                 id: Date.now() + Math.random(),
@@ -4304,7 +4287,7 @@ class Scheduler {
                 serviceCount: monthServs.length,
                 total,
                 urgency: 'normal',
-                reason: `📋 ${typeLabel} — Facturar ${periodLabel}`,
+                reason: `📋 ${typeLabel} — Revisar y enviar el ${lastDay}`,
                 createdAt: today.toISOString()
             });
         });
