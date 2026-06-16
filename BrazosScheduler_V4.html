@@ -4070,7 +4070,7 @@ class Scheduler {
 
             // ── REGLA 1: AIRBNB ──
             if (cliType === 'airbnb') {
-                const airbnbBilling = cli.billingPeriod || billingPeriod;
+                const airbnbBilling = cli.invoicingType || cli.billingPeriod || billingPeriod;
 
                 // AirBnB Mensual → último día del mes, columna Programadas
                 if (airbnbBilling === 'monthly' || airbnbBilling === 'fixed_monthly') {
@@ -4195,14 +4195,17 @@ class Scheduler {
                 clients.some(c => c.id == s.cliId) && !s.cancelled &&
                 s.date >= thisMonthStart && s.date <= thisMonthEnd
             );
-            // perservice → facturar el día del servicio (toda la semana actual)
+            // perservice → facturar el día del servicio (semana pasada + semana actual)
             if (billingPeriod === 'perservice') {
                 // Calcular lunes de la semana actual
                 const weekStart = new Date(today);
                 weekStart.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+                // Incluir también semana pasada para servicios no facturados
+                const twoWeeksAgo = new Date(weekStart);
+                twoWeeksAgo.setDate(weekStart.getDate() - 7);
                 const weekEnd = new Date(weekStart);
                 weekEnd.setDate(weekStart.getDate() + 6);
-                const weekStartStr = weekStart.toISOString().split('T')[0];
+                const weekStartStr = twoWeeksAgo.toISOString().split('T')[0];
                 const weekEndStr = weekEnd.toISOString().split('T')[0];
 
                 const weekServs = thisMonthServs.filter(s => s.date >= weekStartStr && s.date <= weekEndStr);
