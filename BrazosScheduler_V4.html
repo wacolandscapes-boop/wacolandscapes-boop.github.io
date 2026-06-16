@@ -6785,14 +6785,16 @@ class Scheduler {
         this.save(); this.renderCat(); this.refreshSels();
     }
 
-    addPropField(value='') {
+    addPropField(value='', price='') {
         const list = document.getElementById('propFieldsList');
         if (!list) return;
         const row = document.createElement('div');
-        row.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
+        row.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;align-items:center;';
         row.innerHTML = `
-            <input type="text" placeholder="Nombre/ID propiedad (ej: 123 Main St)" value="${value}"
-                style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;">
+            <input type="text" placeholder="Nombre/ID propiedad" value="${value}"
+                style="flex:2;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;">
+            <input type="number" placeholder="$Precio" value="${price}"
+                style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;" min="0" step="0.01">
             <button type="button" onclick="this.parentElement.remove()" 
                 style="background:#e74c3c;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.8rem;">✕</button>`;
         list.appendChild(row);
@@ -6811,7 +6813,12 @@ class Scheduler {
     getPropsFromFields() {
         const list = document.getElementById('propFieldsList');
         if (!list) return [];
-        return [...list.querySelectorAll('input')].map(i => i.value.trim()).filter(Boolean);
+        return [...list.children].map(row => {
+            const inputs = row.querySelectorAll('input');
+            const propId = inputs[0]?.value.trim() || '';
+            const price = inputs[1]?.value.trim() || '';
+            return propId ? { propId, price } : null;
+        }).filter(Boolean);
     }
 
     cancelCliForm() {
@@ -6846,7 +6853,7 @@ class Scheduler {
         const isMulti = type === 'airbnb' || type === 'construccion'; // unico ya no es multi-propiedad
         // Para multi-propiedad, leer del propFieldsList; para unico/otros, del campo dirección
         const propId = isMulti
-            ? (this.getPropsFromFields()[0] || document.getElementById('np').value.trim())
+            ? (this.getPropsFromFields()[0]?.propId || document.getElementById('np').value.trim())
             : (type === 'unico' ? (document.getElementById('np').value.trim() || document.getElementById('dc').value.trim()) : document.getElementById('np').value.trim());
         const price = document.getElementById('pc').value;
         const tel = document.getElementById('tc').value || '';
@@ -6857,7 +6864,7 @@ class Scheduler {
         const serviceType = document.getElementById('cliServiceType').value;
         const billingPeriod = document.getElementById('cliBillingPeriod').value;
         if(!name) { alert('Nombre es requerido'); return; }
-        if(isMulti && this.getPropsFromFields().length === 0) { alert('Agrega al menos una propiedad'); return; }
+        if(isMulti && this.getPropsFromFields().filter(p=>p.propId).length === 0) { alert('Agrega al menos una propiedad'); return; }
         
         // Si estamos editando, actualizar el existente
         if(editId) {
@@ -6876,7 +6883,10 @@ class Scheduler {
 
                     // Actualizar datos base en todos los registros existentes
                     existingProps.forEach(c => {
-                        c.name = name; c.price = price; c.tel = tel; c.email = email;
+                        // Precio individual por propiedad
+                        const fp = fieldProps.find(p => p.propId === c.propId);
+                        if (fp) c.price = fp.price || price;
+                        c.name = name; c.tel = tel; c.email = email;
                         c.address = address; c.city = city; c.zip = zip;
                         c.paymentTerms = payTerms;
                         c.type = type; c.serviceType = serviceType;
@@ -6884,11 +6894,12 @@ class Scheduler {
                     });
 
                     // Agregar propiedades nuevas
-                    fieldProps.forEach((pId, i) => {
-                        if(!existingPropIds.includes(pId) && pId) {
+                    const fieldPropIds = fieldProps.map(p => p.propId);
+                    fieldProps.forEach((fp, i) => {
+                        if(!existingPropIds.includes(fp.propId) && fp.propId) {
                             this.clis.push({
-                                id: String(Date.now() + i * 100), name, propId: pId,
-                                price, tel, address, city, zip, type,
+                                id: String(Date.now() + i * 100), name, propId: fp.propId,
+                                price: fp.price || price, tel, address, city, zip, type,
                                 serviceType, billingPeriod, invoicingType
                             });
                         }
@@ -6898,7 +6909,7 @@ class Scheduler {
                     this.clis = this.clis.filter(c => {
                         if(c.name !== name) return true;
                         if(c.type!=='airbnb'&&c.type!=='construccion') return true;
-                        return fieldProps.includes(c.propId);
+                        return fieldPropIds.includes(c.propId);
                     });
 
                 } else {
@@ -6974,12 +6985,12 @@ class Scheduler {
             if (!props.length) { alert('Agrega al menos una propiedad'); return; }
             const invTypeProp = document.getElementById('cliInvoicingType') ? document.getElementById('cliInvoicingType').value : 'perservice';
             let added = 0;
-            props.forEach((pId, i) => {
-                const propExists = this.clis.some(c => c.name === name && c.propId === pId);
+            props.forEach((fp, i) => {
+                const propExists = this.clis.some(c => c.name === name && c.propId === fp.propId);
                 if(propExists) return;
                 this.clis.push({
                     id: String(Date.now() + i * 100),
-                    name, propId: pId, price, tel, address, city, zip,
+                    name, propId: fp.propId, price: fp.price || price, tel, address, city, zip,
                     type, serviceType, billingPeriod, invoicingType: invTypeProp
                 });
                 added++;
@@ -7057,7 +7068,7 @@ class Scheduler {
                 if(isMulti) {
                     const allProps = this.clis.filter(c => c.name.trim().toLowerCase() === cli.name.trim().toLowerCase() && (c.type==='airbnb'||c.type==='unico'||c.type==='construccion'));
                     if(allProps.length > 0) {
-                        allProps.forEach(p => this.addPropField(p.propId || ''));
+                        allProps.forEach(p => this.addPropField(p.propId || '', p.price || ''));
                     } else if(cli.propId) {
                         this.addPropField(cli.propId);
                     }
