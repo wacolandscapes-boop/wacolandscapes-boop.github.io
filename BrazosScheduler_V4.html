@@ -4295,6 +4295,15 @@ class Scheduler {
             });
         });
 
+        // Ordenar: urgentes primero, luego alfabético
+        this.pendingInvoices.sort((a, b) => {
+            const urgencyOrder = { overdue: 0, high: 1, normal: 2 };
+            const ua = urgencyOrder[a.urgency] ?? 2;
+            const ub = urgencyOrder[b.urgency] ?? 2;
+            if (ua !== ub) return ua - ub;
+            return a.clientName.localeCompare(b.clientName);
+        });
+
         // Actualizar badge
         this.updatePendingBadge();
     }
@@ -4562,12 +4571,22 @@ class Scheduler {
         // Cargar clientes en dropdown
         const select = document.getElementById('genInvClient');
         select.innerHTML = '<option value="all">Todos</option>';
-        
-        // Obtener clientes únicos de facturas generadas
         const uniqueClients = [...new Set((this.generatedInvoices || []).map(inv => inv.clientName))];
         uniqueClients.sort().forEach(clientName => {
             select.innerHTML += `<option value="${clientName}">${clientName}</option>`;
         });
+
+        // Populate period dropdown dynamically (last 12 months)
+        const periodSel = document.getElementById('genInvPeriod');
+        const monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+        const fullNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+        periodSel.innerHTML = '<option value="all">Todos los períodos</option>';
+        const now = new Date();
+        for (let i = 0; i <= 14; i++) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+            periodSel.innerHTML += `<option value="${key}">${fullNames[d.getMonth()]} ${d.getFullYear()}</option>`;
+        }
         
         this.refreshGeneratedInvoices();
         document.getElementById('generatedInvoicesModal').style.display = 'block';
@@ -4657,6 +4676,7 @@ class Scheduler {
                             <button onclick="app.regenerateInvoice(${index})" class="btn" style="background: #1A4FCC; color: white; padding: 5px 8px; font-size: 0.75rem;">🔄 Regenerar</button>
                             <button onclick="app.openInvoiceForEdit(${index})" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
                             <button onclick="app.editInvoiceNumber('${inv.id}', ${inv.invoiceNumber})" class="btn" style="background: #6c757d; color: white; padding: 5px 8px; font-size: 0.75rem;"># Nº</button>
+                            ${inv.status === 'pagada' ? `<button onclick="app.printReceipt(${index})" class="btn" style="background: #27ae60; color: white; padding: 5px 8px; font-size: 0.75rem;">🧾 Recibo</button>` : ''}
                         </div>` : '<span style="color:#95a5a6;font-size:0.8rem">—</span>'}
                 </td>
             </tr>`;
@@ -4668,6 +4688,7 @@ class Scheduler {
             </td></tr>`;
         }
         
+        this._lastFilteredInvoices = filtered;
         document.getElementById('genInvBody').innerHTML = html;
         document.getElementById('genInvCount').innerText = filtered.length;
         const badge = document.getElementById('genInvBadge'); if(badge) badge.innerText = filtered.length + ' facturas';
@@ -5112,13 +5133,32 @@ class Scheduler {
                 default: serviceTypeIcon = '📦';
             }
             
-            html += `<tr>
+            // Check if this service has an invoice
+            const sMonth = s.date.substring(0, 7); // YYYY-MM
+            const invForClient = (this.generatedInvoices || []).filter(inv => 
+                inv.clientName === c.name &&
+                (inv.startDate?.substring(0,7) === sMonth || 
+                 inv.endDate?.substring(0,7) === sMonth ||
+                 (inv.startDate <= s.date && inv.endDate >= s.date))
+            );
+            let invBadge = '<span style="color:#aaa;font-size:0.75rem;">—</span>';
+            if (invForClient.length > 0) {
+                const inv = invForClient[0];
+                const statusColors = { pendiente:'#e67e22', enviada:'#2980b9', pagada:'#27ae60', vencida:'#e74c3c' };
+                const statusLabels = { pendiente:'⏳ Pendiente', enviada:'📧 Enviada', pagada:'✅ Pagada', vencida:'🔴 Vencida' };
+                const color = statusColors[inv.status] || '#888';
+                const label = statusLabels[inv.status] || inv.status;
+                invBadge = `<span style="background:${color};color:white;padding:2px 7px;border-radius:4px;font-size:0.7rem;cursor:pointer;" title="#${inv.invoiceNumber}" onclick="app.openGeneratedInvoices()">${label} #${inv.invoiceNumber}</span>`;
+            }
+
+            html += `<tr style="${invForClient.length === 0 ? '' : 'background:#f0f8ff;'}">
                 <td>${dateFormatted}</td>
                 <td>${c.name}</td>
                 <td>${c.propId}</td>
                 <td><span style="background:var(--color-${c.type}); color:white; padding:3px 8px; border-radius:4px; font-size:0.7rem">${c.type.toUpperCase()}</span></td>
                 <td>${serviceTypeIcon} ${(c.serviceType || 'N/A').charAt(0).toUpperCase() + (c.serviceType || 'N/A').slice(1)}</td>
                 <td style="text-align: right;"><b>${price.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</b></td>
+                <td style="text-align: center;">${invBadge}</td>
             </tr>`;
         });
         
@@ -5127,6 +5167,93 @@ class Scheduler {
         document.getElementById('histTotal').innerText = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     }
     
+    printReceipt(index) {
+        const filtered = this._lastFilteredInvoices || this.generatedInvoices;
+        const inv = filtered[index];
+        if (!inv) return;
+
+        const client = this.clis.find(c => c.name === inv.clientName);
+        const companyConfig = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        const companyLogo = localStorage.getItem('companyLogo') || '';
+        const paidDate = inv.paidAt ? new Date(inv.paidAt + 'T12:00:00').toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'}) : new Date().toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
+        const paidAmount = inv.paidAmount ? parseFloat(inv.paidAmount).toFixed(2) : inv.total.toFixed(2);
+
+        const win = window.open('', '_blank', 'width=700,height=900');
+        win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+        <title>Receipt #${inv.invoiceNumber}</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 0; padding: 40px; color: #333; }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 3px solid #2c3e50; }
+            .logo { max-height: 80px; max-width: 200px; }
+            .company-info { font-size: 12px; color: #666; }
+            .receipt-title { text-align: center; margin: 20px 0; }
+            .receipt-title h1 { font-size: 28px; color: #27ae60; margin: 0; }
+            .receipt-title p { color: #888; margin: 5px 0; }
+            .paid-stamp { text-align: center; margin: 20px 0; }
+            .paid-stamp .stamp { display: inline-block; border: 4px solid #27ae60; color: #27ae60; font-size: 36px; font-weight: 900; padding: 10px 30px; border-radius: 8px; transform: rotate(-5deg); letter-spacing: 4px; }
+            .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
+            .info-box h3 { font-size: 11px; color: #999; text-transform: uppercase; margin-bottom: 8px; }
+            .info-box p { margin: 3px 0; font-size: 13px; }
+            table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+            th { background: #2c3e50; color: white; padding: 10px; text-align: left; font-size: 12px; }
+            td { padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; }
+            .total-row { background: #f8f9fa; font-weight: bold; font-size: 16px; }
+            .footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #999; }
+            @media print { body { padding: 20px; } }
+        </style></head><body>
+        <div class="header">
+            <div>
+                ${companyLogo ? `<img src="${companyLogo}" class="logo">` : `<h2 style="color:#2c3e50;margin:0;">${companyConfig.name || 'Brazos Cleaning'}</h2>`}
+                <div class="company-info" style="margin-top:8px;">
+                    ${companyConfig.address || '134 Dosher Lane, Woodway TX 76712'}<br>
+                    Tel: ${companyConfig.phone || '2544124508'}<br>
+                    ${companyConfig.email || 'brazoscleaningservices@gmail.com'}
+                </div>
+            </div>
+            <div style="text-align:right;">
+                <div style="font-size:11px;color:#999;">RECEIPT</div>
+                <div style="font-size:24px;font-weight:bold;">#${inv.invoiceNumber}</div>
+                <div style="font-size:12px;color:#666;">${new Date().toLocaleDateString('en-US')}</div>
+            </div>
+        </div>
+
+        <div class="paid-stamp">
+            <div class="stamp">PAID</div>
+        </div>
+
+        <div class="info-grid">
+            <div class="info-box">
+                <h3>Client</h3>
+                <p><strong>${inv.clientName}</strong></p>
+                <p>${client?.address || ''}</p>
+                <p>${client?.email || inv.clientEmail || ''}</p>
+            </div>
+            <div class="info-box">
+                <h3>Payment Details</h3>
+                <p><strong>Date paid:</strong> ${paidDate}</p>
+                <p><strong>Invoice period:</strong> ${inv.startDate} – ${inv.endDate}</p>
+                <p><strong>Original invoice:</strong> #${inv.invoiceNumber}</p>
+            </div>
+        </div>
+
+        <table>
+            <thead><tr><th>Description</th><th style="text-align:right;">Amount</th></tr></thead>
+            <tbody>
+                <tr><td>Cleaning Services — ${inv.startDate} to ${inv.endDate}</td><td style="text-align:right;">$${inv.total.toFixed(2)}</td></tr>
+                <tr class="total-row"><td><strong>TOTAL PAID</strong></td><td style="text-align:right;color:#27ae60;"><strong>$${paidAmount}</strong></td></tr>
+            </tbody>
+        </table>
+
+        <div class="footer">
+            <p>Thank you for your business! · ${companyConfig.name || 'Brazos Cleaning Services'}</p>
+            <p>This receipt confirms payment in full for the above services.</p>
+        </div>
+
+        <scr' + 'ipt>window.onload = function() { window.print(); }</scr' + 'ipt>
+        </body></html>`);
+        win.document.close();
+    }
+
     printHistory() {
         const printWindow = window.open('', '', 'width=800,height=600');
         const content = document.getElementById('histBody').innerHTML;
@@ -12561,6 +12688,7 @@ document.addEventListener('click', function(e) {
                         <th>Recurrencia</th>
                         <th>Tipo Servicio</th>
                         <th style="text-align: right;">Monto</th>
+                        <th style="text-align: center;">Factura</th>
                     </tr>
                 </thead>
                 <tbody id="histBody"></tbody>
@@ -12607,6 +12735,7 @@ document.addEventListener('click', function(e) {
                 <div><label style="font-size:0.8rem;font-weight:600;">Período (mes)</label>
                     <select id="genInvPeriod" onchange="app.refreshGeneratedInvoices()" style="width:100%;padding:6px;">
                         <option value="all">Todos</option>
+                        <option value="2026-06">Junio 2026</option>
                         <option value="2026-05">Mayo 2026</option>
                         <option value="2026-04">Abril 2026</option>
                         <option value="2026-03">Marzo 2026</option>
@@ -12618,11 +12747,17 @@ document.addEventListener('click', function(e) {
                     </select>
                 </div>
             </div>
-            <div style="margin-top:10px;">
-                <label style="font-size:0.8rem;font-weight:600;">🔍 Buscar (# factura, nombre, estado)</label>
-                <input type="text" id="genInvSearch" onkeyup="app.refreshGeneratedInvoices()" 
-                    placeholder="Ej: 7522, Yowell, pagada..."
-                    style="width:100%; padding:7px 12px; border:1px solid #ced4da; border-radius:6px; font-size:0.9rem; margin-top:4px;">
+            <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+                <div style="flex:1; position:relative;">
+                    <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#999;">🔍</span>
+                    <input type="text" id="genInvSearch" onkeyup="app.refreshGeneratedInvoices()" 
+                        placeholder="Buscar por # factura, nombre, estado..."
+                        style="width:100%; padding:8px 12px 8px 34px; border:2px solid #1a56a0; border-radius:6px; font-size:0.9rem;">
+                </div>
+                <button onclick="document.getElementById('genInvSearch').value=''; app.refreshGeneratedInvoices();" 
+                    class="btn" style="padding:8px 12px; background:#e74c3c; color:white; font-size:0.85rem;">
+                    ✕ Limpiar
+                </button>
             </div>
         </div>
         
