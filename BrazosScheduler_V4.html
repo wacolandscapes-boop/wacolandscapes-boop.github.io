@@ -4676,7 +4676,10 @@ class Scheduler {
                             <button onclick="app.regenerateInvoice(${index})" class="btn" style="background: #1A4FCC; color: white; padding: 5px 8px; font-size: 0.75rem;">🔄 Regenerar</button>
                             <button onclick="app.openInvoiceForEdit(${index})" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
                             <button onclick="app.editInvoiceNumber('${inv.id}', ${inv.invoiceNumber})" class="btn" style="background: #6c757d; color: white; padding: 5px 8px; font-size: 0.75rem;"># Nº</button>
-                            ${inv.status === 'pagada' ? `<button onclick="app.printReceipt(${index})" class="btn" style="background: #27ae60; color: white; padding: 5px 8px; font-size: 0.75rem;">🧾 Recibo</button>` : ''}
+                            ${inv.status === 'pagada' ? `
+                            <button onclick="app.printReceipt(${index})" class="btn" style="background: #27ae60; color: white; padding: 5px 8px; font-size: 0.75rem;">🧾 Recibo</button>
+                            <button onclick="app.emailReceipt(${index})" class="btn" style="background: #16a085; color: white; padding: 5px 8px; font-size: 0.75rem;">📧 Email Recibo</button>
+                            ` : ''}
                         </div>` : '<span style="color:#95a5a6;font-size:0.8rem">—</span>'}
                 </td>
             </tr>`;
@@ -5252,6 +5255,44 @@ class Scheduler {
         <scr' + 'ipt>window.onload = function() { window.print(); }</scr' + 'ipt>
         </body></html>`);
         win.document.close();
+    }
+
+    async emailReceipt(index) {
+        const filtered = this._lastFilteredInvoices || this.generatedInvoices;
+        const inv = filtered[index];
+        if (!inv) return;
+
+        const client = this.clis.find(c => c.name === inv.clientName);
+        const email = client?.email || inv.clientEmail || '';
+
+        if (!email) {
+            alert('Este cliente no tiene email registrado.');
+            return;
+        }
+
+        const emailInput = prompt(`Enviar recibo de pago a:`, email);
+        if (!emailInput) return;
+
+        const companyConfig = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        const paidDate = inv.paidAt ? new Date(inv.paidAt + 'T12:00:00').toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'}) : new Date().toLocaleDateString('en-US');
+        const paidAmount = inv.paidAmount ? parseFloat(inv.paidAmount).toFixed(2) : inv.total.toFixed(2);
+
+        try {
+            const templateParams = {
+                to_email: emailInput,
+                client_name: inv.clientName,
+                invoice_number: inv.invoiceNumber.toString().padStart(4,'0'),
+                subject: `Payment Receipt #${inv.invoiceNumber} — ${inv.clientName}`,
+                message: `Dear ${inv.clientName},\n\nThis is your payment receipt for services rendered.\n\nReceipt #${inv.invoiceNumber}\nPeriod: ${inv.startDate} to ${inv.endDate}\nDate Paid: ${paidDate}\nAmount Paid: $${paidAmount}\n\nThank you for your business!\n\n${companyConfig.name || 'Brazos Cleaning Services'}\n${companyConfig.phone || ''}`,
+                pdf_content: '',
+                pdf_name: `Receipt_${inv.invoiceNumber}_${inv.clientName.replace(/[^a-zA-Z0-9]/g,'_')}.pdf`
+            };
+
+            await emailjs.send('service_mamjtia', 'template_ygaa3xa', templateParams);
+            alert(`✅ Recibo de pago enviado a ${emailInput}`);
+        } catch(e) {
+            alert('Error enviando email: ' + e.message);
+        }
     }
 
     printHistory() {
