@@ -4530,6 +4530,12 @@ class Scheduler {
         if (nextInvoiceNumber < startNumber) nextInvoiceNumber = startNumber;
         
         // Registrar factura
+        const grandTotal = this._pendingGrandTotal || pending.total;
+        const applyTax = this._pendingApplyTax || false;
+        const taxRate = this._pendingTaxRate || 0;
+        this._pendingGrandTotal = null;
+        this._pendingApplyTax = null;
+        this._pendingTaxRate = null;
         this.generatedInvoices.push({
             id: Date.now() + Math.random(),
             invoiceNumber: nextInvoiceNumber,
@@ -4541,7 +4547,10 @@ class Scheduler {
             startDate: pending.startDate,
             endDate: pending.endDate,
             serviceCount: pending.serviceCount,
-            total: pending.total,
+            total: grandTotal,
+            subtotal: pending.total,
+            applyTax: applyTax,
+            taxRate: taxRate,
             periodKey: pending.periodKey,
             // Campos de seguimiento de cobros
             status: 'pendiente', // pendiente | enviada | pagada | vencida | cancelada
@@ -4660,7 +4669,11 @@ class Scheduler {
                 <td style="font-size: 0.85rem;">${periodFormatted}</td>
                 <td><span style="background:${isCancelled?'#95a5a6':'var(--color-'+inv.type+')'}; color:white; padding:3px 8px; border-radius:4px; font-size:0.7rem">${isCancelled?'CANCELADA':inv.type.toUpperCase()}</span></td>
                 <td style="text-align: center;">${inv.serviceCount}</td>
-                <td style="text-align: right;"><b>$${inv.total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</b></td>
+                <td style="text-align: right;">
+                    <b>$${(inv.paidAmount ? parseFloat(inv.paidAmount) : inv.total).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</b>
+                    ${inv.paidAmount && parseFloat(inv.paidAmount) !== inv.total ? `<div style="font-size:0.68rem;color:#888;margin-top:1px;">Facturado: $${inv.total.toFixed(2)}</div>` : ''}
+                    ${inv.applyTax && inv.taxRate > 0 && !inv.paidAmount ? `<div style="font-size:0.68rem;color:#888;margin-top:1px;">Sub: $${(inv.subtotal||inv.total).toFixed(2)} + ${inv.taxRate}% tax</div>` : ''}
+                </td>
                 <td>
                     <select onchange="app.changeInvoiceStatus('${inv.id || inv.invoiceNumber}', '${inv.clientName}', this.value)" style="background:${statusColor}; color:white; border:none; padding:3px 6px; border-radius:4px; font-size:0.7rem; cursor:pointer; font-weight:bold;">
                         <option value="pendiente" ${inv.status==='pendiente'?'selected':''}>⏳ Pendiente</option>
@@ -9241,6 +9254,13 @@ class Scheduler {
         // Generar PDF
         this.createPDF(client, allServices, startDate, endDate, template, paymentDue, showDetails, applyTax, taxRate);
         
+        // Calcular total con tax para guardarlo correctamente
+        const subtotalAmt = allServices.reduce((sum, s) => sum + (parseFloat(s.price) || 0), 0);
+        const taxAmt = applyTax && taxRate > 0 ? (subtotalAmt * taxRate / 100) : 0;
+        this._pendingGrandTotal = subtotalAmt + taxAmt;
+        this._pendingApplyTax = applyTax;
+        this._pendingTaxRate = taxRate;
+
         // Si viene de un pending, marcarlo como generado
         this.markPendingAsGenerated();
     }
