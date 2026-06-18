@@ -1765,6 +1765,11 @@ class Scheduler {
             <tbody>${rows}</tbody></table>
             <div class="footer">Generado el ${new Date().toLocaleDateString('es-US',{dateStyle:'long'})}</div>
             
+
+    <!-- VERSION STAMP -->
+    <div id="versionStamp" style="position:fixed; bottom:8px; right:10px; background:rgba(0,0,0,0.55); color:white; font-size:0.7rem; padding:3px 8px; border-radius:10px; z-index:9999; pointer-events:none; font-family:monospace;">
+        v 06/18/2026 01:47 PM CT
+    </div>
 </body></html>`);
         win.document.close(); win.print();
     }
@@ -9045,12 +9050,11 @@ Motivo de cancelación (opcional):`);
     }
 
     printPDF(pdfUrl) {
+        // Registrar en Enviadas al imprimir (status: enviada — se imprimió para entregar)
+        this._registerInvoiceFromPDF('enviada');
+        this.markPendingAsGenerated();
         const printWindow = window.open(pdfUrl);
-        printWindow.onload = function() {
-            printWindow.print();
-        };
-        // Registrar en historial al imprimir
-        this._registerInvoiceFromPDF('pendiente');
+        printWindow.onload = function() { printWindow.print(); };
     }
 
     _registerInvoiceFromPDF(status) {
@@ -9094,6 +9098,9 @@ Motivo de cancelación (opcional):`);
     }
 
     async sendInvoiceByGmail(pdfBlob, client, invoiceNumber, total, startDate, endDate) {
+        // Registrar en Enviadas con status enviada
+        this._registerInvoiceFromPDF('enviada');
+        this.markPendingAsGenerated();
         try {
             const toEmail = client.email;
             if (!toEmail) { alert('Este cliente no tiene email registrado.'); return; }
@@ -9371,9 +9378,7 @@ Motivo de cancelación (opcional):`);
         this._pendingGrandTotal = subtotalAmt + taxAmt;
         this._pendingApplyTax = applyTax;
         this._pendingTaxRate = taxRate;
-
-        // Si viene de un pending, marcarlo como generado
-        this.markPendingAsGenerated();
+        // markPendingAsGenerated se llama al imprimir o enviar, no aquí
     }
 
 	createPDFBlob(client, services, startDate, endDate, template, paymentDue, showDetails, applyTax, taxRate) {
