@@ -1764,12 +1764,11 @@ class Scheduler {
             <table><thead><tr><th>Cliente</th><th>Teléfono</th><th>Dirección</th><th>Grupo</th><th>Fecha</th></tr></thead>
             <tbody>${rows}</tbody></table>
             <div class="footer">Generado el ${new Date().toLocaleDateString('es-US',{dateStyle:'long'})}</div>
-            
 
-    <!-- VERSION STAMP -->
-    <div id="versionStamp" style="position:fixed; bottom:8px; right:10px; background:rgba(0,0,0,0.55); color:white; font-size:0.7rem; padding:3px 8px; border-radius:10px; z-index:9999; pointer-events:none; font-family:monospace;">
-        v 06/18/2026 01:47 PM CT
-    </div>
+<!-- VERSION STAMP -->
+<div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
+    v 06/18/2026 02:49 PM CT
+</div>
 </body></html>`);
         win.document.close(); win.print();
     }
@@ -4735,7 +4734,7 @@ class Scheduler {
         
         filtered.sort((a, b) => b.generatedDate.localeCompare(a.generatedDate));
         
-        const statusColors = { pendiente:'#e67e22', enviada:'#2980b9', pagada:'#27ae60', vencida:'#e74c3c', cancelada:'#95a5a6' };
+        const statusColors = { pendiente:'#e67e22', enviada:'#2980b9', parcial:'#d4a017', pagada:'#27ae60', vencida:'#e74c3c', cancelada:'#95a5a6' };
         const statusLabels = { pendiente:'⏳ Pendiente', enviada:'📧 Enviada', pagada:'✅ Pagada', vencida:'🔴 Vencida', cancelada:'🚫 Cancelada' };
 
         let html = '';
@@ -4775,6 +4774,7 @@ class Scheduler {
                     <select onchange="app.changeInvoiceStatus('${inv.id || inv.invoiceNumber}', '${inv.clientName}', this.value)" style="background:${statusColor}; color:white; border:none; padding:3px 6px; border-radius:4px; font-size:0.7rem; cursor:pointer; font-weight:bold;">
                         <option value="pendiente" ${inv.status==='pendiente'?'selected':''}>⏳ Pendiente</option>
                         <option value="enviada" ${inv.status==='enviada'?'selected':''}>📧 Enviada</option>
+                        <option value="parcial" ${inv.status==='parcial'?'selected':''}>💛 Parcial</option>
                         <option value="pagada" ${inv.status==='pagada'?'selected':''}>✅ Pagada</option>
                         <option value="vencida" ${inv.status==='vencida'?'selected':''}>🔴 Vencida</option>
                         <option value="cancelada" ${inv.status==='cancelada'?'selected':''}>🚫 Cancelada</option>
@@ -4876,8 +4876,8 @@ class Scheduler {
         }).sort((a,b) => b.generatedDate.localeCompare(a.generatedDate));
 
         // Resumen
-        const totals = { pendiente:0, enviada:0, pagada:0, vencida:0, cancelada:0 };
-        const counts = { pendiente:0, enviada:0, pagada:0, vencida:0, cancelada:0 };
+        const totals = { pendiente:0, enviada:0, parcial:0, pagada:0, vencida:0, cancelada:0 };
+        const counts = { pendiente:0, enviada:0, parcial:0, pagada:0, vencida:0, cancelada:0 };
         (this.generatedInvoices||[]).forEach(inv => {
             const s = inv.status || 'pendiente';
             totals[s] = (totals[s]||0) + inv.total;
@@ -4925,15 +4925,58 @@ class Scheduler {
         const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(id));
         if (!inv) return;
         document.getElementById('cobroDetalleId').value = id;
-        document.getElementById('cobroDetalleTitle').textContent = `💰 #${inv.invoiceNumber?.toString().padStart(4,'0')} — ${inv.clientName}`;
+        const num = inv.invoiceNumber?.toString().padStart(4,'0');
+        const totalPaid = (inv.payments||[]).reduce((s,p) => s + parseFloat(p.amount||0), 0);
+        const balance = (inv.total||0) - totalPaid;
+        document.getElementById('cobroDetalleTitle').textContent = `💰 #${num} — ${inv.clientName}`;
         document.getElementById('cobroDetalleStatus').value = inv.status || 'pendiente';
         document.getElementById('cobroDetalleSentAt').value = inv.sentAt || '';
-        document.getElementById('cobroDetallePaidAt').value = inv.paidAt || '';
-        document.getElementById('cobroDetallePaidAmount').value = inv.paidAmount || '';
-        document.getElementById('cobroDetallePayMethod').value = inv.paymentMethod || '';
-        document.getElementById('cobroDetallePayRef').value = inv.paymentRef || '';
-        document.getElementById('cobroDetalleNotes').value = inv.notes || '';
+        document.getElementById('cobroDetallePaidAt').value = '';
+        document.getElementById('cobroDetallePaidAmount').value = balance > 0 ? balance.toFixed(2) : '';
+        document.getElementById('cobroDetallePayMethod').value = '';
+        document.getElementById('cobroDetallePayRef').value = '';
+        document.getElementById('cobroDetalleNotes').value = '';
+        // Render payment history
+        this.renderPaymentHistory(inv);
+        // Show balance info
+        const balanceEl = document.getElementById('cobroBalanceInfo');
+        if (balanceEl) {
+            const paidStr = totalPaid > 0 ? `Pagado: <b style="color:#27ae60">$${totalPaid.toFixed(2)}</b> | ` : '';
+            balanceEl.innerHTML = `Total: <b>$${(inv.total||0).toFixed(2)}</b> | ${paidStr}Balance: <b style="color:${balance>0?'#e74c3c':'#27ae60'}">$${balance.toFixed(2)}</b>`;
+        }
         document.getElementById('cobroDetalleModal').style.display = 'flex';
+    }
+
+    renderPaymentHistory(inv) {
+        const el = document.getElementById('cobroPaymentHistory');
+        if (!el) return;
+        const payments = inv.payments || [];
+        if (payments.length === 0) { el.style.display = 'none'; return; }
+        const methodIcons = {cash:'💵',check:'🏦',credit:'💳',zelle:'📱',other:'💰'};
+        el.style.display = 'block';
+        el.innerHTML = `
+            <div style="font-size:0.82rem;font-weight:700;color:#444;margin-bottom:6px;">Historial de pagos:</div>
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                ${payments.map((p,i) => `
+                <tr style="border-bottom:1px solid #f0f0f0;">
+                    <td style="padding:4px 6px;color:#666;">${p.date}</td>
+                    <td style="padding:4px 6px;font-weight:700;color:#27ae60;">$${parseFloat(p.amount).toFixed(2)}</td>
+                    <td style="padding:4px 6px;">${methodIcons[p.method]||''} ${p.method||''}</td>
+                    <td style="padding:4px 6px;color:#888;">${p.ref||''}</td>
+                    <td style="padding:4px 6px;"><button onclick="app.removePayment('${inv.id}',${i})" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:0.8rem;">✕</button></td>
+                </tr>`).join('')}
+            </table>`;
+    }
+
+    removePayment(invId, index) {
+        const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(invId));
+        if (!inv || !inv.payments) return;
+        inv.payments.splice(index, 1);
+        const totalPaid = inv.payments.reduce((s,p) => s + parseFloat(p.amount||0), 0);
+        if (totalPaid < (inv.total||0)) inv.status = totalPaid > 0 ? 'parcial' : 'enviada';
+        this.save();
+        this.openCobroDetalle(invId);
+        this.refreshGeneratedInvoices();
     }
 
     onCobroStatusChange() {
@@ -4963,13 +5006,36 @@ class Scheduler {
         const id = document.getElementById('cobroDetalleId').value;
         const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(id));
         if (!inv) return;
-        inv.status = document.getElementById('cobroDetalleStatus').value;
-        inv.sentAt = document.getElementById('cobroDetalleSentAt').value || null;
-        inv.paidAt = document.getElementById('cobroDetallePaidAt').value || null;
-        inv.paidAmount = document.getElementById('cobroDetallePaidAmount').value || null;
-        inv.paymentMethod = document.getElementById('cobroDetallePayMethod').value || '';
-        inv.paymentRef = document.getElementById('cobroDetallePayRef').value || '';
-        inv.notes = document.getElementById('cobroDetalleNotes').value || '';
+
+        // Add payment to history if amount entered
+        const amount = parseFloat(document.getElementById('cobroDetallePaidAmount').value || 0);
+        const paidAt = document.getElementById('cobroDetallePaidAt').value;
+        const method = document.getElementById('cobroDetallePayMethod').value || '';
+        const ref = document.getElementById('cobroDetallePayRef').value || '';
+        const notes = document.getElementById('cobroDetalleNotes').value || '';
+
+        if (amount > 0 && paidAt) {
+            if (!inv.payments) inv.payments = [];
+            inv.payments.push({ date: paidAt, amount, method, ref, notes });
+            // Calculate total paid
+            const totalPaid = inv.payments.reduce((s,p) => s + parseFloat(p.amount||0), 0);
+            inv.paidAmount = totalPaid.toFixed(2);
+            inv.paidAt = paidAt;
+            inv.paymentMethod = method;
+            inv.paymentRef = ref;
+            // Auto-set status
+            if (totalPaid >= (inv.total||0)) {
+                inv.status = 'pagada';
+            } else {
+                inv.status = 'parcial';
+            }
+        } else {
+            // Just update status/sentAt without adding payment
+            inv.status = document.getElementById('cobroDetalleStatus').value;
+        }
+
+        inv.sentAt = document.getElementById('cobroDetalleSentAt').value || inv.sentAt || null;
+        inv.notes = notes;
         this.save();
         document.getElementById('cobroDetalleModal').style.display = 'none';
         this.refreshGeneratedInvoices();
@@ -5392,7 +5458,12 @@ Motivo de cancelación (opcional):`);
         </div>
 
         <scr' + 'ipt>window.onload = function() { window.print(); }</scr' + 'ipt>
-        </body></html>`);
+        
+<!-- VERSION STAMP -->
+<div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
+    v 06/18/2026 02:49 PM CT
+</div>
+</body></html>`);
         win.document.close();
     }
 
@@ -5477,7 +5548,12 @@ Motivo de cancelación (opcional):`);
                         <span style="color: #8e44ad;">${total}</span>
                     </div>
                 </div>
-            </body>
+            
+<!-- VERSION STAMP -->
+<div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
+    v 06/18/2026 02:49 PM CT
+</div>
+</body>
             </html>
         `);
         printWindow.document.close();
@@ -6323,7 +6399,12 @@ Motivo de cancelación (opcional):`);
                     <div class="ganancias-box">
                         ${gananciasContent}
                     </div>
-                </body>
+                
+<!-- VERSION STAMP -->
+<div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
+    v 06/18/2026 02:49 PM CT
+</div>
+</body>
                 </html>
             `);
             printWindow.document.close();
@@ -6390,7 +6471,12 @@ Motivo de cancelación (opcional):`);
                         <span class="monto azul">${ganancia}</span>
                     </div>
                 </div>
-            </body>
+            
+<!-- VERSION STAMP -->
+<div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
+    v 06/18/2026 02:49 PM CT
+</div>
+</body>
             </html>
         `);
         printWindow.document.close();
@@ -11450,7 +11536,12 @@ Motivo de cancelación (opcional):`);
           <div style="background:${pdfGrandNet>=0?'#e8f8f5':'#fdf2f8'};border-radius:8px;padding:10px;text-align:center;border:2px solid ${pdfGrandNet>=0?'#27ae60':'#e74c3c'}"><div style="font-size:10px;color:${pdfGrandNet>=0?'#27ae60':'#e74c3c'};font-weight:700;text-transform:uppercase">Ganancia Neta</div><div style="font-size:1.5rem;font-weight:700;color:${pdfGrandNet>=0?'#1e8449':'#922b21'}">${pdfGrandNet>=0?'+':''}$${fmt(pdfGrandNet)}</div></div>
         </div>
         ${weeklyTableHTML}${groupsHTML}
-        </body></html>`);
+        
+<!-- VERSION STAMP -->
+<div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
+    v 06/18/2026 02:49 PM CT
+</div>
+</body></html>`);
         win.document.close();
     }
 
@@ -12322,7 +12413,12 @@ Motivo de cancelación (opcional):`);
             <body>
             ${allHTML}
             <button onclick="window.print()" class="no-print" style="margin-top:20px;padding:10px 24px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:1rem;display:block;">🖨️ Imprimir todos</button>
-            </body></html>`);
+            
+<!-- VERSION STAMP -->
+<div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
+    v 06/18/2026 02:49 PM CT
+</div>
+</body></html>`);
         win.document.close();
     }
 
@@ -12411,7 +12507,12 @@ Motivo de cancelación (opcional):`);
             <div class="grand-total">TOTAL: $${grandTotal.toFixed(2)}</div>
         </div>
         <button onclick="window.print()" style="margin-top:20px;padding:10px 24px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:1rem;">🖨️ Imprimir</button>
-        </body></html>`);
+        
+<!-- VERSION STAMP -->
+<div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
+    v 06/18/2026 02:49 PM CT
+</div>
+</body></html>`);
         win.document.close();
     }
 
@@ -12913,6 +13014,7 @@ document.addEventListener('click', function(e) {
                         <option value="all">Todos (enviadas+)</option>
                         <option value="pendiente">⏳ Solo Pendientes</option>
                         <option value="enviada">📧 Enviada</option>
+                        <option value="parcial">💛 Pago Parcial</option>
                         <option value="pagada">✅ Pagada</option>
                         <option value="vencida">🔴 Vencida</option>
                         <option value="cancelada">🚫 Cancelada</option>
@@ -13288,10 +13390,12 @@ document.addEventListener('click', function(e) {
 <!-- Modal Detalle Cobro -->
 <div id="cobroDetalleModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:99999; align-items:center; justify-content:center;">
     <div style="background:white; border-radius:14px; padding:24px; max-width:460px; width:92%; box-shadow:0 8px 40px rgba(0,0,0,0.35);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <h3 id="cobroDetalleTitle" style="margin:0; color:#16a085; font-size:1.1rem;">💰 Registrar Pago</h3>
             <button onclick="document.getElementById('cobroDetalleModal').style.display='none'" style="background:none; border:none; font-size:1.4rem; cursor:pointer; color:#999;">✕</button>
         </div>
+        <div id="cobroBalanceInfo" style="background:#f8f9fa; border-radius:8px; padding:8px 12px; margin-bottom:12px; font-size:0.85rem; color:#444;"></div>
+        <div id="cobroPaymentHistory" style="display:none; background:#f0faf5; border-radius:8px; padding:10px 12px; margin-bottom:12px; border:1px solid #a8e6cf;"></div>
         <input type="hidden" id="cobroDetalleId">
 
         <!-- Estado -->
@@ -13300,6 +13404,7 @@ document.addEventListener('click', function(e) {
             <select id="cobroDetalleStatus" onchange="app.onCobroStatusChange()" style="width:100%; padding:9px; margin-top:5px; border:1px solid #ddd; border-radius:8px; font-size:0.95rem; font-weight:600;">
                 <option value="pendiente">⏳ Pendiente</option>
                 <option value="enviada">📤 Enviada al cliente</option>
+                <option value="parcial">💛 Pago Parcial</option>
                 <option value="pagada">✅ Pagada</option>
                 <option value="vencida">🔴 Vencida</option>
                 <option value="cancelada">❌ Cancelada</option>
@@ -13487,5 +13592,10 @@ document.addEventListener('click', function(e) {
   </div>
 </div>
 
+
+<!-- VERSION STAMP -->
+<div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
+    v 06/18/2026 02:49 PM CT
+</div>
 </body>
 </html>
