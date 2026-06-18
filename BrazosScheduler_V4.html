@@ -762,6 +762,7 @@
                             <span id="pendingBadge" style="display: none; position: absolute; top: 50%; transform: translateY(-50%); right: 10px; background: #e74c3c; color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; font-weight: bold; line-height: 18px; text-align: center;"></span>
                         </button>
                         <button onclick="app.openGeneratedInvoices(); closeAllDropdowns();">📑 Enviadas</button>
+                        <button onclick="app.openServiceLog(); closeAllDropdowns();">📋 Log</button>
                         <span id="cobrosBadge" style="display:none"></span>
                     </div>
                 </div>
@@ -1529,6 +1530,7 @@ class Scheduler {
         this.expandedMembers = JSON.parse(localStorage.getItem('v55_expMembers')) || {};
         this.emps = JSON.parse(localStorage.getItem('v35_emps')) || [];
         this.clis = JSON.parse(localStorage.getItem('v35_clis')) || [];
+        this.serviceLog = JSON.parse(localStorage.getItem('v35_serviceLog') || '[]');
         this.servs = JSON.parse(localStorage.getItem('v35_servs')) || [];
         this.grupos = JSON.parse(localStorage.getItem('v35_grupos')) || {
             "Grupo A":["","","","",""], "Grupo B":["","","","",""]
@@ -3328,6 +3330,72 @@ class Scheduler {
         alert(`✅ ${toMove.length} servicios adelantados una semana.`);
     }
 
+    openServiceLog() {
+        const log = (this.serviceLog || []).slice().reverse(); // newest first
+        const actionColors = { cancelado:'#e74c3c', eliminado:'#c0392b', editado:'#e67e22', creado:'#27ae60' };
+        const actionIcons = { cancelado:'🚫', eliminado:'🗑️', editado:'✏️', creado:'✅' };
+
+        let html = `
+        <div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center;" id="serviceLogModal">
+            <div style="background:white;border-radius:14px;padding:24px;max-width:700px;width:95%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.3);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <h3 style="margin:0;color:#2c3e50;">📋 Log de Cambios en Servicios</h3>
+                    <button onclick="document.getElementById('serviceLogModal').remove()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:#999;">✕</button>
+                </div>`;
+
+        if (log.length === 0) {
+            html += `<p style="text-align:center;color:#999;padding:40px;">No hay cambios registrados aún.</p>`;
+        } else {
+            html += `<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                <thead><tr style="background:#f8f9fa;border-bottom:2px solid #dee2e6;">
+                    <th style="padding:8px;text-align:left;">Fecha/Hora</th>
+                    <th style="padding:8px;text-align:left;">Acción</th>
+                    <th style="padding:8px;text-align:left;">Cliente</th>
+                    <th style="padding:8px;text-align:left;">Fecha Servicio</th>
+                    <th style="padding:8px;text-align:left;">Empleado</th>
+                    <th style="padding:8px;text-align:left;">Detalle</th>
+                </tr></thead><tbody>`;
+            log.forEach(entry => {
+                const dt = new Date(entry.ts);
+                const dateStr = dt.toLocaleDateString('en-US', {month:'2-digit',day:'2-digit',year:'2-digit'});
+                const timeStr = dt.toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit'});
+                const color = actionColors[entry.action] || '#666';
+                const icon = actionIcons[entry.action] || '•';
+                html += `<tr style="border-bottom:1px solid #f0f0f0;">
+                    <td style="padding:8px;color:#666;white-space:nowrap;">${dateStr} ${timeStr}</td>
+                    <td style="padding:8px;"><span style="background:${color};color:white;padding:2px 8px;border-radius:10px;font-size:0.75rem;font-weight:700;">${icon} ${entry.action.toUpperCase()}</span></td>
+                    <td style="padding:8px;font-weight:600;">${entry.client}</td>
+                    <td style="padding:8px;">${entry.date}</td>
+                    <td style="padding:8px;color:#666;">${entry.emp||'—'}</td>
+                    <td style="padding:8px;color:#888;font-size:0.8rem;">${entry.extra||'—'}</td>
+                </tr>`;
+            });
+            html += `</tbody></table>`;
+        }
+        html += `<div style="text-align:right;margin-top:16px;">
+            <button onclick="document.getElementById('serviceLogModal').remove()" style="padding:8px 20px;background:#2c3e50;color:white;border:none;border-radius:8px;cursor:pointer;">Cerrar</button>
+        </div></div></div>`;
+        document.body.insertAdjacentHTML('beforeend', html);
+    }
+
+    logServiceChange(action, svc, extra) {
+        if (!this.serviceLog) this.serviceLog = [];
+        const cli = this.clis.find(c => c.id == svc.cliId);
+        const emp = this.emps ? this.emps.find(e => e.id == svc.empId) : null;
+        this.serviceLog.push({
+            ts: new Date().toISOString(),
+            action,  // 'cancelado' | 'eliminado' | 'editado' | 'creado'
+            svcId: svc.id,
+            client: cli ? cli.name : svc.cliId,
+            date: svc.date,
+            emp: emp ? emp.name : svc.empId,
+            extra: extra || ''
+        });
+        // Keep last 500 entries
+        if (this.serviceLog.length > 500) this.serviceLog = this.serviceLog.slice(-500);
+        localStorage.setItem('v35_serviceLog', JSON.stringify(this.serviceLog));
+    }
+
     saveService(e) {
         e.preventDefault();
         const isCancelled = document.getElementById('mCancelled').checked || false;
@@ -3356,6 +3424,7 @@ class Scheduler {
             // Eliminar el original primero para evitar duplicados
             this.servs = this.servs.filter(x => String(x.id) !== String(this.editing.id));
             this.servs.push(data);
+            if (!isCancelled) this.logServiceChange('editado', data, `fecha anterior: ${this.editing.date}`);
             // Aplicar prioridad a toda la serie futura si se seleccionó
             const prioApply = document.querySelector('input[name="priorityApply"]:checked');
             if(prioApply && prioApply.value === 'serie' && data.priority) {
@@ -3373,6 +3442,7 @@ class Scheduler {
             if (isCancelled && !wasAlreadyCancelled) {
                 const cli = this.clis.find(c => c.id == data.cliId);
                 const hasRecurrence = cli && cli.type && cli.type !== 'unico' && cli.type !== 'airbnb' && cli.type !== 'construccion';
+                this.logServiceChange('cancelado', data, 'desde modal');
                 this._pendingCancelData = data;
                 document.getElementById('cancelModalInfo').textContent = 
                     `${cli ? cli.name : ''} — ${data.date}`;
@@ -3387,6 +3457,7 @@ class Scheduler {
             if (isCancelled && !wasAlreadyCancelled) {
                 const cli = this.clis.find(c => c.id == data.cliId);
                 const hasRecurrence = cli && cli.type && cli.type !== 'unico' && cli.type !== 'airbnb' && cli.type !== 'construccion';
+                this.logServiceChange('cancelado', data, 'nuevo cancelado');
                 this._pendingCancelData = data;
                 document.getElementById('cancelModalInfo').textContent = 
                     `${cli ? cli.name : ''} — ${data.date}`;
@@ -4459,6 +4530,27 @@ class Scheduler {
     
     // Esta función se llamará desde el modal de facturación al generar el PDF
     markPendingAsGenerated() {
+        // Si viene de regenerar, actualizar la factura existente en lugar de crear nueva
+        if (this._regeneratingInvoiceId) {
+            const existingInv = (this.generatedInvoices||[]).find(i => i.id == this._regeneratingInvoiceId);
+            if (existingInv) {
+                const grandTotal = this._pendingGrandTotal || existingInv.total;
+                existingInv.total = grandTotal;
+                existingInv.subtotal = this._pendingGrandTotal ? (grandTotal / (1 + (this._pendingTaxRate||0)/100)) : existingInv.subtotal;
+                existingInv.applyTax = this._pendingApplyTax || existingInv.applyTax;
+                existingInv.taxRate = this._pendingTaxRate || existingInv.taxRate;
+                existingInv.generatedDate = new Date().toISOString().split('T')[0];
+                this._pendingGrandTotal = null;
+                this._pendingApplyTax = null;
+                this._pendingTaxRate = null;
+                this._regeneratingInvoiceId = null;
+                this.save();
+                this.refreshGeneratedInvoices();
+                return;
+            }
+            this._regeneratingInvoiceId = null;
+        }
+
         if (this.currentPendingIndex !== undefined && this.currentPendingIndex !== null) {
             const pending = this.pendingInvoices[this.currentPendingIndex];
             if (pending) {
@@ -4692,6 +4784,7 @@ class Scheduler {
                             <button onclick="app.regenerateInvoice('${inv.id}')" class="btn" style="background: #1A4FCC; color: white; padding: 5px 8px; font-size: 0.75rem;">🔄 Regenerar</button>
                             <button onclick="app.openInvoiceForEdit('${inv.id}')" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
                             <button onclick="app.editInvoiceNumber('${inv.id}', ${inv.invoiceNumber})" class="btn" style="background: #6c757d; color: white; padding: 5px 8px; font-size: 0.75rem;"># Nº</button>
+                            <button onclick="app.cancelInvoice('${inv.id}')" class="btn" style="background: #c0392b; color: white; padding: 5px 8px; font-size: 0.75rem;">🗑️ Cancelar</button>
                             ${inv.status === 'pagada' ? `
                             <button onclick="app.printReceipt('${inv.id}')" class="btn" style="background: #27ae60; color: white; padding: 5px 8px; font-size: 0.75rem;">🧾 Recibo</button>
                             <button onclick="app.emailReceipt('${inv.id}')" class="btn" style="background: #16a085; color: white; padding: 5px 8px; font-size: 0.75rem;">📧 Email Recibo</button>
@@ -4955,6 +5048,22 @@ class Scheduler {
         }, 300);
     }
 
+    cancelInvoice(id) {
+        const inv = (this.generatedInvoices||[]).find(i => (i.id && i.id == id) || i.invoiceNumber == id);
+        if (!inv) return;
+        const num = inv.invoiceNumber?.toString().padStart(4,'0');
+        const reason = prompt(`Cancelar factura #${num} — ${inv.clientName}
+
+Motivo de cancelación (opcional):`);
+        if (reason === null) return; // user pressed Cancel
+        inv.status = 'cancelada';
+        inv.cancelledReason = reason || 'Cancelada manualmente';
+        inv.cancelledAt = new Date().toISOString().split('T')[0];
+        this.save();
+        this.refreshGeneratedInvoices();
+        this.updateCobrosBadge();
+    }
+
     returnInvoiceToPending(index) {
         const start = document.getElementById('genInvStart').value;
         const end = document.getElementById('genInvEnd').value;
@@ -5037,6 +5146,8 @@ class Scheduler {
 
         const regenConfig = { template: iCfg.template || 'modern', paymentDue: iCfg.paymentDue || '', showDetails: iCfg.showDetails !== undefined ? iCfg.showDetails : true, applyTax: iCfg.applyTax || false, taxRate: iCfg.taxRate || 0 };
         window.currentPDFData = { ...pdfData, client, blob: pdfData.blob, serviceCount: services.length, invoiceConfig: regenConfig };
+        // Guardar ID de factura existente para reemplazar en lugar de crear nueva
+        this._regeneratingInvoiceId = invoice.id;
         this.displayPDFPreview(pdfData, client, invoice.startDate, invoice.endDate, regenConfig);
     }
 
