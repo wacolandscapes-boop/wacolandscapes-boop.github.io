@@ -1767,7 +1767,7 @@ class Scheduler {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 02:49 PM CT
+    v 06/18/2026 04:59 PM CT
 </div>
 </body></html>`);
         win.document.close(); win.print();
@@ -5216,7 +5216,7 @@ Motivo de cancelación (opcional):`);
         if (!pdfData || !pdfData.blob) { alert('Error al generar PDF'); return; }
 
         const regenConfig = { template: iCfg.template || 'modern', paymentDue: iCfg.paymentDue || '', showDetails: iCfg.showDetails !== undefined ? iCfg.showDetails : true, applyTax: iCfg.applyTax || false, taxRate: iCfg.taxRate || 0 };
-        window.currentPDFData = { ...pdfData, client, blob: pdfData.blob, serviceCount: services.length, invoiceConfig: regenConfig };
+        window.currentPDFData = { ...pdfData, client, blob: pdfData.blob, serviceCount: services.length, _services: services, invoiceConfig: regenConfig };
         // Guardar ID de factura existente para reemplazar en lugar de crear nueva
         this._regeneratingInvoiceId = invoice.id;
         this.displayPDFPreview(pdfData, client, invoice.startDate, invoice.endDate, regenConfig);
@@ -5461,7 +5461,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 02:49 PM CT
+    v 06/18/2026 04:59 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -5551,7 +5551,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 02:49 PM CT
+    v 06/18/2026 04:59 PM CT
 </div>
 </body>
             </html>
@@ -6402,7 +6402,7 @@ Motivo de cancelación (opcional):`);
                 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 02:49 PM CT
+    v 06/18/2026 04:59 PM CT
 </div>
 </body>
                 </html>
@@ -6474,7 +6474,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 02:49 PM CT
+    v 06/18/2026 04:59 PM CT
 </div>
 </body>
             </html>
@@ -9044,6 +9044,8 @@ Motivo de cancelación (opcional):`);
             return;
         }
         // Mostrar preview
+        pdfData._serviceCount = allServices.length;
+        pdfData._services = allServices;
         this.displayPDFPreview(pdfData, client, startDate, endDate);
     }    
 
@@ -9071,11 +9073,24 @@ Motivo de cancelación (opcional):`);
                 <iframe src="${pdfUrl}" style="flex: 1; border: none; margin: 0; padding: 0;"></iframe>
                 
                 <div style="padding: 20px; border-top: 2px solid #ddd; display: flex; gap: 15px; justify-content: center; flex-wrap:wrap;">
+                    <!-- Tax controls in preview -->
+                    <div style="display:flex;align-items:center;gap:8px;background:#f8f9fa;padding:10px 15px;border-radius:8px;border:1px solid #ddd;">
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;font-size:0.9rem;">
+                            <input type="checkbox" id="previewApplyTax" onchange="app.togglePreviewTax()" style="width:16px;height:16px;">
+                            💵 Tax
+                        </label>
+                        <input type="number" id="previewTaxRate" value="8.25" min="0" max="100" step="0.01" style="width:70px;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem;" placeholder="8.25">
+                        <span style="font-size:0.85rem;color:#666;">%</span>
+                        <button onclick="app.regenWithTax()" class="btn" style="background:#e67e22;color:white;padding:8px 14px;font-size:0.85rem;border:none;border-radius:6px;cursor:pointer;font-weight:600;">🔄 Aplicar</button>
+                    </div>
                     <button onclick="app.printPDF('${pdfUrl}')" class="btn" style="background: #1A4FCC; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         🖨️ Imprimir
                     </button>
                     <button onclick="app.savePDF(window.currentPDFData.invoiceNumber, window.currentPDFData.client.id, window.currentPDFData.startDate)" class="btn" style="background: #27ae60; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                        💾 Guardar
+                        💾 Guardar + Descargar
+                    </button>
+                    <button onclick="app.saveAsEnviada()" class="btn" style="background: #16a085; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                        ✅ Guardar como Enviada
                     </button>
                     ${client.email ? `<button onclick="app.sendInvoiceByGmail(window.currentPDFData.blob, window.currentPDFData.client, window.currentPDFData.invoiceNumber, window.currentPDFData.total || 0, window.currentPDFData.startDate || '${startDate}', window.currentPDFData.endDate || '${endDate}')" class="btn" style="background: #ea4335; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         📧 Enviar por Gmail
@@ -9093,7 +9108,8 @@ Motivo de cancelación (opcional):`);
         window.currentPDFData = pdfData;
         window.currentPDFData.startDate = startDate;
         window.currentPDFData.endDate = endDate;
-        window.currentPDFData.serviceCount = pdfData.services ? pdfData.services.length : (typeof allServices !== 'undefined' ? allServices.length : 0);
+        window.currentPDFData.serviceCount = pdfData._serviceCount || (pdfData.services ? pdfData.services.length : 0);
+        if (pdfData._services) window.currentPDFData._services = pdfData._services;
         // Use override if provided (from regenerate), else capture from modal vars
         if (invoiceConfigOverride) {
             window.currentPDFData.invoiceConfig = invoiceConfigOverride;
@@ -9133,6 +9149,88 @@ Motivo de cancelación (opcional):`);
         } catch(e) {
             alert('Error: ' + e.message);
         }
+    }
+
+    saveAsEnviada() {
+        const pdfData = window.currentPDFData;
+        if (!pdfData || !pdfData.invoiceNumber) return;
+        const invoiceNumber = parseInt(pdfData.invoiceNumber);
+        const clientName = pdfData.client?.name || '';
+        const today = new Date().toISOString().split('T')[0];
+        if (!this.generatedInvoices) this.generatedInvoices = [];
+        // Check if already exists
+        const existing = this.generatedInvoices.find(i => i.invoiceNumber === invoiceNumber);
+        if (existing) {
+            // Update existing record
+            existing.status = 'enviada';
+            existing.sentAt = existing.sentAt || today;
+            existing.invoiceConfig = pdfData.invoiceConfig || existing.invoiceConfig;
+            existing.serviceCount = pdfData.serviceCount || existing.serviceCount;
+            existing.total = pdfData.total || existing.total;
+        } else {
+            // Create new record
+            const cli = this.clis ? this.clis.find(c => c.name === clientName) : null;
+            this.generatedInvoices.push({
+                id: Date.now() + Math.random(),
+                invoiceNumber,
+                generatedDate: today,
+                clientName,
+                clientEmail: cli?.email || pdfData.client?.email || '',
+                type: cli?.type || 'mensual',
+                startDate: pdfData.startDate || '',
+                endDate: pdfData.endDate || '',
+                serviceCount: pdfData.serviceCount || 0,
+                total: pdfData.total || 0,
+                status: 'enviada',
+                sentAt: today,
+                paidAt: null, paidAmount: null, notes: '',
+                invoiceConfig: pdfData.invoiceConfig || null
+            });
+        }
+        localStorage.setItem('lastInvoiceNumber', invoiceNumber.toString());
+        this.markPendingAsGenerated();
+        this.save();
+        document.getElementById('pdfPreviewModal').remove();
+        this.refreshGeneratedInvoices();
+        alert('✅ Registrada en Enviadas correctamente!');
+        this.closeInvoice();
+    }
+
+    togglePreviewTax() {
+        const cb = document.getElementById('previewApplyTax');
+        const rateEl = document.getElementById('previewTaxRate');
+        if (rateEl) rateEl.style.opacity = cb && cb.checked ? '1' : '0.4';
+    }
+
+    regenWithTax() {
+        const pdfData = window.currentPDFData;
+        if (!pdfData) return;
+        const applyTax = document.getElementById('previewApplyTax')?.checked || false;
+        const taxRate = applyTax ? parseFloat(document.getElementById('previewTaxRate')?.value || 8.25) : 0;
+        const client = pdfData.client;
+        const services = pdfData._services || [];
+        const cfg = pdfData.invoiceConfig || {};
+        // Regenerate PDF with new tax settings
+        const newPdfData = this.createPDFBlob(client, services, pdfData.startDate, pdfData.endDate,
+            cfg.template || 'modern', cfg.paymentDue || '', cfg.showDetails !== false, applyTax, taxRate);
+        if (!newPdfData || !newPdfData.blob) { alert('Error al regenerar'); return; }
+        newPdfData._serviceCount = services.length;
+        newPdfData._services = services;
+        // Update current PDF data
+        window.currentPDFData = { ...pdfData, ...newPdfData, 
+            invoiceConfig: { ...cfg, applyTax, taxRate },
+            _pendingApplyTax: applyTax, _pendingTaxRate: taxRate };
+        this._pendingApplyTax = applyTax;
+        this._pendingTaxRate = taxRate;
+        const subtotal = services.reduce((s, sv) => s + (parseFloat(sv.price) || 0), 0);
+        this._pendingGrandTotal = subtotal + (applyTax ? subtotal * taxRate / 100 : 0);
+        // Update iframe
+        const iframe = document.querySelector('#pdfPreviewModal iframe');
+        if (iframe) iframe.src = URL.createObjectURL(newPdfData.blob);
+        // Update print button
+        const pdfUrl = URL.createObjectURL(newPdfData.blob);
+        const printBtn = document.querySelector('#pdfPreviewModal button[onclick*="printPDF"]');
+        if (printBtn) printBtn.setAttribute('onclick', `app.printPDF('${pdfUrl}')`);
     }
 
     printPDF(pdfUrl) {
@@ -11539,7 +11637,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 02:49 PM CT
+    v 06/18/2026 04:59 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12416,7 +12514,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 02:49 PM CT
+    v 06/18/2026 04:59 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12510,7 +12608,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 02:49 PM CT
+    v 06/18/2026 04:59 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -13595,7 +13693,7 @@ document.addEventListener('click', function(e) {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 02:49 PM CT
+    v 06/18/2026 04:59 PM CT
 </div>
 </body>
 </html>
