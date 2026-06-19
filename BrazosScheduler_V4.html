@@ -1781,7 +1781,7 @@ class Scheduler {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 11:31 PM CT
+    v 06/18/2026 11:56 PM CT
 </div>
 </body></html>`);
         win.document.close(); win.print();
@@ -1992,7 +1992,7 @@ class Scheduler {
                 cell.dataset.date = dStr;
                 cell.dataset.grupo = nombreGrupo;
                 cell.onclick = () => this.openModal(null, dStr, nombreGrupo);
-                this._fillCell(cell, dStr, nombreGrupo, fCli);
+                this._fillCell(cell, dStr, nombreGrupo, fCli, fRecurrence);
                 cellsRow.appendChild(cell);
             });
             row.appendChild(cellsRow);
@@ -2322,7 +2322,7 @@ class Scheduler {
     }
 
     // ── Helper: llenar celda con servicios ──────────────────────────
-    _fillCell(cell, dStr, nombreGrupo, fCli) {
+    _fillCell(cell, dStr, nombreGrupo, fCli, fRecurrence='all') {
         let daily = this.servs.filter(s => {
             if(s.date !== dStr) return false;
             if(s.empId === nombreGrupo) return true;
@@ -5479,7 +5479,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 11:31 PM CT
+    v 06/18/2026 11:56 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -5569,7 +5569,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 11:31 PM CT
+    v 06/18/2026 11:56 PM CT
 </div>
 </body>
             </html>
@@ -6420,7 +6420,7 @@ Motivo de cancelación (opcional):`);
                 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 11:31 PM CT
+    v 06/18/2026 11:56 PM CT
 </div>
 </body>
                 </html>
@@ -6492,7 +6492,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 11:31 PM CT
+    v 06/18/2026 11:56 PM CT
 </div>
 </body>
             </html>
@@ -9226,7 +9226,19 @@ Motivo de cancelación (opcional):`);
         const applyTax = document.getElementById('previewApplyTax')?.checked || false;
         const taxRate = applyTax ? parseFloat(document.getElementById('previewTaxRate')?.value || 8.25) : 0;
         const client = pdfData.client;
-        const services = pdfData._services || [];
+        // Si _services está vacío (facturas viejas sin este dato), recuperar del calendario
+        let services = pdfData._services || [];
+        if (services.length === 0 && client && pdfData.startDate && pdfData.endDate) {
+            services = this.servs.filter(s =>
+                String(s.cliId) === String(client.id) &&
+                s.date >= pdfData.startDate && s.date <= pdfData.endDate &&
+                !s.cancelled
+            );
+        }
+        if (services.length === 0) {
+            alert('⚠️ No se encontraron servicios en el calendario para este período. No se puede aplicar tax sin servicios.');
+            return;
+        }
         const cfg = pdfData.invoiceConfig || {};
         // Regenerate PDF with new tax settings
         const newPdfData = this.createPDFBlob(client, services, pdfData.startDate, pdfData.endDate,
@@ -11655,7 +11667,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 11:31 PM CT
+    v 06/18/2026 11:56 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12532,7 +12544,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 11:31 PM CT
+    v 06/18/2026 11:56 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12626,7 +12638,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 11:31 PM CT
+    v 06/18/2026 11:56 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -13711,7 +13723,7 @@ document.addEventListener('click', function(e) {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 11:31 PM CT
+    v 06/18/2026 11:56 PM CT
 </div>
 </body>
 </html>
