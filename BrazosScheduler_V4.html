@@ -1781,7 +1781,7 @@ class Scheduler {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 08:25 AM CT
+    v 06/19/2026 08:53 AM CT
 </div>
 </body></html>`);
         win.document.close(); win.print();
@@ -5481,7 +5481,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 08:25 AM CT
+    v 06/19/2026 08:53 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -5571,7 +5571,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 08:25 AM CT
+    v 06/19/2026 08:53 AM CT
 </div>
 </body>
             </html>
@@ -6422,7 +6422,7 @@ Motivo de cancelación (opcional):`);
                 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 08:25 AM CT
+    v 06/19/2026 08:53 AM CT
 </div>
 </body>
                 </html>
@@ -6494,7 +6494,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 08:25 AM CT
+    v 06/19/2026 08:53 AM CT
 </div>
 </body>
             </html>
@@ -11160,6 +11160,15 @@ Motivo de cancelación (opcional):`);
         this.loadProductionLocal();
     }
 
+    toggleHoursExclude(empId) {
+        const startStr = document.getElementById('hoursRangeStart')?.value;
+        const endStr = document.getElementById('hoursRangeEnd')?.value;
+        if (!this._hoursExcluded) this._hoursExcluded = {};
+        const key = `${startStr}_${endStr}_${empId}`;
+        this._hoursExcluded[key] = !this._hoursExcluded[key];
+        this.renderWeeklyHoursSummary();
+    }
+
     renderWeeklyHoursSummary() {
         const startStr = document.getElementById('hoursRangeStart')?.value;
         const endStr = document.getElementById('hoursRangeEnd')?.value;
@@ -11184,14 +11193,27 @@ Motivo de cancelación (opcional):`);
         dates.forEach(dt => {
             const dayData = this._prodReports[dt];
             if (!dayData) return;
-            Object.values(dayData).forEach(empData => {
-                if (!empData.shopOut || !empData.shopBack) return; // solo si hay ambos registros
-                const empId = empData.empId;
-                const emp = this.emps.find(e => String(e.id) === String(empId));
-                const empName = emp ? emp.name : (empData.empName || 'Desconocido');
 
-                const [soh, som] = empData.shopOut.split(':').map(Number);
-                const [sbh, sbm] = empData.shopBack.split(':').map(Number);
+            // Agrupar registros del día por grupo, para encontrar el "líder" (quien tiene shopOut/shopBack)
+            const dayByGroup = {}; // grupo -> { leaderShopOut, leaderShopBack, memberEmpIds:Set }
+            Object.values(dayData).forEach(empData => {
+                const grp = empData.group || 'Sin Grupo';
+                if (!dayByGroup[grp]) dayByGroup[grp] = { shopOut: null, shopBack: null, memberEmpIds: new Set() };
+                dayByGroup[grp].memberEmpIds.add(String(empData.empId));
+                // El líder es quien tiene ambos registros de shop
+                if (empData.shopOut && empData.shopBack && !dayByGroup[grp].shopOut) {
+                    dayByGroup[grp].shopOut = empData.shopOut;
+                    dayByGroup[grp].shopBack = empData.shopBack;
+                }
+            });
+
+            // Para cada grupo con horario de líder, aplicar a TODOS los miembros configurados del grupo
+            Object.keys(dayByGroup).forEach(grp => {
+                const groupInfo = dayByGroup[grp];
+                if (!groupInfo.shopOut || !groupInfo.shopBack) return; // sin líder con horario ese día
+
+                const [soh, som] = groupInfo.shopOut.split(':').map(Number);
+                const [sbh, sbm] = groupInfo.shopBack.split(':').map(Number);
                 let minutes = (sbh * 60 + sbm) - (soh * 60 + som);
                 if (minutes < 0) minutes = 0;
 
@@ -11202,11 +11224,19 @@ Motivo de cancelación (opcional):`);
                     breakApplied = true;
                 }
 
-                if (!empHours[empId]) empHours[empId] = { name: empName, totalMin: 0, days: [] };
-                empHours[empId].totalMin += minutes;
-                empHours[empId].days.push({
-                    date: dt, shopOut: empData.shopOut, shopBack: empData.shopBack,
-                    netMin: minutes, breakApplied
+                // Usar la lista oficial de miembros del grupo (this.grupos), no solo quienes tienen registro
+                const officialMemberIds = (this.grupos[grp] || []).filter(id => id);
+                const memberIds = officialMemberIds.length > 0 ? officialMemberIds : [...groupInfo.memberEmpIds];
+
+                memberIds.forEach(empId => {
+                    const emp = this.emps.find(e => String(e.id) === String(empId));
+                    const empName = emp ? emp.name : 'Desconocido';
+                    if (!empHours[empId]) empHours[empId] = { empId, name: empName, totalMin: 0, days: [] };
+                    empHours[empId].totalMin += minutes;
+                    empHours[empId].days.push({
+                        date: dt, shopOut: groupInfo.shopOut, shopBack: groupInfo.shopBack,
+                        netMin: minutes, breakApplied
+                    });
                 });
             });
         });
@@ -11226,8 +11256,13 @@ Motivo de cancelación (opcional):`);
 
         const OT_THRESHOLD_MIN = 40 * 60; // 40 horas en minutos
 
+        // Recordar exclusiones (empleados marcados como "no asistió") por rango+empleado
+        if (!this._hoursExcluded) this._hoursExcluded = {};
+        const excludeKey = (empId) => `${startStr}_${endStr}_${empId}`;
+
         let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
             <thead><tr style="background:#fff3e0;border-bottom:2px solid #ffcc80;">
+                <th style="padding:8px;text-align:center;" title="Desmarcar si faltó">✓</th>
                 <th style="padding:8px;text-align:left;">Empleado</th>
                 <th style="padding:8px;text-align:center;">Días con registro</th>
                 <th style="padding:8px;text-align:right;">Horas Regulares</th>
@@ -11237,13 +11272,21 @@ Motivo de cancelación (opcional):`);
 
         let grandRegularMin = 0, grandOTMin = 0, grandTotalMin = 0;
         empList.forEach(emp => {
-            grandTotalMin += emp.totalMin;
+            const empIdSafe = String(emp.empId || emp.name).replace(/[^a-zA-Z0-9]/g, '_');
+            const isExcluded = !!this._hoursExcluded[excludeKey(emp.empId || emp.name)];
             const regularMin = Math.min(emp.totalMin, OT_THRESHOLD_MIN);
             const otMin = Math.max(0, emp.totalMin - OT_THRESHOLD_MIN);
-            grandRegularMin += regularMin;
-            grandOTMin += otMin;
-            html += `<tr style="border-bottom:1px solid #ffe0b2;">
-                <td style="padding:8px;font-weight:600;">${emp.name}</td>
+            if (!isExcluded) {
+                grandTotalMin += emp.totalMin;
+                grandRegularMin += regularMin;
+                grandOTMin += otMin;
+            }
+            const rowStyle = isExcluded ? 'opacity:0.45;' : '';
+            html += `<tr style="border-bottom:1px solid #ffe0b2;${rowStyle}">
+                <td style="padding:8px;text-align:center;">
+                    <input type="checkbox" ${isExcluded ? '' : 'checked'} onchange="app.toggleHoursExclude('${(emp.empId||emp.name)}')" style="width:16px;height:16px;cursor:pointer;">
+                </td>
+                <td style="padding:8px;font-weight:600;${isExcluded ? 'text-decoration:line-through;' : ''}">${emp.name}${isExcluded ? ' <span style="font-size:0.72rem;color:#c0392b;font-weight:400;">(no asistió)</span>' : ''}</td>
                 <td style="padding:8px;text-align:center;color:#888;">${emp.days.length}</td>
                 <td style="padding:8px;text-align:right;color:#444;">${fmtHrs(regularMin)}</td>
                 <td style="padding:8px;text-align:right;${otMin > 0 ? 'color:#c0392b;font-weight:700;' : 'color:#bbb;'}">${otMin > 0 ? fmtHrs(otMin) : '—'}</td>
@@ -11252,7 +11295,7 @@ Motivo de cancelación (opcional):`);
         });
 
         html += `</tbody><tfoot><tr style="border-top:2px solid #e65100;">
-            <td style="padding:8px;font-weight:700;" colspan="2">TOTAL GENERAL</td>
+            <td style="padding:8px;font-weight:700;" colspan="3">TOTAL A PAGAR (excluye los desmarcados)</td>
             <td style="padding:8px;text-align:right;font-weight:700;color:#444;">${fmtHrs(grandRegularMin)}</td>
             <td style="padding:8px;text-align:right;font-weight:700;color:#c0392b;">${grandOTMin > 0 ? fmtHrs(grandOTMin) : '—'}</td>
             <td style="padding:8px;text-align:right;font-weight:700;color:#e65100;font-size:0.95rem;">${fmtHrs(grandTotalMin)}</td>
@@ -11807,7 +11850,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 08:25 AM CT
+    v 06/19/2026 08:53 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12684,7 +12727,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 08:25 AM CT
+    v 06/19/2026 08:53 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12778,7 +12821,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 08:25 AM CT
+    v 06/19/2026 08:53 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -13882,7 +13925,7 @@ document.addEventListener('click', function(e) {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 08:25 AM CT
+    v 06/19/2026 08:53 AM CT
 </div>
 </body>
 </html>
