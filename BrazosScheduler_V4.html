@@ -818,6 +818,20 @@
                         <div id="groupCheckboxes"></div>
                     </div>
                 </div>
+
+                <select id="recurrenceFilter" onchange="app.render()" class="filter-select-final" style="min-width:140px;">
+                    <option value="all">RECURRENCIA (TODOS)</option>
+                    <option value="semanal">Semanal</option>
+                    <option value="quincenal">Quincenal</option>
+                    <option value="mensual">Mensual</option>
+                    <option value="cada3semanas">Cada 3 Semanas</option>
+                    <option value="2xsemana">2x Semana</option>
+                    <option value="3xsemana">3x Semana</option>
+                    <option value="diario">Diario</option>
+                    <option value="airbnb">AirBnB</option>
+                    <option value="unico">Único</option>
+                    <option value="construccion">Construcción</option>
+                </select>
                 
                 <div style="position:relative;flex:1;min-width:160px;">
                     <input type="text" id="searchCliText" placeholder="🔍 Buscar cliente..." autocomplete="off"
@@ -1767,7 +1781,7 @@ class Scheduler {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 04:59 PM CT
+    v 06/18/2026 11:31 PM CT
 </div>
 </body></html>`);
         win.document.close(); win.print();
@@ -1943,6 +1957,7 @@ class Scheduler {
         }
 
         const fCli = document.getElementById('searchCliIds')?.value||'all';
+        const fRecurrence = document.getElementById('recurrenceFilter')?.value||'all';
         const selectedGrps = this.selectedGroups || ['all'];
 
         Object.keys(this.grupos).forEach(nombreGrupo => {
@@ -1995,6 +2010,7 @@ class Scheduler {
         const yr = this.curDate.getFullYear();
         const mo = this.curDate.getMonth();
         const fCli = document.getElementById('searchCliIds')?.value||'all';
+        const fRecurrence = document.getElementById('recurrenceFilter')?.value||'all';
         const selectedGrps = this.selectedGroups || ['all'];
 
         // Wrapper
@@ -2062,6 +2078,7 @@ class Scheduler {
                             return this.grupos[g].includes(s.empId.toString());
                         });
                         if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
+                        if(fRecurrence !== 'all'){daily=daily.filter(s=>{const _c=this.clis.find(c=>c.id==s.cliId);return _c && _c.type===fRecurrence;});}
                         daily.forEach(s => { if(!seen.has(s.id)) { seen.add(s.id); allServs.push({...s, grupo: g}); } });
                     });
 
@@ -2312,6 +2329,7 @@ class Scheduler {
             return this.grupos[nombreGrupo].includes(s.empId.toString());
         });
         if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
+                        if(fRecurrence !== 'all'){daily=daily.filter(s=>{const _c=this.clis.find(c=>c.id==s.cliId);return _c && _c.type===fRecurrence;});}
         daily.sort((a,b) => {
             // Ordenar por hora si tienen hora, sino por prioridad
             const aTime = a.timeStart || '';
@@ -5461,7 +5479,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 04:59 PM CT
+    v 06/18/2026 11:31 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -5551,7 +5569,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 04:59 PM CT
+    v 06/18/2026 11:31 PM CT
 </div>
 </body>
             </html>
@@ -6402,7 +6420,7 @@ Motivo de cancelación (opcional):`);
                 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 04:59 PM CT
+    v 06/18/2026 11:31 PM CT
 </div>
 </body>
                 </html>
@@ -6474,7 +6492,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 04:59 PM CT
+    v 06/18/2026 11:31 PM CT
 </div>
 </body>
             </html>
@@ -11637,7 +11655,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 04:59 PM CT
+    v 06/18/2026 11:31 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12514,7 +12532,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 04:59 PM CT
+    v 06/18/2026 11:31 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12608,7 +12626,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 04:59 PM CT
+    v 06/18/2026 11:31 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -13693,7 +13711,7 @@ document.addEventListener('click', function(e) {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/18/2026 04:59 PM CT
+    v 06/18/2026 11:31 PM CT
 </div>
 </body>
 </html>
