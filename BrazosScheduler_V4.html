@@ -1781,7 +1781,7 @@ class Scheduler {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:19 AM CT
+    v 06/19/2026 08:25 AM CT
 </div>
 </body></html>`);
         win.document.close(); win.print();
@@ -5481,7 +5481,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:19 AM CT
+    v 06/19/2026 08:25 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -5571,7 +5571,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:19 AM CT
+    v 06/19/2026 08:25 AM CT
 </div>
 </body>
             </html>
@@ -6422,7 +6422,7 @@ Motivo de cancelación (opcional):`);
                 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:19 AM CT
+    v 06/19/2026 08:25 AM CT
 </div>
 </body>
                 </html>
@@ -6494,7 +6494,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:19 AM CT
+    v 06/19/2026 08:25 AM CT
 </div>
 </body>
             </html>
@@ -11142,9 +11142,123 @@ Motivo de cancelación (opcional):`);
         Object.keys(this.grupos).forEach(g => {
             const o = document.createElement('option'); o.value = g; o.textContent = g; sel.appendChild(o);
         });
+        // Inicializar rango de fechas para resumen de horas: semana pasada (Lun-Dom)
+        const today = new Date();
+        const dow = today.getDay(); // 0=Dom
+        const diffToMon = (dow === 0) ? -6 : 1 - dow;
+        const thisMonday = new Date(today);
+        thisMonday.setDate(today.getDate() + diffToMon);
+        const lastMonday = new Date(thisMonday);
+        lastMonday.setDate(thisMonday.getDate() - 7);
+        const lastSunday = new Date(lastMonday);
+        lastSunday.setDate(lastMonday.getDate() + 6);
+        document.getElementById('hoursRangeStart').value = lastMonday.toLocaleDateString('en-CA');
+        document.getElementById('hoursRangeEnd').value = lastSunday.toLocaleDateString('en-CA');
+
         // Siempre recargar horarios frescos desde localStorage y Drive
         this._prodReports = null;
         this.loadProductionLocal();
+    }
+
+    renderWeeklyHoursSummary() {
+        const startStr = document.getElementById('hoursRangeStart')?.value;
+        const endStr = document.getElementById('hoursRangeEnd')?.value;
+        const container = document.getElementById('weeklyHoursSummary');
+        if (!container || !startStr || !endStr || !this._prodReports) {
+            if (container) container.innerHTML = '<p style="color:#999;font-size:0.85rem;margin:0;">Cargando horarios...</p>';
+            return;
+        }
+
+        // Recopilar fechas en el rango
+        const dates = [];
+        let d = new Date(startStr + 'T12:00:00');
+        const end = new Date(endStr + 'T12:00:00');
+        while (d <= end) {
+            dates.push(d.toLocaleDateString('en-CA'));
+            d.setDate(d.getDate() + 1);
+        }
+
+        // Acumular por empleado
+        const empHours = {}; // empId -> { name, totalMin, days: [{date, shopOut, shopBack, netHrs}] }
+
+        dates.forEach(dt => {
+            const dayData = this._prodReports[dt];
+            if (!dayData) return;
+            Object.values(dayData).forEach(empData => {
+                if (!empData.shopOut || !empData.shopBack) return; // solo si hay ambos registros
+                const empId = empData.empId;
+                const emp = this.emps.find(e => String(e.id) === String(empId));
+                const empName = emp ? emp.name : (empData.empName || 'Desconocido');
+
+                const [soh, som] = empData.shopOut.split(':').map(Number);
+                const [sbh, sbm] = empData.shopBack.split(':').map(Number);
+                let minutes = (sbh * 60 + sbm) - (soh * 60 + som);
+                if (minutes < 0) minutes = 0;
+
+                // Descontar 30 min de break si trabajó 7+ horas (420+ min)
+                let breakApplied = false;
+                if (minutes >= 420) {
+                    minutes -= 30;
+                    breakApplied = true;
+                }
+
+                if (!empHours[empId]) empHours[empId] = { name: empName, totalMin: 0, days: [] };
+                empHours[empId].totalMin += minutes;
+                empHours[empId].days.push({
+                    date: dt, shopOut: empData.shopOut, shopBack: empData.shopBack,
+                    netMin: minutes, breakApplied
+                });
+            });
+        });
+
+        const empList = Object.values(empHours).sort((a, b) => a.name.localeCompare(b.name));
+
+        if (empList.length === 0) {
+            container.innerHTML = '<p style="color:#999;font-size:0.85rem;margin:0;">No hay registros de Shop (salida/regreso) en este rango de fechas.</p>';
+            return;
+        }
+
+        const fmtHrs = (min) => {
+            const h = Math.floor(min / 60);
+            const m = Math.round(min % 60);
+            return `${h}h ${m}m`;
+        };
+
+        const OT_THRESHOLD_MIN = 40 * 60; // 40 horas en minutos
+
+        let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+            <thead><tr style="background:#fff3e0;border-bottom:2px solid #ffcc80;">
+                <th style="padding:8px;text-align:left;">Empleado</th>
+                <th style="padding:8px;text-align:center;">Días con registro</th>
+                <th style="padding:8px;text-align:right;">Horas Regulares</th>
+                <th style="padding:8px;text-align:right;">Horas Extra</th>
+                <th style="padding:8px;text-align:right;">Total</th>
+            </tr></thead><tbody>`;
+
+        let grandRegularMin = 0, grandOTMin = 0, grandTotalMin = 0;
+        empList.forEach(emp => {
+            grandTotalMin += emp.totalMin;
+            const regularMin = Math.min(emp.totalMin, OT_THRESHOLD_MIN);
+            const otMin = Math.max(0, emp.totalMin - OT_THRESHOLD_MIN);
+            grandRegularMin += regularMin;
+            grandOTMin += otMin;
+            html += `<tr style="border-bottom:1px solid #ffe0b2;">
+                <td style="padding:8px;font-weight:600;">${emp.name}</td>
+                <td style="padding:8px;text-align:center;color:#888;">${emp.days.length}</td>
+                <td style="padding:8px;text-align:right;color:#444;">${fmtHrs(regularMin)}</td>
+                <td style="padding:8px;text-align:right;${otMin > 0 ? 'color:#c0392b;font-weight:700;' : 'color:#bbb;'}">${otMin > 0 ? fmtHrs(otMin) : '—'}</td>
+                <td style="padding:8px;text-align:right;font-weight:700;color:#e65100;">${fmtHrs(emp.totalMin)}</td>
+            </tr>`;
+        });
+
+        html += `</tbody><tfoot><tr style="border-top:2px solid #e65100;">
+            <td style="padding:8px;font-weight:700;" colspan="2">TOTAL GENERAL</td>
+            <td style="padding:8px;text-align:right;font-weight:700;color:#444;">${fmtHrs(grandRegularMin)}</td>
+            <td style="padding:8px;text-align:right;font-weight:700;color:#c0392b;">${grandOTMin > 0 ? fmtHrs(grandOTMin) : '—'}</td>
+            <td style="padding:8px;text-align:right;font-weight:700;color:#e65100;font-size:0.95rem;">${fmtHrs(grandTotalMin)}</td>
+        </tr></tfoot></table>`;
+
+        container.innerHTML = html;
     }
 
     closeProductionReport() {
@@ -11204,6 +11318,7 @@ Motivo de cancelación (opcional):`);
         status.textContent = `📱 ${totalDates} día(s) con registros`;
         status.style.color = '#27ae60';
         this.renderProductionReport();
+        this.renderWeeklyHoursSummary();
     }
 
     loadProductionDemo() {
@@ -11692,7 +11807,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:19 AM CT
+    v 06/19/2026 08:25 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12569,7 +12684,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:19 AM CT
+    v 06/19/2026 08:25 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12663,7 +12778,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:19 AM CT
+    v 06/19/2026 08:25 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -13653,6 +13768,25 @@ document.addEventListener('click', function(e) {
           <button onclick="app.printProductionPDF()" style="padding:8px 16px;background:#0e7490;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">🖨️ Imprimir PDF</button>
         </div>
       </div>
+
+      <!-- Resumen de Horas Trabajadas (Semanal por Empleado) -->
+      <div style="margin-bottom:20px;padding:16px;background:#fff8e1;border-radius:10px;border:1px solid #ffe082">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:10px;">
+          <h3 style="margin:0;font-size:1rem;color:#e65100">⏱️ Resumen de Horas Trabajadas (Shop → Shop)</h3>
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+            <div>
+              <label style="display:block;font-size:0.75rem;color:#666;margin-bottom:3px">Desde</label>
+              <input type="date" id="hoursRangeStart" onchange="app.renderWeeklyHoursSummary()" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:0.85rem">
+            </div>
+            <div>
+              <label style="display:block;font-size:0.75rem;color:#666;margin-bottom:3px">Hasta</label>
+              <input type="date" id="hoursRangeEnd" onchange="app.renderWeeklyHoursSummary()" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:0.85rem">
+            </div>
+          </div>
+        </div>
+        <div id="weeklyHoursSummary"></div>
+      </div>
+
       <div id="prodStatus" style="font-size:0.85rem;color:#888;margin-bottom:12px"></div>
       <div id="prodContent"></div>
     </div>
@@ -13748,7 +13882,7 @@ document.addEventListener('click', function(e) {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:19 AM CT
+    v 06/19/2026 08:25 AM CT
 </div>
 </body>
 </html>
