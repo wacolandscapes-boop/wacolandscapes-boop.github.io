@@ -1781,7 +1781,7 @@ class Scheduler {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:50 AM CT
+    v 06/19/2026 03:09 PM CT
 </div>
 </body></html>`);
         win.document.close(); win.print();
@@ -4674,8 +4674,11 @@ class Scheduler {
             notes: ''
         });
         
-        // Actualizar número de factura
-        localStorage.setItem('lastInvoiceNumber', nextInvoiceNumber.toString());
+        // Actualizar número de factura (solo si avanza, nunca retrocede)
+        const _curLast = parseInt(localStorage.getItem('lastInvoiceNumber') || '0');
+        if (nextInvoiceNumber > _curLast) {
+            localStorage.setItem('lastInvoiceNumber', nextInvoiceNumber.toString());
+        }
         this.save();
     }
     
@@ -4750,10 +4753,27 @@ class Scheduler {
             return true;
         });
         
-        filtered.sort((a, b) => b.generatedDate.localeCompare(a.generatedDate));
+        const sortMode = document.getElementById('genInvSort')?.value || 'date_desc';
+        filtered.sort((a, b) => {
+            switch(sortMode) {
+                case 'date_asc': return a.generatedDate.localeCompare(b.generatedDate);
+                case 'num_desc': return (b.invoiceNumber||0) - (a.invoiceNumber||0);
+                case 'num_asc': return (a.invoiceNumber||0) - (b.invoiceNumber||0);
+                case 'name_asc': return (a.clientName||'').localeCompare(b.clientName||'');
+                case 'name_desc': return (b.clientName||'').localeCompare(a.clientName||'');
+                default: return b.generatedDate.localeCompare(a.generatedDate); // date_desc
+            }
+        });
         
         const statusColors = { pendiente:'#e67e22', enviada:'#2980b9', parcial:'#d4a017', pagada:'#27ae60', vencida:'#e74c3c', cancelada:'#95a5a6' };
         const statusLabels = { pendiente:'⏳ Pendiente', enviada:'📧 Enviada', pagada:'✅ Pagada', vencida:'🔴 Vencida', cancelada:'🚫 Cancelada' };
+
+        // Detectar números de factura duplicados (excluyendo canceladas)
+        const numCounts = {};
+        (this.generatedInvoices || []).forEach(inv => {
+            if (inv.status === 'cancelada') return;
+            numCounts[inv.invoiceNumber] = (numCounts[inv.invoiceNumber] || 0) + 1;
+        });
 
         let html = '';
         let total = 0;
@@ -4775,9 +4795,10 @@ class Scheduler {
             const rowStyle = isCancelled ? 'opacity:0.5;text-decoration:line-through;background:#f8f8f8;' : '';
             const statusColor = statusColors[inv.status] || '#95a5a6';
             const statusLabel = statusLabels[inv.status] || inv.status;
+            const isDuplicate = !isCancelled && numCounts[inv.invoiceNumber] > 1;
 
-            html += `<tr style="${rowStyle}">
-                <td><strong>#${invoiceNumberFormatted}</strong></td>
+            html += `<tr style="${rowStyle}${isDuplicate ? 'background:#fff3cd;' : ''}">
+                <td><strong>#${invoiceNumberFormatted}</strong>${isDuplicate ? ' <span title="Número duplicado" style="color:#e74c3c;font-size:0.8rem;">⚠️</span>' : ''}</td>
                 <td>${genFormatted}</td>
                 <td>${inv.clientName}${isCancelled ? `<br><small style="color:#c0392b;font-style:italic;text-decoration:none">${inv.cancelledReason||'Cancelada'}</small>` : ''}</td>
                 <td style="font-size: 0.85rem;">${periodFormatted}</td>
@@ -5481,7 +5502,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:50 AM CT
+    v 06/19/2026 03:09 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -5571,7 +5592,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:50 AM CT
+    v 06/19/2026 03:09 PM CT
 </div>
 </body>
             </html>
@@ -6422,7 +6443,7 @@ Motivo de cancelación (opcional):`);
                 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:50 AM CT
+    v 06/19/2026 03:09 PM CT
 </div>
 </body>
                 </html>
@@ -6494,7 +6515,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:50 AM CT
+    v 06/19/2026 03:09 PM CT
 </div>
 </body>
             </html>
@@ -9207,7 +9228,11 @@ Motivo de cancelación (opcional):`);
                 invoiceConfig: pdfData.invoiceConfig || null
             });
         }
-        localStorage.setItem('lastInvoiceNumber', invoiceNumber.toString());
+        // Solo avanzar el contador global, nunca retrocederlo (importante al editar/regenerar facturas viejas)
+        const currentLastNum = parseInt(localStorage.getItem('lastInvoiceNumber') || '0');
+        if (invoiceNumber > currentLastNum) {
+            localStorage.setItem('lastInvoiceNumber', invoiceNumber.toString());
+        }
         this.markPendingAsGenerated();
         this.save();
         document.getElementById('pdfPreviewModal').remove();
@@ -11896,7 +11921,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:50 AM CT
+    v 06/19/2026 03:09 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12771,7 +12796,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:50 AM CT
+    v 06/19/2026 03:09 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12865,7 +12890,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:50 AM CT
+    v 06/19/2026 03:09 PM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -13401,6 +13426,14 @@ document.addEventListener('click', function(e) {
                     class="btn" style="padding:8px 12px; background:#e74c3c; color:white; font-size:0.85rem;">
                     ✕ Limpiar
                 </button>
+                <select id="genInvSort" onchange="app.refreshGeneratedInvoices()" style="padding:8px 10px; border:1px solid #ccc; border-radius:6px; font-size:0.85rem;">
+                    <option value="date_desc">📅 Fecha (más reciente)</option>
+                    <option value="date_asc">📅 Fecha (más antigua)</option>
+                    <option value="num_desc"># Factura (mayor a menor)</option>
+                    <option value="num_asc"># Factura (menor a mayor)</option>
+                    <option value="name_asc">Cliente (A-Z)</option>
+                    <option value="name_desc">Cliente (Z-A)</option>
+                </select>
             </div>
         </div>
         
@@ -13973,7 +14006,7 @@ document.addEventListener('click', function(e) {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:50 AM CT
+    v 06/19/2026 03:09 PM CT
 </div>
 </body>
 </html>
