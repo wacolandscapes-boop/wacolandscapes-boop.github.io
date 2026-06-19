@@ -1781,7 +1781,7 @@ class Scheduler {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:03 AM CT
+    v 06/19/2026 01:19 AM CT
 </div>
 </body></html>`);
         win.document.close(); win.print();
@@ -5481,7 +5481,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:03 AM CT
+    v 06/19/2026 01:19 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -5571,7 +5571,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:03 AM CT
+    v 06/19/2026 01:19 AM CT
 </div>
 </body>
             </html>
@@ -6422,7 +6422,7 @@ Motivo de cancelación (opcional):`);
                 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:03 AM CT
+    v 06/19/2026 01:19 AM CT
 </div>
 </body>
                 </html>
@@ -6494,7 +6494,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:03 AM CT
+    v 06/19/2026 01:19 AM CT
 </div>
 </body>
             </html>
@@ -9242,6 +9242,9 @@ Motivo de cancelación (opcional):`);
             return;
         }
         const cfg = pdfData.invoiceConfig || {};
+        // IMPORTANTE: mantener el mismo número de factura al regenerar con tax
+        const hiddenNumEl2 = document.getElementById('editingInvoiceNumber');
+        if (hiddenNumEl2 && pdfData.invoiceNumber) hiddenNumEl2.value = pdfData.invoiceNumber;
         // Regenerate PDF with new tax settings
         const newPdfData = this.createPDFBlob(client, services, pdfData.startDate, pdfData.endDate,
             cfg.template || 'modern', cfg.paymentDue || '', cfg.showDetails !== false, applyTax, taxRate);
@@ -10160,10 +10163,11 @@ Motivo de cancelación (opcional):`);
         doc.setFont(undefined, 'bold');
         
         // Si hay impuestos, mostrar subtotal, impuesto y total
+        let grandTotal; // declarado fuera del if para que el return final lo vea
         if (applyTax && taxRate > 0) {
             const subtotal = total;
             const taxAmount = (subtotal * taxRate) / 100;
-            const grandTotal = subtotal + taxAmount;
+            grandTotal = subtotal + taxAmount;
             
             doc.setFontSize(11);
             doc.text('SUBTOTAL:', 130, y + 10);
@@ -10655,10 +10659,11 @@ Motivo de cancelación (opcional):`);
         doc.setFont(undefined, 'bold');
         
         // Si hay impuestos, mostrar subtotal, impuesto y total
+        let grandTotal; // declarado fuera del if para que el return final lo vea
         if (applyTax && taxRate > 0) {
             const subtotal = total;
             const taxAmount = (subtotal * taxRate) / 100;
-            const grandTotal = subtotal + taxAmount;
+            grandTotal = subtotal + taxAmount;
             
             doc.setFontSize(11);
             doc.text('SUBTOTAL:', 130, y + 10);
@@ -11687,7 +11692,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:03 AM CT
+    v 06/19/2026 01:19 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12564,7 +12569,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:03 AM CT
+    v 06/19/2026 01:19 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12658,7 +12663,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:03 AM CT
+    v 06/19/2026 01:19 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -13743,7 +13748,7 @@ document.addEventListener('click', function(e) {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 01:03 AM CT
+    v 06/19/2026 01:19 AM CT
 </div>
 </body>
 </html>
