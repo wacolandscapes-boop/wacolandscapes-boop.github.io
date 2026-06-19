@@ -1781,7 +1781,7 @@ class Scheduler {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:10 AM CT
+    v 06/19/2026 09:50 AM CT
 </div>
 </body></html>`);
         win.document.close(); win.print();
@@ -5481,7 +5481,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:10 AM CT
+    v 06/19/2026 09:50 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -5571,7 +5571,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:10 AM CT
+    v 06/19/2026 09:50 AM CT
 </div>
 </body>
             </html>
@@ -6422,7 +6422,7 @@ Motivo de cancelación (opcional):`);
                 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:10 AM CT
+    v 06/19/2026 09:50 AM CT
 </div>
 </body>
                 </html>
@@ -6494,7 +6494,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:10 AM CT
+    v 06/19/2026 09:50 AM CT
 </div>
 </body>
             </html>
@@ -11155,6 +11155,13 @@ Motivo de cancelación (opcional):`);
         document.getElementById('hoursRangeStart').value = lastMonday.toLocaleDateString('en-CA');
         document.getElementById('hoursRangeEnd').value = lastSunday.toLocaleDateString('en-CA');
 
+        // Restaurar estado colapsado/expandido de la sección de horas
+        const wasCollapsed = localStorage.getItem('prodHoursSectionCollapsed') === 'true';
+        const hBody = document.getElementById('hoursSectionBody');
+        const hChevron = document.getElementById('hoursSectionChevron');
+        if (hBody) hBody.style.display = wasCollapsed ? 'none' : 'block';
+        if (hChevron) hChevron.style.transform = wasCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+
         // Siempre recargar horarios frescos desde localStorage y Drive
         this._prodReports = null;
         this.loadProductionLocal();
@@ -11167,6 +11174,16 @@ Motivo de cancelación (opcional):`);
         const key = `${startStr}_${endStr}_${empId}`;
         this._hoursExcluded[key] = !this._hoursExcluded[key];
         this.renderWeeklyHoursSummary();
+    }
+
+    toggleHoursSection() {
+        const body = document.getElementById('hoursSectionBody');
+        const chevron = document.getElementById('hoursSectionChevron');
+        if (!body) return;
+        const isHidden = body.style.display === 'none';
+        body.style.display = isHidden ? 'block' : 'none';
+        if (chevron) chevron.style.transform = isHidden ? 'rotate(0deg)' : 'rotate(-90deg)';
+        localStorage.setItem('prodHoursSectionCollapsed', isHidden ? 'false' : 'true');
     }
 
     printHoursSummary() {
@@ -11879,7 +11896,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:10 AM CT
+    v 06/19/2026 09:50 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12429,11 +12446,9 @@ Motivo de cancelación (opcional):`);
                 const cli = this.clis.find(c => String(c.id) === String(s.cliId)) || {};
                 // Precio: semana guardada > catálogo María > precio cliente
                 const savedPrice = weekData && weekData.prices && weekData.prices[idx] !== undefined ? weekData.prices[idx] : null;
-                const catalogKey = this.nmGetEmpId() + '_' + String(s.cliId);
-                const catalogPrice = priceCatalog[catalogKey] !== undefined ? priceCatalog[catalogKey] : null;
-                // Usar precio por visita según tipo de cliente (cuota fija o por servicio)
-                const defaultPrice = this.nmPricePerVisit(cli);
-                const precio = savedPrice !== null ? savedPrice : (catalogPrice !== null ? catalogPrice : defaultPrice);
+                // SIEMPRE usar el precio actual de la base de datos del cliente
+                // (ya no se prioriza ningún valor guardado de semanas anteriores)
+                const precio = this.nmPricePerVisit(cli);
                 const soloHrsChecked = weekData && weekData.soloHrs && weekData.soloHrs[idx];
                 // ÷ Empleados: precargado con número del grupo, editable
                 const savedEmp = weekData && weekData.emps && weekData.emps[idx] !== undefined ? weekData.emps[idx] : null;
@@ -12756,7 +12771,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:10 AM CT
+    v 06/19/2026 09:50 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12850,7 +12865,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:10 AM CT
+    v 06/19/2026 09:50 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -13841,11 +13856,14 @@ document.addEventListener('click', function(e) {
         </div>
       </div>
 
-      <!-- Resumen de Horas Trabajadas (Semanal por Empleado) -->
-      <div style="margin-bottom:20px;padding:16px;background:#fff8e1;border-radius:10px;border:1px solid #ffe082">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:10px;">
+      <!-- Resumen de Horas Trabajadas (Semanal por Empleado) — RETRÁCTIL -->
+      <div style="margin-bottom:20px;padding:0;background:#fff8e1;border-radius:10px;border:1px solid #ffe082;overflow:hidden">
+        <div onclick="app.toggleHoursSection()" style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;user-select:none;">
           <h3 style="margin:0;font-size:1rem;color:#e65100">⏱️ Resumen de Horas Trabajadas (Shop → Shop)</h3>
-          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+          <span id="hoursSectionChevron" style="font-size:1.1rem;color:#e65100;transition:transform 0.2s;">▾</span>
+        </div>
+        <div id="hoursSectionBody" style="padding:0 16px 16px 16px;">
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px;">
             <div>
               <label style="display:block;font-size:0.75rem;color:#666;margin-bottom:3px">Desde</label>
               <input type="date" id="hoursRangeStart" onchange="app.renderWeeklyHoursSummary()" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:0.85rem">
@@ -13856,8 +13874,8 @@ document.addEventListener('click', function(e) {
             </div>
             <button onclick="app.printHoursSummary()" style="padding:7px 14px;background:#e65100;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem;font-weight:600;">🖨️ Imprimir Horas</button>
           </div>
+          <div id="weeklyHoursSummary"></div>
         </div>
-        <div id="weeklyHoursSummary"></div>
       </div>
 
       <div id="prodStatus" style="font-size:0.85rem;color:#888;margin-bottom:12px"></div>
@@ -13955,7 +13973,7 @@ document.addEventListener('click', function(e) {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 09:10 AM CT
+    v 06/19/2026 09:50 AM CT
 </div>
 </body>
 </html>
