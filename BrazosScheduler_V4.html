@@ -1781,7 +1781,7 @@ class Scheduler {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 03:09 PM CT
+    v 06/20/2026 10:51 AM CT
 </div>
 </body></html>`);
         win.document.close(); win.print();
@@ -4691,13 +4691,10 @@ class Scheduler {
         document.getElementById('genInvStart').value = yearAgo.toISOString().split('T')[0];
         document.getElementById('genInvEnd').value = today.toISOString().split('T')[0];
         
-        // Cargar clientes en dropdown
-        const select = document.getElementById('genInvClient');
-        select.innerHTML = '<option value="all">Todos</option>';
-        const uniqueClients = [...new Set((this.generatedInvoices || []).map(inv => inv.clientName))];
-        uniqueClients.sort().forEach(clientName => {
-            select.innerHTML += `<option value="${clientName}">${clientName}</option>`;
-        });
+        // Cargar lista de clientes para autocompletado
+        this._genInvClientList = [...new Set((this.generatedInvoices || []).map(inv => inv.clientName))].sort();
+        document.getElementById('genInvClientText').value = '';
+        document.getElementById('genInvClient').value = 'all';
 
         // Populate period dropdown dynamically (last 12 months)
         const periodSel = document.getElementById('genInvPeriod');
@@ -4719,6 +4716,32 @@ class Scheduler {
         document.getElementById('generatedInvoicesModal').style.display = 'none';
     }
     
+    filterGenInvClientList() {
+        const text = document.getElementById('genInvClientText').value.toLowerCase().trim();
+        const dropdown = document.getElementById('genInvClientDropdown');
+        const list = this._genInvClientList || [];
+        const matches = text === '' ? list : list.filter(name => name.toLowerCase().includes(text));
+
+        if (matches.length === 0) {
+            dropdown.innerHTML = '<div style="padding:8px 12px;color:#999;font-size:0.85rem;">Sin coincidencias</div>';
+        } else {
+            let html = '<div onclick="app.selectGenInvClient(\'all\')" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;font-weight:600;" onmouseover="this.style.background=\'#f0f0f0\'" onmouseout="this.style.background=\'white\'">Todos</div>';
+            matches.slice(0, 50).forEach(name => {
+                const safe = name.replace(/'/g, "\\'");
+                html += `<div onclick="app.selectGenInvClient('${safe}')" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;font-size:0.9rem;" onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='white'">${name}</div>`;
+            });
+            dropdown.innerHTML = html;
+        }
+        dropdown.style.display = 'block';
+    }
+
+    selectGenInvClient(name) {
+        document.getElementById('genInvClientText').value = name === 'all' ? '' : name;
+        document.getElementById('genInvClient').value = name;
+        document.getElementById('genInvClientDropdown').style.display = 'none';
+        this.refreshGeneratedInvoices();
+    }
+
     refreshGeneratedInvoices() {
         const start = document.getElementById('genInvStart').value;
         const end = document.getElementById('genInvEnd').value;
@@ -5502,7 +5525,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 03:09 PM CT
+    v 06/20/2026 10:51 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -5592,7 +5615,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 03:09 PM CT
+    v 06/20/2026 10:51 AM CT
 </div>
 </body>
             </html>
@@ -6443,7 +6466,7 @@ Motivo de cancelación (opcional):`);
                 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 03:09 PM CT
+    v 06/20/2026 10:51 AM CT
 </div>
 </body>
                 </html>
@@ -6515,7 +6538,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 03:09 PM CT
+    v 06/20/2026 10:51 AM CT
 </div>
 </body>
             </html>
@@ -11921,7 +11944,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 03:09 PM CT
+    v 06/20/2026 10:51 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12796,7 +12819,7 @@ Motivo de cancelación (opcional):`);
             
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 03:09 PM CT
+    v 06/20/2026 10:51 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12890,7 +12913,7 @@ Motivo de cancelación (opcional):`);
         
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 03:09 PM CT
+    v 06/20/2026 10:51 AM CT
 </div>
 </body></html>`);
         win.document.close();
@@ -12926,6 +12949,11 @@ document.addEventListener('click', function(e) {
     if (!e.target.closest('#searchCliText') && !e.target.closest('#searchCliDropdown')) {
         const dd = document.getElementById('searchCliDropdown');
         if (dd) dd.style.display = 'none';
+    }
+    // Close Enviadas client autocomplete dropdown
+    if (!e.target.closest('#genInvClientText') && !e.target.closest('#genInvClientDropdown')) {
+        const gd = document.getElementById('genInvClientDropdown');
+        if (gd) gd.style.display = 'none';
     }
 });
 
@@ -13388,7 +13416,14 @@ document.addEventListener('click', function(e) {
             <div style="display:grid; grid-template-columns: 150px 150px 1fr 160px 160px; gap:10px; flex-wrap:wrap;">
                 <div><label style="font-size:0.8rem;font-weight:600;">Generada Desde</label><input type="date" id="genInvStart" onchange="app.refreshGeneratedInvoices()"></div>
                 <div><label style="font-size:0.8rem;font-weight:600;">Generada Hasta</label><input type="date" id="genInvEnd" onchange="app.refreshGeneratedInvoices()"></div>
-                <div><label style="font-size:0.8rem;font-weight:600;">Cliente</label><select id="genInvClient" onchange="app.refreshGeneratedInvoices()" style="width:100%;padding:6px;"></select></div>
+                <div style="position:relative;">
+                    <label style="font-size:0.8rem;font-weight:600;">Cliente</label>
+                    <input type="text" id="genInvClientText" placeholder="Todos" autocomplete="off"
+                        oninput="app.filterGenInvClientList()" onfocus="app.filterGenInvClientList()"
+                        style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;">
+                    <input type="hidden" id="genInvClient" value="all">
+                    <div id="genInvClientDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #ccc;border-radius:4px;max-height:220px;overflow-y:auto;z-index:1000;box-shadow:0 4px 10px rgba(0,0,0,0.15);"></div>
+                </div>
                 <div><label style="font-size:0.8rem;font-weight:600;">Status</label>
                     <select id="genInvStatus" onchange="app.refreshGeneratedInvoices()" style="width:100%;padding:6px;">
                         <option value="all">Todos (enviadas+)</option>
@@ -14006,7 +14041,7 @@ document.addEventListener('click', function(e) {
 
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/19/2026 03:09 PM CT
+    v 06/20/2026 10:51 AM CT
 </div>
 </body>
 </html>
