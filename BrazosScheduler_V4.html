@@ -107,7 +107,7 @@
         .month-grid-header-cell { text-align:center; padding: 7px 0; font-weight:700; font-size:0.78rem; color: var(--primary); border-right: 2px solid #c8cdd5; letter-spacing:0.05em; }
         .month-grid-header-cell:last-child { border-right: none; }
         .month-week-row { display: grid; grid-template-columns: repeat(7,1fr); border-bottom: 2px solid #c8cdd5; min-height: 90px; }
-        .month-day-cell { border-right: 1px solid #c8cdd5; border-bottom: 1px solid #c8cdd5; padding: 4px 5px; position: relative; min-height: 90px; cursor: pointer; transition: background 0.15s; }
+        .month-day-cell { border-right: 1px solid #c8cdd5; border-bottom: 1px solid #c8cdd5; padding: 4px 5px; position: relative; min-height: 90px; min-width: 0; overflow: hidden; cursor: pointer; transition: background 0.15s; }
         .month-day-cell:hover { background: #f8f9ff; }
         .month-day-cell:last-child { border-right: none; }
         .month-day-cell.today { background: var(--today-bg) !important; }
@@ -2083,12 +2083,20 @@ class Scheduler {
                     });
 
                     allServs.sort((a,b) => {
+                        // ✅ La Prioridad manda cuando está definida (es su propósito: forzar el orden manual).
+                        const aPrio = parseInt(a.priority);
+                        const bPrio = parseInt(b.priority);
+                        const aHasPrio = !isNaN(aPrio);
+                        const bHasPrio = !isNaN(bPrio);
+                        if (aHasPrio && bHasPrio && aPrio !== bPrio) return aPrio - bPrio;
+                        if (aHasPrio && !bHasPrio) return -1;
+                        if (!aHasPrio && bHasPrio) return 1;
                         const aTime = a.timeStart || '';
                         const bTime = b.timeStart || '';
                         if (aTime && bTime) return aTime.localeCompare(bTime);
                         if (aTime) return -1;
                         if (bTime) return 1;
-                        return (parseInt(a.priority)||999) - (parseInt(b.priority)||999);
+                        return 0;
                     });
 
                     const MAX_VISIBLE = 3;
@@ -2331,13 +2339,20 @@ class Scheduler {
         if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
                         if(fRecurrence !== 'all'){daily=daily.filter(s=>{const _c=this.clis.find(c=>c.id==s.cliId);return _c && _c.type===fRecurrence;});}
         daily.sort((a,b) => {
-            // Ordenar por hora si tienen hora, sino por prioridad
+            // ✅ La Prioridad manda cuando está definida (es su propósito: forzar el orden manual).
+            const aPrio = parseInt(a.priority);
+            const bPrio = parseInt(b.priority);
+            const aHasPrio = !isNaN(aPrio);
+            const bHasPrio = !isNaN(bPrio);
+            if (aHasPrio && bHasPrio && aPrio !== bPrio) return aPrio - bPrio;
+            if (aHasPrio && !bHasPrio) return -1;
+            if (!aHasPrio && bHasPrio) return 1;
             const aTime = a.timeStart || '';
             const bTime = b.timeStart || '';
             if (aTime && bTime) return aTime.localeCompare(bTime);
             if (aTime) return -1;
             if (bTime) return 1;
-            return (parseInt(a.priority)||999) - (parseInt(b.priority)||999);
+            return 0;
         });
         daily.forEach(s => {
             const c = this.clis.find(cl => cl.id == s.cliId); if(!c) return;
@@ -8389,12 +8404,19 @@ Motivo de cancelación (opcional):`);
                 if (s.empId === gName) return true;
                 return this.grupos[gName] && this.grupos[gName].includes(s.empId.toString());
             }).sort((a,b) => {
+                const aPrio = parseInt(a.priority);
+                const bPrio = parseInt(b.priority);
+                const aHasPrio = !isNaN(aPrio);
+                const bHasPrio = !isNaN(bPrio);
+                if (aHasPrio && bHasPrio && aPrio !== bPrio) return aPrio - bPrio;
+                if (aHasPrio && !bHasPrio) return -1;
+                if (!aHasPrio && bHasPrio) return 1;
                 const aTime = a.timeStart || '';
                 const bTime = b.timeStart || '';
                 if (aTime && bTime) return aTime.localeCompare(bTime);
                 if (aTime) return -1;
                 if (bTime) return 1;
-                return (parseInt(a.priority)||999) - (parseInt(b.priority)||999);
+                return 0;
             });
 
             let servicesHtml = '';
@@ -8535,12 +8557,19 @@ Motivo de cancelación (opcional):`);
             });
             
             dailyServices.sort((a, b) => {
+                const aPrio = parseInt(a.priority);
+                const bPrio = parseInt(b.priority);
+                const aHasPrio = !isNaN(aPrio);
+                const bHasPrio = !isNaN(bPrio);
+                if (aHasPrio && bHasPrio && aPrio !== bPrio) return aPrio - bPrio;
+                if (aHasPrio && !bHasPrio) return -1;
+                if (!aHasPrio && bHasPrio) return 1;
                 const aTime = a.timeStart || '';
                 const bTime = b.timeStart || '';
                 if (aTime && bTime) return aTime.localeCompare(bTime);
                 if (aTime) return -1;
                 if (bTime) return 1;
-                return (parseInt(a.priority)||999) - (parseInt(b.priority)||999);
+                return 0;
             });
             
             text += `${dayNames[date.getDay()]} ${date.getDate()}\n`;
@@ -9058,6 +9087,7 @@ Motivo de cancelación (opcional):`);
                 const clientServices = this.servs.filter(s => {
                     if (String(s.cliId) !== String(c.id)) return false;
                     if (s.date < startDate || s.date > endDate) return false;
+                    if (s.cancelled) return false; // ✅ no facturar servicios cancelados
                     return true;
                 }).map(s => ({
                     ...s,
@@ -9070,6 +9100,7 @@ Motivo de cancelación (opcional):`);
             allServices = this.servs.filter(s => {
                 if (String(s.cliId) !== String(clientId)) return false;
                 if (s.date < startDate || s.date > endDate) return false;
+                if (s.cancelled) return false; // ✅ no facturar servicios cancelados
                 return true;
             }).map(s => ({
                 ...s,
@@ -12957,10 +12988,17 @@ document.addEventListener('click', function(e) {
     }
 });
 
-// Cerrar dropdown de filtros al hacer click fuera — sin render (evita abrir modal de servicio)
+// Cerrar dropdown de filtros al hacer click fuera — aplica el filtro pendiente si hubo cambios
 document.addEventListener('click', function(e) {
     if(!e.target.closest('.filter-dropdown')) {
+        const wasShowing = document.querySelector('.filter-dropdown-content.show');
         document.querySelectorAll('.filter-dropdown-content').forEach(d => d.classList.remove('show'));
+        // ✅ Si el dropdown de Grupos tenía cambios sin aplicar, renderizar ahora
+        // (con setTimeout 0 para no interferir con el click actual — evita abrir el modal de servicio)
+        if (wasShowing && app && app._groupFilterDirty) {
+            app._groupFilterDirty = false;
+            setTimeout(() => app.render(), 0);
+        }
     }
 });
 
