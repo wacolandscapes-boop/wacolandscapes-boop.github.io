@@ -757,6 +757,7 @@
                     <button class="btn-action" style="background:#e67e22; color:white" onclick="toggleDropdown('dropdownFacturacion')">💼 Facturación</button>
                     <div class="dropdown-content">
                         <button onclick="app.openInvoice(); closeAllDropdowns();">📄 Crear Factura</button>
+                        <button onclick="app.openEstimateForm(); closeAllDropdowns();">📐 Crear Estimado</button>
                         <button onclick="app.openPendingInvoices(); closeAllDropdowns();" style="position:relative">
                             📋 Pendientes
                             <span id="pendingBadge" style="display: none; position: absolute; top: 50%; transform: translateY(-50%); right: 10px; background: #e74c3c; color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; font-weight: bold; line-height: 18px; text-align: center;"></span>
@@ -766,6 +767,8 @@
                         <span id="cobrosBadge" style="display:none"></span>
                     </div>
                 </div>
+
+                <button class="btn-action" style="background:#16a085; color:white" onclick="app.openEstimatesList()">📐 Estimados</button>
                 
                 <div class="dropdown" id="dropdownContabilidad">
                     <button class="btn-action btn-green" onclick="toggleDropdown('dropdownContabilidad')">📊 Contabilidad</button>
@@ -1128,6 +1131,7 @@
                 <button class="btn" onclick="app.showSec('secCli')" style="background:#2c3e50; color:white">🏠 Clientes</button>
                 <button class="btn" onclick="app.showSec('secConfig')" style="background:#2c3e50; color:white">🎨 Config. Series</button>
                 <button class="btn" onclick="app.showSec('secGrupos')" style="background:#2c3e50; color:white">👥 Grupos</button>
+                <button class="btn" onclick="app.showSec('secServiceCatalog')" style="background:#16a085; color:white">📐 Catálogo Servicios</button>
                 <button class="btn" onclick="app.showSec('secSupervisor')" style="background:#6c3483; color:white">🔐 Supervisor</button>
             </div>
             <div id="secEmp">
@@ -1251,6 +1255,16 @@
                 <div id="gruposResumen" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px;"></div>
             </div>
 
+            <div id="secServiceCatalog" style="display:none">
+                <h3 style="margin-top:0; color:#16a085">📐 Catálogo de Servicios</h3>
+                <p style="color:#666; font-size:0.85rem; margin-bottom:16px;">
+                    Plantillas reutilizables para crear estimados más rápido. Define qué incluye cada tipo de servicio (Residencial, Comercial, Deep Clean, Construcción, etc.) y sus precios típicos —
+                    al elegir el tipo en un estimado nuevo, estas líneas se cargan automáticamente.
+                </p>
+                <button onclick="app.addServiceCatalogItem()" class="btn btn-success" style="margin-bottom:16px;">➕ Nuevo Tipo de Servicio</button>
+                <div id="serviceCatalogList"></div>
+            </div>
+
             <div id="secSupervisor" style="display:none">
                 <h3 style="margin-top:0; color:#6c3483">🔐 Configuración del Supervisor</h3>
                 <p style="color:#666; font-size:0.85rem; margin-bottom:16px;">Este PIN es el que usa el supervisor en <strong>BrazosCalendar</strong> para acceder al modo de gestión de servicios.</p>
@@ -1344,6 +1358,102 @@
             </div>
         </div>
         <button class="btn" onclick="app.closeCatalog()" style="width:100%; margin-top:16px; background:#2c3e50; color:white">CERRAR</button>
+    </div>
+</div>
+
+<!-- MODAL: LISTA DE ESTIMADOS -->
+<div id="estimatesListModal" class="modal" onclick="event.stopPropagation()" style="z-index:9100;">
+    <div class="modal-content" style="width:950px; max-height:88vh; display:flex; flex-direction:column;">
+        <div style="position:relative;">
+            <button onclick="app.closeEstimatesList()" style="position:absolute; top:0; right:0; background:#e74c3c; color:white; border:none; width:30px; height:30px; border-radius:50%; font-size:1.1rem; font-weight:bold; cursor:pointer;">✕</button>
+            <h2 style="margin-top:0; padding-right:40px;">📐 Estimados</h2>
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center;">
+            <input type="text" id="estListSearch" placeholder="🔍 Buscar por cliente o número..." oninput="app.renderEstimatesList()" style="flex:1; min-width:200px; padding:8px 12px; border:1px solid #ccc; border-radius:6px;">
+            <select id="estListStatusFilter" onchange="app.renderEstimatesList()" style="padding:8px 12px; border:1px solid #ccc; border-radius:6px;">
+                <option value="all">Todos los estados</option>
+                <option value="pendiente">Pendiente</option>
+                <option value="aprobado">Aprobado</option>
+                <option value="rechazado">Rechazado</option>
+                <option value="convertido">Convertido a Factura</option>
+            </select>
+            <button class="btn btn-success" onclick="app.openEstimateForm()" style="white-space:nowrap;">➕ Nuevo Estimado</button>
+        </div>
+        <div id="estimatesListContent" style="overflow-y:auto; flex:1;"></div>
+    </div>
+</div>
+
+<!-- MODAL: CREAR / EDITAR ESTIMADO -->
+<div id="estimateFormModal" class="modal" onclick="event.stopPropagation()" style="z-index:9200;">
+    <div class="modal-content" style="width:800px; max-height:90vh; overflow-y:auto;">
+        <div style="position:relative;">
+            <button onclick="app.closeEstimateForm()" style="position:absolute; top:0; right:0; background:#e74c3c; color:white; border:none; width:30px; height:30px; border-radius:50%; font-size:1.1rem; font-weight:bold; cursor:pointer;">✕</button>
+            <h2 id="estFormTitle" style="margin-top:0; padding-right:40px;">📐 Nuevo Estimado</h2>
+        </div>
+        <input type="hidden" id="estId">
+        <div style="display:flex; justify-content:space-between; align-items:center; background:#f8f9fa; padding:10px 14px; border-radius:8px; margin-bottom:14px;">
+            <div><b>No. Estimado:</b> <span id="estNumberDisplay" style="color:#16a085; font-weight:800;"></span></div>
+            <div style="display:flex; gap:14px; align-items:center;">
+                <div><label style="font-size:0.85rem; font-weight:600;">Fecha:</label> <input type="date" id="estDate" style="padding:5px; border:1px solid #ccc; border-radius:5px;"></div>
+                <div><label style="font-size:0.85rem; font-weight:600;">Válido hasta:</label> <input type="date" id="estValidUntil" style="padding:5px; border:1px solid #ccc; border-radius:5px;"></div>
+            </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
+            <div>
+                <label style="font-weight:600; font-size:0.85rem;">Cliente existente (opcional):</label>
+                <select id="estClientSelect" onchange="app.fillEstimateFromClient()" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:6px;">
+                    <option value="">— Nuevo prospecto / sin cliente —</option>
+                </select>
+            </div>
+            <div>
+                <label style="font-weight:600; font-size:0.85rem;">Tipo de servicio:</label>
+                <div style="display:flex; gap:6px;">
+                    <select id="estServiceType" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:6px;"></select>
+                    <button type="button" onclick="app.loadServiceCatalogIntoEstimate(document.getElementById('estServiceType').value)" title="Cargar líneas de esta plantilla" style="background:#16a085; color:white; border:none; border-radius:6px; padding:0 12px; cursor:pointer; font-size:0.8rem; white-space:nowrap;">🔄 Cargar</button>
+                </div>
+            </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
+            <div><label style="font-weight:600; font-size:0.85rem;">Nombre del cliente/prospecto:</label><input type="text" id="estClientName" placeholder="Nombre completo" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:6px;"></div>
+            <div><label style="font-weight:600; font-size:0.85rem;">Teléfono:</label><input type="text" id="estClientPhone" placeholder="(254) 555-0100" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:6px;"></div>
+        </div>
+        <div style="display:grid; grid-template-columns:2fr 1fr; gap:10px; margin-bottom:18px;">
+            <div><label style="font-weight:600; font-size:0.85rem;">Dirección:</label><input type="text" id="estClientAddress" placeholder="Calle, ciudad" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:6px;"></div>
+            <div><label style="font-weight:600; font-size:0.85rem;">Email:</label><input type="email" id="estClientEmail" placeholder="correo@ejemplo.com" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:6px;"></div>
+        </div>
+
+        <h3 style="margin:0 0 8px;">Detalle del trabajo</h3>
+        <div id="estLineItemsHeader" style="display:grid; grid-template-columns: 2.2fr 0.7fr 0.7fr 1fr 1fr 32px; gap:6px; font-size:0.78rem; font-weight:700; color:#666; padding:0 4px 4px;">
+            <div>Actividad / Descripción</div><div>Cant.</div><div>Unidad</div><div>Precio Unit.</div><div style="text-align:right;">Total</div><div></div>
+        </div>
+        <div id="estLineItemsContainer"></div>
+        <button type="button" class="btn" onclick="app.addEstimateLineItem()" style="background:#16a085; color:white; margin:8px 0 18px; padding:8px 16px; font-size:0.85rem;">➕ Agregar línea</button>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:18px;">
+            <div>
+                <label style="font-weight:600; font-size:0.85rem;">Notas / Alcance del trabajo:</label>
+                <textarea id="estNotes" rows="4" placeholder="Detalles, condiciones, lo que incluye/excluye el estimado..." style="width:100%; padding:8px; border:1px solid #ccc; border-radius:6px; resize:vertical;"></textarea>
+            </div>
+            <div style="background:#f8f9fa; border-radius:8px; padding:14px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:6px;"><span>Subtotal:</span><b id="estSubtotalDisplay">$0.00</b></div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span>Descuento ($):</span>
+                    <input type="number" id="estDiscount" value="0" min="0" step="0.01" oninput="app.calcEstimateTotals()" style="width:90px; padding:4px; border:1px solid #ccc; border-radius:5px; text-align:right;">
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span>Impuesto (%):</span>
+                    <input type="number" id="estTaxRate" value="0" min="0" step="0.01" oninput="app.calcEstimateTotals()" style="width:90px; padding:4px; border:1px solid #ccc; border-radius:5px; text-align:right;">
+                </div>
+                <div style="display:flex; justify-content:space-between; border-top:2px solid #16a085; padding-top:8px; margin-top:8px; font-size:1.15rem;"><span><b>TOTAL:</b></span><b id="estTotalDisplay" style="color:#16a085;">$0.00</b></div>
+            </div>
+        </div>
+
+        <div style="display:flex; gap:10px;">
+            <button type="button" class="btn" onclick="app.closeEstimateForm()" style="background:#bdc3c7; flex:1;">Cancelar</button>
+            <button type="button" class="btn" onclick="app.previewEstimate()" style="background:#1A4FCC; flex:1;">👁️ Vista Previa</button>
+            <button type="button" class="btn" onclick="app.saveEstimate()" style="background:var(--success); flex:2;">💾 Guardar Estimado</button>
+        </div>
     </div>
 </div>
 
@@ -1550,6 +1660,8 @@ class Scheduler {
             "Grupo A":["","","","",""], "Grupo B":["","","","",""]
         };
         this.gastos = JSON.parse(localStorage.getItem('v35_gastos')) || [];
+        this.estimates = JSON.parse(localStorage.getItem('v35_estimates')) || [];
+        this.serviceCatalog = JSON.parse(localStorage.getItem('v35_serviceCatalog')) || this.getDefaultServiceCatalog();
         this.nominaTotales = JSON.parse(localStorage.getItem('v35_nominaTotales')) || [];
         this.gastosCategories = JSON.parse(localStorage.getItem('v35_gastosCategories')) || {
             "Vehículos": ["Gas", "Aseguranza", "Reparación", "Renovación de placas"],
@@ -1879,6 +1991,8 @@ class Scheduler {
         localStorage.setItem('v35_gastosCategories', JSON.stringify(this.gastosCategories || {}));
         localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices || []));
         localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices || []));
+        localStorage.setItem('v35_estimates', JSON.stringify(this.estimates || []));
+        localStorage.setItem('v35_serviceCatalog', JSON.stringify(this.serviceCatalog || []));
         localStorage.setItem('anaCS_lastSavedAt', new Date().toISOString());
         this.localDirty = true;
         if (this.driveConnected) {
@@ -4577,6 +4691,9 @@ class Scheduler {
                 existingInv.applyTax = this._pendingApplyTax || existingInv.applyTax;
                 existingInv.taxRate = this._pendingTaxRate || existingInv.taxRate;
                 existingInv.generatedDate = new Date().toISOString().split('T')[0];
+                if (window.currentPDFData?._services) {
+                    existingInv.items = this.buildInvoiceItems(window.currentPDFData._services, window.currentPDFData.client);
+                }
                 this._pendingGrandTotal = null;
                 this._pendingApplyTax = null;
                 this._pendingTaxRate = null;
@@ -4644,7 +4761,69 @@ class Scheduler {
     }
     
     // ==================== MÓDULO DE FACTURAS GENERADAS ====================
-    
+
+    // Construye el detalle (fecha, descripción, precio) de los servicios de una factura
+    // para que quede guardado permanentemente en el historial, aunque el servicio
+    // se borre después del calendario.
+    buildInvoiceItems(services, client) {
+        return (services || []).map(s => {
+            let desc = s.name || 'Cleaning Service';
+            if (client && (client.type === 'airbnb' || client.type === 'unico' || client.type === 'construccion') && s.propId) {
+                desc = s.propId + ' - ' + desc;
+            }
+            return {
+                fecha: s.date || '',
+                descripcion: desc,
+                precio: parseFloat(s.price) || 0
+            };
+        });
+    }
+
+    viewInvoiceItems(id) {
+        const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(id));
+        if (!inv) { alert('No se encontró la factura'); return; }
+        const items = inv.items || [];
+        const invNum = String(inv.invoiceNumber).padStart(4, '0');
+        let rows = '';
+        if (items.length === 0) {
+            rows = `<tr><td colspan="3" style="text-align:center;color:#888;padding:16px;">
+                Esta factura no tiene detalle guardado (factura generada antes de activar este registro).
+            </td></tr>`;
+        } else {
+            items.forEach(it => {
+                const [y, m, d] = (it.fecha || '').split('-');
+                const fechaFmt = (y && m && d) ? `${m}/${d}/${y}` : (it.fecha || '');
+                rows += `<tr>
+                    <td style="padding:6px 10px;border-bottom:1px solid #333;">${fechaFmt}</td>
+                    <td style="padding:6px 10px;border-bottom:1px solid #333;">${it.descripcion || ''}</td>
+                    <td style="padding:6px 10px;border-bottom:1px solid #333;text-align:right;">$${(parseFloat(it.precio)||0).toFixed(2)}</td>
+                </tr>`;
+            });
+        }
+        const overlay = document.createElement('div');
+        overlay.id = '_invItemsOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:20000;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = `
+            <div style="background:#1a2535;border-radius:14px;padding:24px;max-width:480px;width:90%;max-height:80vh;overflow-y:auto;font-family:sans-serif;color:#e2e8f0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                    <div style="font-size:18px;font-weight:800;">🔍 Detalle Factura #${invNum}</div>
+                    <button onclick="document.getElementById('_invItemsOverlay').remove()" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;">✕</button>
+                </div>
+                <div style="font-size:13px;color:#94a3b8;margin-bottom:14px;">${inv.clientName} &nbsp;|&nbsp; ${inv.startDate} a ${inv.endDate}</div>
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead><tr style="color:#94a3b8;text-align:left;">
+                        <th style="padding:6px 10px;border-bottom:1px solid #334155;">Fecha</th>
+                        <th style="padding:6px 10px;border-bottom:1px solid #334155;">Descripción</th>
+                        <th style="padding:6px 10px;border-bottom:1px solid #334155;text-align:right;">Precio</th>
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                <div style="text-align:right;margin-top:12px;font-weight:700;">Total: $${(inv.total||0).toFixed(2)}</div>
+                <button onclick="document.getElementById('_invItemsOverlay').remove()" style="margin-top:16px;width:100%;background:#334155;border:none;color:#fff;padding:10px;border-radius:8px;cursor:pointer;font-weight:600;">Cerrar</button>
+            </div>`;
+        document.body.appendChild(overlay);
+    }
+
     registerGeneratedInvoice(pending) {
         // Inicializar array si no existe
         if (!this.generatedInvoices) {
@@ -4665,6 +4844,14 @@ class Scheduler {
         this._pendingGrandTotal = null;
         this._pendingApplyTax = null;
         this._pendingTaxRate = null;
+        // Reconstruir lista de servicios del período para guardar el detalle permanente
+        const clientIdsForItems = pending.clientIds || [];
+        const itemServices = this.servs.filter(s =>
+            clientIdsForItems.some(id => String(s.cliId) === String(id)) &&
+            !s.cancelled &&
+            s.date >= pending.startDate && s.date <= pending.endDate
+        );
+        const clientForItems = this.clis.find(c => clientIdsForItems.some(id => String(c.id) === String(id)));
         this.generatedInvoices.push({
             id: Date.now() + Math.random(),
             invoiceNumber: nextInvoiceNumber,
@@ -4681,6 +4868,7 @@ class Scheduler {
             applyTax: applyTax,
             taxRate: taxRate,
             periodKey: pending.periodKey,
+            items: this.buildInvoiceItems(itemServices, clientForItems),
             // Campos de seguimiento de cobros
             status: 'pendiente', // pendiente | enviada | pagada | vencida | cancelada
             sentAt: null,
@@ -4863,7 +5051,7 @@ class Scheduler {
                     ${!isCancelled ? `
                         <div style="display:flex;gap:4px;flex-wrap:wrap;">
                             <button onclick="app.openCobroDetalle('${inv.id}')" class="btn" style="background: #16a085; color: white; padding: 5px 8px; font-size: 0.75rem;">💰 Pago</button>
-                            <button onclick="app.regenerateInvoice('${inv.id}')" class="btn" style="background: #1A4FCC; color: white; padding: 5px 8px; font-size: 0.75rem;">🔄 Regenerar</button>
+                            <button onclick="app.viewInvoiceItems('${inv.id}')" class="btn" style="background: #8e44ad; color: white; padding: 5px 8px; font-size: 0.75rem;">🔍 Detalle</button>
                             <button onclick="app.openInvoiceForEdit('${inv.id}')" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
                             <button onclick="app.editInvoiceNumber('${inv.id}', ${inv.invoiceNumber})" class="btn" style="background: #6c757d; color: white; padding: 5px 8px; font-size: 0.75rem;"># Nº</button>
                             <button onclick="app.cancelInvoice('${inv.id}')" class="btn" style="background: #c0392b; color: white; padding: 5px 8px; font-size: 0.75rem;">🗑️ Cancelar</button>
@@ -6920,7 +7108,7 @@ Motivo de cancelación (opcional):`);
 
     
     showSec(s) { 
-        ['secEmp','secCli','secConfig','secGrupos','secSupervisor'].forEach(x => document.getElementById(x).style.display = x === s ? 'block' : 'none');
+        ['secEmp','secCli','secConfig','secGrupos','secSupervisor','secServiceCatalog'].forEach(x => document.getElementById(x).style.display = x === s ? 'block' : 'none');
         // Refrescar PIN actual al abrir sección supervisor
         if (s === 'secSupervisor') {
             const el = document.getElementById('supPinActual');
@@ -6931,6 +7119,9 @@ Motivo de cancelación (opcional):`);
         }
         if(s === 'secGrupos') {
             this.renderGruposSection();
+        }
+        if(s === 'secServiceCatalog') {
+            this.renderServiceCatalog();
         }
     }
 
@@ -8626,7 +8817,574 @@ Motivo de cancelación (opcional):`);
         
         return text;
     }
-    
+
+    // ══════════════════════════════════════════════════════════════
+    // 📐 CATÁLOGO DE SERVICIOS — plantillas reutilizables para Estimados
+    // ══════════════════════════════════════════════════════════════
+    getDefaultServiceCatalog() {
+        const mk = (id, name, category, items) => ({ id, name, category, items: items.map((d, i) => ({ id: id + '_i' + i, description: d[0], qty: d[1], unit: d[2], unitPrice: d[3] })) });
+        return [
+            mk('svc_residencial', 'Limpieza Residencial Estándar', 'residencial', [
+                ['Limpieza general de cocina', 1, 'servicio', 60],
+                ['Limpieza de baños', 1, 'servicio', 50],
+                ['Aspirado y trapeado de pisos', 1, 'servicio', 40],
+                ['Limpieza de superficies y polvo', 1, 'servicio', 30],
+                ['Vaciar botes de basura', 1, 'servicio', 10],
+            ]),
+            mk('svc_comercial', 'Limpieza Comercial', 'comercial', [
+                ['Limpieza de áreas comunes', 1, 'servicio', 80],
+                ['Limpieza de baños', 1, 'servicio', 50],
+                ['Vaciado de botes de basura', 1, 'servicio', 20],
+                ['Aspirado de alfombras', 1, 'servicio', 50],
+                ['Limpieza de ventanas interiores', 1, 'servicio', 40],
+            ]),
+            mk('svc_deepclean', 'Deep Clean (Limpieza Profunda)', 'deepclean', [
+                ['Limpieza profunda de cocina (interior de electrodomésticos)', 1, 'servicio', 120],
+                ['Limpieza profunda de baños', 1, 'servicio', 90],
+                ['Limpieza de rodapiés y marcos de puertas', 1, 'servicio', 50],
+                ['Limpieza de ventanas interiores', 1, 'servicio', 60],
+                ['Organización de closets', 1, 'servicio', 40],
+                ['Limpieza detrás/debajo de muebles', 1, 'servicio', 50],
+            ]),
+            mk('svc_construccion', 'Limpieza Post-Construcción', 'construccion', [
+                ['Remoción de polvo de construcción', 1, 'servicio', 150],
+                ['Limpieza de ventanas (residuos de pintura/sellador)', 1, 'servicio', 80],
+                ['Limpieza de pisos (residuos de materiales)', 1, 'servicio', 100],
+                ['Limpieza de superficies y gabinetes', 1, 'servicio', 70],
+                ['Remoción de etiquetas y plásticos protectores', 1, 'servicio', 50],
+            ]),
+            mk('svc_mudanza', 'Limpieza de Mudanza (Move-in / Move-out)', 'mudanza', [
+                ['Limpieza interior de gabinetes y closets', 1, 'servicio', 80],
+                ['Limpieza profunda de cocina y baños', 1, 'servicio', 110],
+                ['Limpieza de pisos', 1, 'servicio', 50],
+                ['Limpieza de ventanas interiores', 1, 'servicio', 50],
+            ]),
+        ];
+    }
+
+    renderServiceCatalog() {
+        const container = document.getElementById('serviceCatalogList');
+        if (!this.serviceCatalog || this.serviceCatalog.length === 0) {
+            container.innerHTML = `<div style="text-align:center; padding:30px; color:#999;">Sin tipos de servicio definidos.</div>`;
+            return;
+        }
+        if (!this._expandedCatalogCards) this._expandedCatalogCards = new Set();
+        const unitLabel = { servicio: 'Servicio', hora: 'Hora', pie2: 'Pie²', unidad: 'Unidad' };
+        container.innerHTML = this.serviceCatalog.map(svc => {
+            const isOpen = this._expandedCatalogCards.has(svc.id);
+            return `
+            <div style="background:#f8f9fa; border:1.5px solid #ddd; border-radius:10px; margin-bottom:12px; overflow:hidden;">
+                <div onclick="app.toggleServiceCatalogCard('${svc.id}')" style="display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; background:${isOpen ? '#e9f7f4' : '#f8f9fa'};">
+                    <span style="font-size:0.9rem; color:#16a085; transition:transform 0.15s; transform:rotate(${isOpen ? '90' : '0'}deg); display:inline-block;">▶</span>
+                    <div style="flex:1; font-weight:700;">${svc.name}</div>
+                    <span style="background:#dfe9e8; color:#444; font-size:0.72rem; padding:2px 9px; border-radius:10px; text-transform:uppercase;">${svc.category || 'general'}</span>
+                    <span style="color:#888; font-size:0.78rem;">${svc.items.length} línea${svc.items.length === 1 ? '' : 's'}</span>
+                    <button onclick="event.stopPropagation(); app.deleteServiceCatalogItem('${svc.id}')" style="background:#e74c3c; color:white; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:0.8rem;">🗑️</button>
+                </div>
+                ${isOpen ? `
+                <div id="svcCardBody_${svc.id}" style="padding:14px; border-top:1px solid #ddd;">
+                    <div style="display:flex; gap:10px; margin-bottom:10px;">
+                        <input type="text" class="svcNameInput" value="${svc.name.replace(/"/g, '&quot;')}" onchange="app.updateServiceCatalogField('${svc.id}','name',this.value)"
+                            style="flex:2; padding:8px; font-weight:700; border:1px solid #ccc; border-radius:6px;">
+                        <input type="text" class="svcCategoryInput" value="${svc.category}" onchange="app.updateServiceCatalogField('${svc.id}','category',this.value)"
+                            placeholder="categoría (ej: residencial)" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:6px;">
+                    </div>
+                    <div id="svcItems_${svc.id}">
+                        ${svc.items.map(it => `
+                            <div class="svcItemRow" data-item-id="${it.id}" style="display:grid; grid-template-columns: 2.2fr 0.7fr 0.9fr 1fr 32px; gap:6px; margin-bottom:10px; align-items:start;">
+                                <textarea class="svcItemDesc" rows="3" onchange="app.updateServiceCatalogItemField('${svc.id}','${it.id}','description',this.value)" style="padding:6px; border:1px solid #ccc; border-radius:5px; font-size:0.85rem; resize:vertical; font-family:inherit;">${it.description.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                                <input type="number" class="svcItemQty" value="${it.qty}" step="0.01" onchange="app.updateServiceCatalogItemField('${svc.id}','${it.id}','qty',parseFloat(this.value)||0)" style="padding:6px; border:1px solid #ccc; border-radius:5px; font-size:0.85rem;">
+                                <select class="svcItemUnit" onchange="app.updateServiceCatalogItemField('${svc.id}','${it.id}','unit',this.value)" style="padding:6px; border:1px solid #ccc; border-radius:5px; font-size:0.8rem;">
+                                    ${Object.keys(unitLabel).map(u => `<option value="${u}" ${it.unit === u ? 'selected' : ''}>${unitLabel[u]}</option>`).join('')}
+                                </select>
+                                <input type="number" class="svcItemPrice" value="${it.unitPrice}" step="0.01" onchange="app.updateServiceCatalogItemField('${svc.id}','${it.id}','unitPrice',parseFloat(this.value)||0)" style="padding:6px; border:1px solid #ccc; border-radius:5px; font-size:0.85rem;">
+                                <button onclick="app.deleteServiceCatalogItemRow('${svc.id}','${it.id}')" style="background:#e74c3c; color:white; border:none; border-radius:5px; cursor:pointer;">✕</button>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div style="display:flex; gap:8px; margin-top:4px; align-items:center;">
+                        <button onclick="app.addServiceCatalogItemRow('${svc.id}')" class="btn" style="background:#16a085; color:white; padding:6px 12px; font-size:0.8rem;">➕ Agregar línea</button>
+                        <button id="svcSaveBtn_${svc.id}" onclick="app.saveServiceCatalogCard('${svc.id}')" class="btn" style="background:#1A4FCC; color:white; padding:6px 16px; font-size:0.8rem; font-weight:700;">💾 Guardar</button>
+                    </div>
+                </div>` : ''}
+            </div>
+        `}).join('');
+    }
+
+    /** Recopila explícitamente todos los valores actuales de una tarjeta del catálogo y los guarda — respaldo del autoguardado por onchange, con confirmación visual. */
+    saveServiceCatalogCard(svcId) {
+        const svc = this.serviceCatalog.find(s => s.id === svcId);
+        if (!svc) return;
+        const body = document.getElementById('svcCardBody_' + svcId);
+        if (!body) return;
+
+        svc.name = body.querySelector('.svcNameInput')?.value.trim() || svc.name;
+        svc.category = body.querySelector('.svcCategoryInput')?.value.trim() || svc.category;
+
+        body.querySelectorAll('.svcItemRow').forEach(row => {
+            const itemId = row.getAttribute('data-item-id');
+            const item = svc.items.find(i => i.id === itemId);
+            if (!item) return;
+            item.description = row.querySelector('.svcItemDesc')?.value.trim() || '';
+            item.qty = parseFloat(row.querySelector('.svcItemQty')?.value) || 0;
+            item.unit = row.querySelector('.svcItemUnit')?.value || 'servicio';
+            item.unitPrice = parseFloat(row.querySelector('.svcItemPrice')?.value) || 0;
+        });
+
+        this.save();
+
+        // Confirmación visual breve en el botón (sin re-render inmediato, para no perder el feedback)
+        const btn = document.getElementById('svcSaveBtn_' + svcId);
+        if (btn) {
+            const original = btn.innerHTML;
+            const originalBg = btn.style.background;
+            btn.innerHTML = '✅ Guardado';
+            btn.style.background = '#27ae60';
+            setTimeout(() => { btn.innerHTML = original; btn.style.background = originalBg; }, 1500);
+        }
+    }
+
+    toggleServiceCatalogCard(svcId) {
+        if (!this._expandedCatalogCards) this._expandedCatalogCards = new Set();
+        if (this._expandedCatalogCards.has(svcId)) this._expandedCatalogCards.delete(svcId);
+        else this._expandedCatalogCards.add(svcId);
+        this.renderServiceCatalog();
+    }
+
+    addServiceCatalogItem() {
+        const id = 'svc_' + Date.now();
+        this.serviceCatalog.push({ id, name: 'Nuevo Tipo de Servicio', category: 'general', items: [{ id: id + '_i0', description: '', qty: 1, unit: 'servicio', unitPrice: 0 }] });
+        if (!this._expandedCatalogCards) this._expandedCatalogCards = new Set();
+        this._expandedCatalogCards.add(id);
+        this.save();
+        this.renderServiceCatalog();
+    }
+    deleteServiceCatalogItem(id) {
+        if (!confirm('¿Eliminar este tipo de servicio del catálogo?')) return;
+        this.serviceCatalog = this.serviceCatalog.filter(s => s.id !== id);
+        this.save();
+        this.renderServiceCatalog();
+    }
+    updateServiceCatalogField(svcId, field, value) {
+        const svc = this.serviceCatalog.find(s => s.id === svcId);
+        if (svc) { svc[field] = value; this.save(); }
+    }
+    addServiceCatalogItemRow(svcId) {
+        const svc = this.serviceCatalog.find(s => s.id === svcId);
+        if (!svc) return;
+        svc.items.push({ id: svcId + '_i' + Date.now(), description: '', qty: 1, unit: 'servicio', unitPrice: 0 });
+        this.save();
+        this.renderServiceCatalog();
+    }
+    deleteServiceCatalogItemRow(svcId, itemId) {
+        const svc = this.serviceCatalog.find(s => s.id === svcId);
+        if (!svc) return;
+        svc.items = svc.items.filter(i => i.id !== itemId);
+        this.save();
+        this.renderServiceCatalog();
+    }
+    updateServiceCatalogItemField(svcId, itemId, field, value) {
+        const svc = this.serviceCatalog.find(s => s.id === svcId);
+        if (!svc) return;
+        const item = svc.items.find(i => i.id === itemId);
+        if (item) { item[field] = value; this.save(); }
+    }
+
+    /** Carga las líneas de una plantilla del catálogo dentro del formulario de Estimado abierto. */
+    loadServiceCatalogIntoEstimate(svcId) {
+        const svc = this.serviceCatalog.find(s => s.id === svcId);
+        if (!svc) return;
+        const container = document.getElementById('estLineItemsContainer');
+        if (container.children.length > 0 && !confirm('Esto reemplazará las líneas actuales del estimado con la plantilla de "' + svc.name + '". ¿Continuar?')) return;
+        container.innerHTML = '';
+        svc.items.forEach(it => this.addEstimateLineItem(it));
+        this.calcEstimateTotals();
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 📐 ESTIMADOS — cotizaciones para clientes/prospectos
+    // ══════════════════════════════════════════════════════════════
+    generateEstimateNumber() {
+        const nums = (this.estimates || []).map(e => {
+            const m = /EST-(\d+)/.exec(e.estimateNumber || '');
+            return m ? parseInt(m[1]) : 0;
+        });
+        const next = (nums.length ? Math.max(...nums) : 0) + 1;
+        return 'EST-' + String(next).padStart(4, '0');
+    }
+
+    openEstimatesList() {
+        const m = document.getElementById('estimatesListModal');
+        m.style.display = 'flex'; m.style.alignItems = 'center'; m.style.justifyContent = 'center';
+        // Llenar selector de cliente del formulario (por si se abre desde aqui)
+        this.renderEstimatesList();
+    }
+    closeEstimatesList() { document.getElementById('estimatesListModal').style.display = 'none'; }
+
+    renderEstimatesList() {
+        const search = (document.getElementById('estListSearch')?.value || '').toLowerCase();
+        const statusFilter = document.getElementById('estListStatusFilter')?.value || 'all';
+        let list = (this.estimates || []).slice().sort((a, b) => (b.estimateNumber || '').localeCompare(a.estimateNumber || ''));
+        if (statusFilter !== 'all') list = list.filter(e => e.status === statusFilter);
+        if (search) list = list.filter(e =>
+            (e.clientName || '').toLowerCase().includes(search) ||
+            (e.estimateNumber || '').toLowerCase().includes(search)
+        );
+        const statusBadge = (s) => {
+            const map = {
+                pendiente: ['#f39c12', 'Pendiente'],
+                aprobado: ['#27ae60', 'Aprobado'],
+                rechazado: ['#e74c3c', 'Rechazado'],
+                convertido: ['#3498db', 'Convertido']
+            };
+            const [color, label] = map[s] || map.pendiente;
+            return `<span style="background:${color}; color:white; padding:3px 10px; border-radius:12px; font-size:0.75rem; font-weight:700;">${label}</span>`;
+        };
+        const container = document.getElementById('estimatesListContent');
+        if (list.length === 0) {
+            container.innerHTML = `<div style="text-align:center; padding:40px; color:#999;"><div style="font-size:2.5rem;">📐</div><h3>No hay estimados</h3></div>`;
+            return;
+        }
+        container.innerHTML = `
+            <table style="width:100%; border-collapse:collapse;">
+                <thead><tr style="background:#f8f9fa; text-align:left;">
+                    <th style="padding:8px;">No.</th><th style="padding:8px;">Cliente</th><th style="padding:8px;">Fecha</th>
+                    <th style="padding:8px;">Válido hasta</th><th style="padding:8px; text-align:right;">Total</th>
+                    <th style="padding:8px;">Estado</th><th style="padding:8px;">Acciones</th>
+                </tr></thead>
+                <tbody>
+                    ${list.map(e => `
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td style="padding:8px; font-weight:700; color:#16a085;">${e.estimateNumber}</td>
+                            <td style="padding:8px;">${e.clientName || '—'}</td>
+                            <td style="padding:8px;">${this.formatDateUS ? this.formatDateUS(e.date) : e.date}</td>
+                            <td style="padding:8px;">${this.formatDateUS ? this.formatDateUS(e.validUntil) : e.validUntil}</td>
+                            <td style="padding:8px; text-align:right; font-weight:700;">$${(e.total || 0).toFixed(2)}</td>
+                            <td style="padding:8px;">
+                                <select onchange="app.changeEstimateStatus('${e.id}', this.value)" style="border:none; background:transparent; font-size:0.8rem; cursor:pointer;">
+                                    <option value="pendiente" ${e.status === 'pendiente' ? 'selected' : ''}>Pendiente</option>
+                                    <option value="aprobado" ${e.status === 'aprobado' ? 'selected' : ''}>Aprobado</option>
+                                    <option value="rechazado" ${e.status === 'rechazado' ? 'selected' : ''}>Rechazado</option>
+                                    <option value="convertido" ${e.status === 'convertido' ? 'selected' : ''}>Convertido</option>
+                                </select>
+                                ${statusBadge(e.status)}
+                            </td>
+                            <td style="padding:8px; white-space:nowrap;">
+                                <button onclick="app.openEstimateForm('${e.id}')" title="Editar" style="background:none; border:none; cursor:pointer; font-size:1rem;">✏️</button>
+                                <button onclick="app.printEstimate('${e.id}')" title="Imprimir/PDF" style="background:none; border:none; cursor:pointer; font-size:1rem;">🖨️</button>
+                                <button onclick="app.deleteEstimate('${e.id}')" title="Eliminar" style="background:none; border:none; cursor:pointer; font-size:1rem;">🗑️</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>`;
+    }
+
+    changeEstimateStatus(id, status) {
+        const est = (this.estimates || []).find(e => e.id === id);
+        if (!est) return;
+        est.status = status;
+        this.save();
+        this.renderEstimatesList();
+    }
+
+    deleteEstimate(id) {
+        if (!confirm('¿Eliminar este estimado? Esta acción no se puede deshacer.')) return;
+        this.estimates = (this.estimates || []).filter(e => e.id !== id);
+        this.save();
+        this.renderEstimatesList();
+    }
+
+    openEstimateForm(id) {
+        // Llenar selector de clientes existentes
+        const sel = document.getElementById('estClientSelect');
+        sel.innerHTML = '<option value="">— Nuevo prospecto / sin cliente —</option>' +
+            this.clis.map(c => `<option value="${c.id}">${c.name}${c.city ? ' - ' + c.city : ''}</option>`).join('');
+
+        const svcSel = document.getElementById('estServiceType');
+        svcSel.innerHTML = (this.serviceCatalog || []).map(s => `<option value="${s.id}">${s.name}</option>`).join('') || '<option value="">— Sin tipos definidos —</option>';
+
+        const today = new Date().toLocaleDateString('en-CA');
+        const in30 = new Date(); in30.setDate(in30.getDate() + 30);
+        const in30Str = in30.toLocaleDateString('en-CA');
+
+        document.getElementById('estLineItemsContainer').innerHTML = '';
+        this._estLineItemSeq = 0;
+
+        if (id) {
+            const est = (this.estimates || []).find(e => e.id === id);
+            if (!est) return;
+            this._editingEstimate = est;
+            document.getElementById('estFormTitle').textContent = '📐 Editar Estimado';
+            document.getElementById('estId').value = est.id;
+            document.getElementById('estNumberDisplay').textContent = est.estimateNumber;
+            document.getElementById('estDate').value = est.date;
+            document.getElementById('estValidUntil').value = est.validUntil;
+            document.getElementById('estClientSelect').value = est.cliId || '';
+            document.getElementById('estServiceType').value = est.serviceType || ((this.serviceCatalog && this.serviceCatalog[0]) ? this.serviceCatalog[0].id : '');
+            document.getElementById('estClientName').value = est.clientName || '';
+            document.getElementById('estClientPhone').value = est.clientPhone || '';
+            document.getElementById('estClientAddress').value = est.clientAddress || '';
+            document.getElementById('estClientEmail').value = est.clientEmail || '';
+            document.getElementById('estNotes').value = est.notes || '';
+            document.getElementById('estDiscount').value = est.discount || 0;
+            document.getElementById('estTaxRate').value = est.taxRate || 0;
+            (est.lineItems || []).forEach(li => this.addEstimateLineItem(li));
+        } else {
+            this._editingEstimate = null;
+            document.getElementById('estFormTitle').textContent = '📐 Nuevo Estimado';
+            document.getElementById('estId').value = '';
+            document.getElementById('estNumberDisplay').textContent = this.generateEstimateNumber();
+            document.getElementById('estDate').value = today;
+            document.getElementById('estValidUntil').value = in30Str;
+            document.getElementById('estClientSelect').value = '';
+            document.getElementById('estServiceType').value = (this.serviceCatalog && this.serviceCatalog[0]) ? this.serviceCatalog[0].id : '';
+            document.getElementById('estClientName').value = '';
+            document.getElementById('estClientPhone').value = '';
+            document.getElementById('estClientAddress').value = '';
+            document.getElementById('estClientEmail').value = '';
+            document.getElementById('estNotes').value = '';
+            document.getElementById('estDiscount').value = 0;
+            document.getElementById('estTaxRate').value = 0;
+            this.addEstimateLineItem();
+        }
+        this.calcEstimateTotals();
+
+        const m = document.getElementById('estimateFormModal');
+        m.style.display = 'flex'; m.style.alignItems = 'center'; m.style.justifyContent = 'center';
+    }
+    closeEstimateForm() { document.getElementById('estimateFormModal').style.display = 'none'; }
+
+    fillEstimateFromClient() {
+        const cliId = document.getElementById('estClientSelect').value;
+        if (!cliId) return;
+        const c = this.clis.find(cl => cl.id == cliId);
+        if (!c) return;
+        document.getElementById('estClientName').value = c.name || '';
+        document.getElementById('estClientPhone').value = c.tel || '';
+        document.getElementById('estClientAddress').value = c.address || '';
+        document.getElementById('estClientEmail').value = c.email || '';
+    }
+
+    addEstimateLineItem(data) {
+        const seq = this._estLineItemSeq = (this._estLineItemSeq || 0) + 1;
+        const rowId = 'estLi_' + seq;
+        const row = document.createElement('div');
+        row.id = rowId;
+        row.style.cssText = 'display:grid; grid-template-columns: 2.2fr 0.7fr 0.7fr 1fr 1fr 32px; gap:6px; margin-bottom:10px; align-items:start;';
+        const escapedDesc = data && data.description ? data.description.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+        const escapedActivity = data && data.activity ? data.activity.replace(/"/g, '&quot;') : '';
+        row.innerHTML = `
+            <div>
+                <input type="text" class="estLiActivity" placeholder="Actividad (ej: Janitorial)" value="${escapedActivity}" style="width:100%; padding:5px 6px; border:1px solid #ccc; border-bottom:none; border-radius:5px 5px 0 0; font-size:0.78rem; font-weight:700; color:#16a085; box-sizing:border-box;">
+                <textarea class="estLiDesc" placeholder="Ej: Limpieza profunda de cocina&#10;Incluye: ..." rows="3" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:0 0 5px 5px; font-size:0.85rem; resize:vertical; font-family:inherit; box-sizing:border-box; display:block;">${escapedDesc}</textarea>
+            </div>
+            <input type="number" class="estLiQty" min="0" step="0.01" value="${data ? data.qty : 1}" oninput="app.calcEstimateTotals()" style="padding:6px; border:1px solid #ccc; border-radius:5px; font-size:0.85rem;">
+            <select class="estLiUnit" style="padding:6px; border:1px solid #ccc; border-radius:5px; font-size:0.8rem;">
+                <option value="servicio" ${(!data || data.unit === 'servicio') ? 'selected' : ''}>Servicio</option>
+                <option value="hora" ${data && data.unit === 'hora' ? 'selected' : ''}>Hora</option>
+                <option value="pie2" ${data && data.unit === 'pie2' ? 'selected' : ''}>Pie²</option>
+                <option value="unidad" ${data && data.unit === 'unidad' ? 'selected' : ''}>Unidad</option>
+            </select>
+            <input type="number" class="estLiPrice" min="0" step="0.01" value="${data ? data.unitPrice : 0}" oninput="app.calcEstimateTotals()" style="padding:6px; border:1px solid #ccc; border-radius:5px; font-size:0.85rem;">
+            <div class="estLiTotal" style="text-align:right; font-weight:700; padding:6px 4px;">$0.00</div>
+            <button type="button" onclick="document.getElementById('${rowId}').remove(); app.calcEstimateTotals();" style="background:#e74c3c; color:white; border:none; border-radius:5px; width:28px; height:28px; cursor:pointer; font-size:0.8rem;">✕</button>
+        `;
+        document.getElementById('estLineItemsContainer').appendChild(row);
+        this.calcEstimateTotals();
+    }
+
+    calcEstimateTotals() {
+        let subtotal = 0;
+        document.querySelectorAll('#estLineItemsContainer > div').forEach(row => {
+            const qty = parseFloat(row.querySelector('.estLiQty')?.value) || 0;
+            const price = parseFloat(row.querySelector('.estLiPrice')?.value) || 0;
+            const total = qty * price;
+            const totalEl = row.querySelector('.estLiTotal');
+            if (totalEl) totalEl.textContent = '$' + total.toFixed(2);
+            subtotal += total;
+        });
+        const discount = parseFloat(document.getElementById('estDiscount')?.value) || 0;
+        const taxRate = parseFloat(document.getElementById('estTaxRate')?.value) || 0;
+        const afterDiscount = Math.max(0, subtotal - discount);
+        const taxAmount = afterDiscount * (taxRate / 100);
+        const total = afterDiscount + taxAmount;
+        const fmt = (n) => '$' + n.toFixed(2);
+        const subEl = document.getElementById('estSubtotalDisplay');
+        const totEl = document.getElementById('estTotalDisplay');
+        if (subEl) subEl.textContent = fmt(subtotal);
+        if (totEl) totEl.textContent = fmt(total);
+        return { subtotal, discount, taxRate, taxAmount, total };
+    }
+
+    /** Recopila los valores actuales del formulario de Estimado (sin guardar) — usado por Guardar y por Vista Previa. */
+    gatherEstimateFormData() {
+        const lineItems = [];
+        document.querySelectorAll('#estLineItemsContainer > div').forEach(row => {
+            const description = row.querySelector('.estLiDesc')?.value.trim();
+            const activity = row.querySelector('.estLiActivity')?.value.trim() || '';
+            const qty = parseFloat(row.querySelector('.estLiQty')?.value) || 0;
+            const unit = row.querySelector('.estLiUnit')?.value || 'servicio';
+            const unitPrice = parseFloat(row.querySelector('.estLiPrice')?.value) || 0;
+            if (description) lineItems.push({ activity, description, qty, unit, unitPrice, total: qty * unitPrice });
+        });
+        const totals = this.calcEstimateTotals();
+        return {
+            id: document.getElementById('estId').value || null,
+            estimateNumber: document.getElementById('estNumberDisplay').textContent,
+            date: document.getElementById('estDate').value,
+            validUntil: document.getElementById('estValidUntil').value,
+            cliId: document.getElementById('estClientSelect').value || null,
+            serviceType: document.getElementById('estServiceType').value,
+            clientName: document.getElementById('estClientName').value.trim(),
+            clientPhone: document.getElementById('estClientPhone').value.trim(),
+            clientAddress: document.getElementById('estClientAddress').value.trim(),
+            clientEmail: document.getElementById('estClientEmail').value.trim(),
+            lineItems,
+            subtotal: totals.subtotal,
+            discount: totals.discount,
+            taxRate: totals.taxRate,
+            taxAmount: totals.taxAmount,
+            total: totals.total,
+            notes: document.getElementById('estNotes').value.trim(),
+            status: (this._editingEstimate && this._editingEstimate.status) || 'pendiente',
+            updatedAt: new Date().toISOString()
+        };
+    }
+
+    previewEstimate() {
+        const data = this.gatherEstimateFormData();
+        if (!data.clientName) { alert('Escribe al menos el nombre del cliente/prospecto para previsualizar.'); return; }
+        if (data.lineItems.length === 0) { alert('Agrega al menos una línea de detalle para previsualizar.'); return; }
+        this.renderEstimateDocument(data, true);
+    }
+
+    saveEstimate() {
+        const clientName = document.getElementById('estClientName').value.trim();
+        if (!clientName) { alert('Por favor escribe el nombre del cliente/prospecto.'); return; }
+
+        const data = this.gatherEstimateFormData();
+        if (data.lineItems.length === 0) { alert('Agrega al menos una línea de detalle.'); return; }
+
+        const id = data.id;
+        const estimateData = { ...data, id: id || ('est_' + Date.now()) };
+
+        if (!this.estimates) this.estimates = [];
+        if (id) {
+            const idx = this.estimates.findIndex(e => e.id === id);
+            if (idx !== -1) this.estimates[idx] = estimateData;
+        } else {
+            this.estimates.push(estimateData);
+        }
+        this.save();
+        this.closeEstimateForm();
+        if (document.getElementById('estimatesListModal').style.display === 'flex') this.renderEstimatesList();
+        alert(`✅ Estimado ${estimateData.estimateNumber} guardado correctamente.`);
+    }
+
+    printEstimate(id) {
+        const est = (this.estimates || []).find(e => e.id === id);
+        if (!est) return;
+        this.renderEstimateDocument(est, false);
+    }
+
+    /** Genera y abre el documento del Estimado — usado tanto por Vista Previa (datos sin guardar) como por Imprimir (datos guardados). */
+    renderEstimateDocument(est, isPreview) {
+        const companyConfig = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        const companyLogo = localStorage.getItem('companyLogo') || '';
+        const companyName = companyConfig.name || (typeof this.getCompanyName === 'function' ? this.getCompanyName() : '{{company_name}}');
+        const fmtDate = (d) => { if (!d) return ''; const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }); };
+        const unitLabel = { servicio: 'Servicio', hora: 'Hora', pie2: 'Pie²', unidad: 'Unidad' };
+
+        const rowsHtml = est.lineItems.map(li => `
+            <tr>
+                <td style="padding:10px 8px; border-bottom:1px solid #eee; vertical-align:top; font-weight:700; white-space:nowrap;">${li.activity || ''}</td>
+                <td style="padding:10px 8px; border-bottom:1px solid #eee; white-space:pre-line; vertical-align:top;">${li.description}</td>
+                <td style="padding:10px 8px; border-bottom:1px solid #eee; text-align:center; vertical-align:top;">${li.qty}</td>
+                <td style="padding:10px 8px; border-bottom:1px solid #eee; text-align:right; vertical-align:top;">${li.unitPrice.toFixed(2)}</td>
+                <td style="padding:10px 8px; border-bottom:1px solid #eee; text-align:right; vertical-align:top;">${li.total.toFixed(2)}</td>
+            </tr>`).join('');
+
+        const win = window.open('', '_blank');
+        win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${est.estimateNumber || 'Estimado'} - ${est.clientName}</title>
+            <style>
+                body{font-family:Arial,sans-serif; color:#2c2c2c; max-width:800px; margin:30px auto; padding:0 20px; font-size:13px; display:flex; flex-direction:column; min-height:100vh; box-sizing:border-box;}
+                .header{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;}
+                .logo{max-height:70px; max-width:220px;}
+                .company-info{font-size:11.5px; color:#555; margin-top:6px; line-height:1.5;}
+                .est-title{color:#1A4FCC; font-size:1.7rem; font-weight:700; margin:0 0 6px;}
+                .meta-table td{padding:1px 0; font-size:12px;}
+                .meta-table td:first-child{color:#999; padding-right:14px; text-transform:uppercase; font-size:10.5px;}
+                .address-block{margin:22px 0 18px;}
+                .address-label{color:#999; text-transform:uppercase; font-size:10.5px; margin-bottom:4px;}
+                table.items{width:100%; border-collapse:collapse; margin:10px 0;}
+                table.items th{background:#eef2f7; color:#444; padding:8px; text-align:left; font-size:10.5px; text-transform:uppercase; font-weight:700;}
+                .bottom-block{margin-top:auto; padding-top:30px;}
+                .totals{margin-left:auto; width:280px; border-top:1px dashed #bbb; padding-top:10px;}
+                .totals div{display:flex; justify-content:space-between; padding:4px 0; font-size:13px;}
+                .grand{font-size:1.15rem; font-weight:700; border-top:2px solid #2c2c2c; padding-top:8px; margin-top:4px;}
+                .preview-banner{background:#fff3cd; color:#856404; text-align:center; padding:8px; border-radius:6px; font-weight:700; margin-bottom:18px; font-size:0.85rem;}
+                .signature-page{page-break-before:always; padding-top:60px;}
+                .sig-line{border-bottom:1px solid #888; width:320px; margin:50px 0 6px;}
+                @media print{ button, .preview-banner{display:none} body{min-height:100vh;} }
+            </style></head><body>
+            ${isPreview ? `<div class="preview-banner">👁️ VISTA PREVIA — este estimado todavía no se ha guardado</div>` : ''}
+            <div class="header">
+                <div>
+                    ${companyLogo ? `<img src="${companyLogo}" class="logo">` : `<div style="font-size:1.3rem; font-weight:800; color:#2c2c2c;">${companyName}</div>`}
+                    <div class="company-info">
+                        ${companyConfig.address || ''}${companyConfig.address ? '<br>' : ''}
+                        ${companyConfig.phone ? 'Tel: ' + companyConfig.phone + '<br>' : ''}
+                        ${companyConfig.email || ''}${companyConfig.email && companyConfig.website ? '<br>' : ''}
+                        ${companyConfig.website || ''}
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    <table class="meta-table" style="margin-left:auto;">
+                        <tr><td>Estimate</td><td><b>${est.estimateNumber || '—'}</b></td></tr>
+                        <tr><td>Date</td><td>${fmtDate(est.date)}</td></tr>
+                        <tr><td>Valid until</td><td>${fmtDate(est.validUntil)}</td></tr>
+                    </table>
+                </div>
+            </div>
+            <div class="est-title">Estimate</div>
+
+            <div class="address-block">
+                <div class="address-label">Address</div>
+                <div><b>${est.clientName}</b></div>
+                ${est.clientAddress ? `<div>${est.clientAddress}</div>` : ''}
+                ${(est.clientPhone || est.clientEmail) ? `<div style="color:#555; font-size:11.5px; margin-top:2px;">${est.clientPhone || ''}${est.clientPhone && est.clientEmail ? ' · ' : ''}${est.clientEmail || ''}</div>` : ''}
+            </div>
+
+            <table class="items">
+                <thead><tr><th>Activity</th><th>Description</th><th style="text-align:center;">Qty</th><th style="text-align:right;">Rate</th><th style="text-align:right;">Amount</th></tr></thead>
+                <tbody>${rowsHtml}</tbody>
+            </table>
+            ${est.notes ? `<div style="margin-top:24px; padding:14px; background:#f8f9fa; border-radius:8px; white-space:pre-line;"><b>Notas / Alcance del trabajo:</b><br>${est.notes}</div>` : ''}
+
+            <div class="bottom-block">
+                <div class="totals">
+                    <div><span>Subtotal</span><span>${est.subtotal.toFixed(2)}</span></div>
+                    ${est.discount > 0 ? `<div><span>Descuento</span><span>-${est.discount.toFixed(2)}</span></div>` : ''}
+                    <div><span>Tax</span><span>${(est.taxAmount || 0).toFixed(2)}</span></div>
+                    <div class="grand"><span>TOTAL</span><span>$${est.total.toFixed(2)}</span></div>
+                </div>
+                <div style="margin-top:30px; text-align:center; color:#999; font-size:0.78rem;">Este estimado es válido hasta la fecha indicada. Precios sujetos a cambio después de esa fecha.</div>
+            </div>
+
+            ${!isPreview ? `
+            <div class="signature-page">
+                <div>Accepted By</div>
+                <div class="sig-line"></div>
+                <div>Accepted Date</div>
+                <div class="sig-line"></div>
+            </div>` : ''}
+
+            <button onclick="window.print()" style="margin-top:24px; padding:10px 24px; background:#1A4FCC; color:white; border:none; border-radius:6px; cursor:pointer; font-size:1rem;">🖨️ Imprimir / Guardar PDF</button>
+            </body></html>`);
+        win.document.close();
+    }
+
     openInvoice() {
         console.log('openInvoice called');
         const modal = document.getElementById('invoiceModal');
@@ -8740,19 +9498,102 @@ Motivo de cancelación (opcional):`);
 
     
     switchInvoiceTab(tab) {
-        if (tab === 'generar') {
-            document.getElementById('invoiceTabGenerar').style.display = 'grid';
-            document.getElementById('invoiceTabConfig').style.display = 'none';
-            document.getElementById('tabGenerar').style.background = '#e67e22';
-            document.getElementById('tabConfig').style.background = '#bdc3c7';
-            document.getElementById('btnGeneratePDF').style.display = 'block';
-        } else {
-            document.getElementById('invoiceTabGenerar').style.display = 'none';
-            document.getElementById('invoiceTabConfig').style.display = 'block';
-            document.getElementById('tabGenerar').style.background = '#bdc3c7';
-            document.getElementById('tabConfig').style.background = '#e67e22';
-            document.getElementById('btnGeneratePDF').style.display = 'none';
+        document.getElementById('invoiceTabGenerar').style.display = (tab === 'generar') ? 'grid' : 'none';
+        document.getElementById('invoiceTabConfig').style.display = (tab === 'config') ? 'block' : 'none';
+        document.getElementById('invoiceTabManual').style.display = (tab === 'manual') ? 'grid' : 'none';
+        document.getElementById('tabGenerar').style.background = (tab === 'generar') ? '#e67e22' : '#bdc3c7';
+        document.getElementById('tabConfig').style.background = (tab === 'config') ? '#e67e22' : '#bdc3c7';
+        document.getElementById('tabManual').style.background = (tab === 'manual') ? '#e67e22' : '#bdc3c7';
+        document.getElementById('btnGeneratePDF').style.display = (tab === 'generar') ? 'block' : 'none';
+        if (tab === 'manual') {
+            this.populateManualInvClientSelect();
+            if (document.getElementById('manualInvItemsList').children.length === 0) {
+                this.addManualInvoiceItem();
+            }
         }
+    }
+
+    populateManualInvClientSelect() {
+        const select = document.getElementById('manualInvClient');
+        const currentValue = select.value;
+        select.innerHTML = '<option value="">-- Selecciona Cliente --</option>';
+        this.clis.forEach(c => {
+            const option = document.createElement('option');
+            option.value = c.id;
+            option.textContent = c.name + (c.propId && c.propId !== c.name ? ' — ' + c.propId : '');
+            select.appendChild(option);
+        });
+        if (currentValue) select.value = currentValue;
+    }
+
+    toggleManualTaxField() {
+        const cb = document.getElementById('manualInvApplyTax');
+        document.getElementById('manualTaxFieldContainer').style.display = cb.checked ? 'block' : 'none';
+    }
+
+    addManualInvoiceItem(date='', desc='', price='') {
+        const list = document.getElementById('manualInvItemsList');
+        if (!list) return;
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:4px;margin-bottom:6px;align-items:center;';
+        row.innerHTML = `
+            <input type="date" value="${date}" class="manualInvDate" style="flex:1.2;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;">
+            <input type="text" placeholder="Descripción" value="${desc}" class="manualInvDesc" style="flex:2;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;">
+            <input type="number" placeholder="$Precio" value="${price}" class="manualInvPrice" style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;" min="0" step="0.01">
+            <button type="button" onclick="this.parentElement.remove()"
+                style="background:#e74c3c;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.8rem;">✕</button>`;
+        list.appendChild(row);
+    }
+
+    getManualInvoiceItems() {
+        const list = document.getElementById('manualInvItemsList');
+        if (!list) return [];
+        return [...list.children].map(row => ({
+            date: row.querySelector('.manualInvDate').value,
+            name: row.querySelector('.manualInvDesc').value.trim(),
+            price: parseFloat(row.querySelector('.manualInvPrice').value)
+        }));
+    }
+
+    showManualInvoicePreview() {
+        const clientId = document.getElementById('manualInvClient').value;
+        if (!clientId) { alert('Por favor selecciona un cliente'); return; }
+        const client = this.clis.find(c => String(c.id) === String(clientId));
+        if (!client) { alert('Cliente no encontrado'); return; }
+
+        const rawItems = this.getManualInvoiceItems();
+        for (const it of rawItems) {
+            if (!it.date || !it.name || isNaN(it.price)) {
+                alert('Revisa que cada línea tenga fecha, descripción y precio válido');
+                return;
+            }
+        }
+        if (rawItems.length === 0) { alert('Agrega al menos una línea a la factura'); return; }
+
+        const items = rawItems.map(it => ({ ...it, propId: client.propId || client.name }));
+        items.sort((a, b) => new Date(a.date) - new Date(b.date));
+        const startDate = items[0].date;
+        const endDate = items[items.length - 1].date;
+
+        const paymentDue = document.getElementById('manualInvPaymentDue').value || '';
+        const applyTax = document.getElementById('manualInvApplyTax').checked;
+        const taxRate = applyTax ? parseFloat(document.getElementById('manualInvTaxRate').value) : 0;
+        const template = document.querySelector('input[name="manualInvoiceTemplate"]:checked').value;
+
+        let pdfData;
+        try {
+            pdfData = this.createPDFBlob(client, items, startDate, endDate, template, paymentDue, true, applyTax, taxRate);
+        } catch(e) {
+            alert('Error al generar preview: ' + e.message);
+            console.error('createPDFBlob error:', e);
+            return;
+        }
+        if (!pdfData || !pdfData.blob) { alert('Error: no se pudo generar el PDF (blob vacío)'); return; }
+
+        pdfData._serviceCount = items.length;
+        pdfData._services = items;
+        pdfData._isManual = true;
+        this.displayPDFPreview(pdfData, client, startDate, endDate);
     }
     
     loadCompanyConfig() {
@@ -9262,6 +10103,9 @@ Motivo de cancelación (opcional):`);
             existing.invoiceConfig = pdfData.invoiceConfig || existing.invoiceConfig;
             existing.serviceCount = pdfData.serviceCount || existing.serviceCount;
             existing.total = pdfData.total || existing.total;
+            if ((!existing.items || existing.items.length === 0) && pdfData._services) {
+                existing.items = this.buildInvoiceItems(pdfData._services, pdfData.client);
+            }
         } else {
             // Create new record
             const cli = this.clis ? this.clis.find(c => c.name === clientName) : null;
@@ -9276,6 +10120,7 @@ Motivo de cancelación (opcional):`);
                 endDate: pdfData.endDate || '',
                 serviceCount: pdfData.serviceCount || 0,
                 total: pdfData.total || 0,
+                items: this.buildInvoiceItems(pdfData._services, pdfData.client),
                 status: 'enviada',
                 sentAt: today,
                 paidAt: null, paidAmount: null, notes: '',
@@ -9364,6 +10209,9 @@ Motivo de cancelación (opcional):`);
         const alreadyExists = this.generatedInvoices.find(i => i.invoiceNumber === invoiceNumber);
         if (alreadyExists) {
             if (status === 'enviada') { alreadyExists.status = 'enviada'; alreadyExists.sentAt = new Date().toISOString().split('T')[0]; }
+            if ((!alreadyExists.items || alreadyExists.items.length === 0) && pdfData._services) {
+                alreadyExists.items = this.buildInvoiceItems(pdfData._services, pdfData.client);
+            }
             this.save();
             return;
         }
@@ -9379,6 +10227,7 @@ Motivo de cancelación (opcional):`);
             endDate: pdfData.endDate || '',
             serviceCount: pdfData.serviceCount || 0,
             total: pdfData.total || 0,
+            items: this.buildInvoiceItems(pdfData._services, pdfData.client),
             status,
             sentAt: status === 'enviada' ? new Date().toISOString().split('T')[0] : null,
             paidAt: null, paidAmount: null, notes: '',
@@ -9443,6 +10292,9 @@ Motivo de cancelación (opcional):`);
             if (genInv) {
                 genInv.status = 'enviada';
                 genInv.sentAt = new Date().toLocaleDateString('en-CA');
+                if ((!genInv.items || genInv.items.length === 0) && window.currentPDFData?._services) {
+                    genInv.items = this.buildInvoiceItems(window.currentPDFData._services, client);
+                }
                 this._registerInvoiceFromPDF('enviada');
             } else {
                 // Crear registro en generadas
@@ -9456,6 +10308,7 @@ Motivo de cancelación (opcional):`);
                     endDate: endDate || '',
                     total: total || 0,
                     serviceCount: window.currentPDFData?.serviceCount || 0,
+                    items: this.buildInvoiceItems(window.currentPDFData?._services, client),
                     type: client.type || 'mensual',
                     status: 'enviada',
                     sentAt: new Date().toLocaleDateString('en-CA'),
@@ -9551,6 +10404,7 @@ Motivo de cancelación (opcional):`);
                 endDate: endDate || '',
                 serviceCount: window.currentPDFData?.serviceCount || 0,
                 total: window.currentPDFData?.total || 0,
+                items: this.buildInvoiceItems(window.currentPDFData?._services, cli),
                 status: 'pendiente',
                 sentAt: null,
                 paidAt: null,
@@ -13105,9 +13959,6 @@ document.addEventListener('click', function(e) {
                     <button id="btnGeneratePDF" onclick="app.showPDFPreview()" class="btn" style="background: #1A4FCC; color: white; padding: 8px 15px; font-size: 0.9rem;">
                         👁️ Vista Previa
                     </button>
-                    <button onclick="app.generateInvoice()" class="btn" style="background: #27ae60; color: white; padding: 8px 15px; font-size: 0.9rem; font-weight: bold;">
-                        📄 Generar PDF
-                    </button>
                 </div>
             </div>
         </div>
@@ -13119,6 +13970,9 @@ document.addEventListener('click', function(e) {
             </button>
             <button id="tabConfig" onclick="app.switchInvoiceTab('config')" style="flex: 1; padding: 8px; border: none; background: #bdc3c7; color: white; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; font-size: 0.9rem;">
                 ⚙️ Configuración
+            </button>
+            <button id="tabManual" onclick="app.switchInvoiceTab('manual')" style="flex: 1; padding: 8px; border: none; background: #bdc3c7; color: white; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; font-size: 0.9rem;">
+                🧾 Manual
             </button>
         </div>
         
@@ -13230,6 +14084,67 @@ document.addEventListener('click', function(e) {
         
         </div>
         
+        <!-- TAB FACTURA MANUAL -->
+        <div id="invoiceTabManual" style="display: none; gap: 12px;">
+            <div style="background:#fff8e1;border-left:4px solid #f59e0b;padding:10px 14px;border-radius:8px;font-size:0.85rem;color:#7a5b00;">
+                🧾 Esta factura es <strong>independiente del calendario</strong> — escribe tú mismo las líneas (fecha, descripción, precio). No busca ni modifica servicios programados.
+            </div>
+            <div>
+                <label style="font-weight: bold; display: block; margin-bottom: 5px; font-size: 0.9rem;">Cliente:</label>
+                <select id="manualInvClient" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem;">
+                    <option value="">-- Selecciona Cliente --</option>
+                </select>
+            </div>
+            <div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                    <label style="font-weight: bold; font-size: 0.9rem;">Líneas de la factura:</label>
+                    <button type="button" onclick="app.addManualInvoiceItem()" class="btn" style="background:#27ae60;color:white;padding:4px 12px;font-size:0.8rem;">+ Agregar línea</button>
+                </div>
+                <div id="manualInvItemsList"></div>
+            </div>
+            <div>
+                <label style="font-weight: bold; display: block; margin-bottom: 5px;">Fecha Límite de Pago:</label>
+                <input type="date" id="manualInvPaymentDue" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #27ae60;">
+                <label style="display: flex; align-items: center; cursor: pointer; margin-bottom: 10px;">
+                    <input type="checkbox" id="manualInvApplyTax" onchange="app.toggleManualTaxField()" style="margin-right: 10px; width: 18px; height: 18px;">
+                    <span style="font-weight: bold;">💵 Aplicar Impuestos (IVA, Tax, etc.)</span>
+                </label>
+                <div id="manualTaxFieldContainer" style="display: none; margin-left: 28px;">
+                    <label style="font-weight: bold; display: block; margin-bottom: 5px;">Porcentaje de Impuesto:</label>
+                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center;">
+                        <input type="number" id="manualInvTaxRate" value="8.25" min="0" max="100" step="0.01" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <span style="font-weight: bold; font-size: 1.2rem;">%</span>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <label style="font-weight: bold; display: block; margin-bottom: 10px;">Plantilla:</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px;">
+                    <label style="cursor: pointer; border: 2px solid #ddd; padding: 15px; border-radius: 8px; text-align: center;">
+                        <input type="radio" name="manualInvoiceTemplate" value="modern" checked style="margin-bottom: 8px;">
+                        <div style="font-weight: bold;">📄 Moderna</div>
+                    </label>
+                    <label style="cursor: pointer; border: 2px solid #ddd; padding: 15px; border-radius: 8px; text-align: center;">
+                        <input type="radio" name="manualInvoiceTemplate" value="classic" style="margin-bottom: 8px;">
+                        <div style="font-weight: bold;">📋 Clásica</div>
+                    </label>
+                    <label style="cursor: pointer; border: 2px solid #ddd; padding: 15px; border-radius: 8px; text-align: center;">
+                        <input type="radio" name="manualInvoiceTemplate" value="colorful" style="margin-bottom: 8px;">
+                        <div style="font-weight: bold;">🎨 Colorida</div>
+                    </label>
+                    <label style="cursor: pointer; border: 2px solid #ddd; padding: 15px; border-radius: 8px; text-align: center; background: linear-gradient(135deg,#e8f5e9,#f1f8e9); border-color: #4caf50;">
+                        <input type="radio" name="manualInvoiceTemplate" value="anas" style="margin-bottom: 8px;">
+                        <div style="font-weight: bold;">✨ Brazos Cleaning</div>
+                    </label>
+                </div>
+            </div>
+            <button id="btnManualPreview" onclick="app.showManualInvoicePreview()" class="btn" style="background: #1A4FCC; color: white; padding: 12px; font-size: 1rem; font-weight: bold;">
+                👁️ Vista Previa
+            </button>
+        </div>
+
         <!-- TAB CONFIGURACIÓN -->
         <div id="invoiceTabConfig" style="display: none;">
 
