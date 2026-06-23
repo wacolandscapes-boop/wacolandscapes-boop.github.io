@@ -14996,5 +14996,16 @@ document.addEventListener('click', function(e) {
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
     v 06/20/2026 10:51 AM CT
 </div>
+<script>
+(function(){
+    try {
+        const d = new Date(document.lastModified);
+        const dateStr = d.toLocaleDateString('en-US', {month:'2-digit', day:'2-digit', year:'numeric'});
+        const timeStr = d.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:true});
+        const el = document.getElementById('versionStamp');
+        if (el) el.textContent = 'v ' + dateStr + ' ' + timeStr + ' CT';
+    } catch(e) { console.warn('No se pudo actualizar el version stamp', e); }
+})();
+</script>
 </body>
 </html>
