@@ -3101,7 +3101,7 @@ class Scheduler {
         if (props.length > 1 && wrap && propSel) {
             propSel.innerHTML = props.map(p => {
                 const hp = p.propId && p.propId.trim() && p.propId.trim().toLowerCase() !== p.name.trim().toLowerCase();
-                const propLabel = hp ? (p.propId.length > 28 ? p.address||p.propId.substring(0,25)+'…' : p.propId) : (p.address||p.name);
+                const propLabel = hp ? (p.propId.length > 28 ? p.propId.substring(0,25)+'…' : p.propId) : (p.address||p.name);
                 return `<option value="${p.id}">${propLabel}${p.city ? ' · ' + p.city : ''}</option>`;
             }).join('');
             wrap.style.display = 'block';
@@ -7540,24 +7540,45 @@ Motivo de cancelación (opcional):`);
 
                 if(isMulti) {
                     // Para multi-propiedad: actualizar datos base y agregar/quitar propiedades
-                    const existingProps = this.clis.filter(c => c.name === this.clis[idx].name &&
+                    const mainCli = this.clis[idx];
+                    const existingProps = this.clis.filter(c => c.name === mainCli.name &&
                         (c.type==='airbnb'||c.type==='construccion'));
+                    const wasMainAlreadyMulti = existingProps.includes(mainCli);
                     const existingPropIds = existingProps.map(c => c.propId);
                     const fieldProps = this.getPropsFromFields();
 
-                    // Actualizar datos base en todos los registros existentes
-                    existingProps.forEach(c => {
-                        // Precio individual por propiedad
-                        const fp = fieldProps.find(p => p.propId === c.propId);
-                        if (fp) c.price = fp.price || price;
+                    const applyCommon = (c) => {
                         c.name = name; c.tel = tel; c.email = email;
                         c.address = address; c.city = city; c.zip = zip;
                         c.paymentTerms = payTerms;
                         c.type = type; c.serviceType = serviceType;
                         c.billingPeriod = billingPeriod; c.invoicingType = invoicingType;
+                    };
+
+                    // Actualizar datos base en todos los registros que YA eran multipropiedad
+                    existingProps.forEach(c => {
+                        // Precio individual por propiedad
+                        const fp = fieldProps.find(p => p.propId === c.propId);
+                        if (fp) c.price = fp.price || price;
+                        applyCommon(c);
                     });
 
-                    // Agregar propiedades nuevas
+                    // Primera vez que este cliente se convierte a multipropiedad: el registro
+                    // que se está editando (mainCli) NUNCA debe quedar huérfano ni mostrarse
+                    // como una "propiedad" usando su dirección general — lo absorbemos como
+                    // la primera propiedad real, conservando su mismo ID (para no romper
+                    // servicios ya programados que apunten a este cliente).
+                    if (!wasMainAlreadyMulti) {
+                        const leftoverField = fieldProps.find(fp => !existingPropIds.includes(fp.propId)) || fieldProps[0];
+                        if (leftoverField) {
+                            mainCli.propId = leftoverField.propId;
+                            mainCli.price = leftoverField.price || price;
+                            existingPropIds.push(leftoverField.propId);
+                        }
+                        applyCommon(mainCli);
+                    }
+
+                    // Agregar propiedades genuinamente nuevas (que no correspondan a ningún registro existente)
                     const fieldPropIds = fieldProps.map(p => p.propId);
                     fieldProps.forEach((fp, i) => {
                         if(!existingPropIds.includes(fp.propId) && fp.propId) {
@@ -7569,8 +7590,9 @@ Motivo de cancelación (opcional):`);
                         }
                     });
 
-                    // Eliminar propiedades removidas en el formulario
+                    // Eliminar propiedades removidas en el formulario, pero nunca el registro principal
                     this.clis = this.clis.filter(c => {
+                        if(c.id === mainCli.id) return true;
                         if(c.name !== name) return true;
                         if(c.type!=='airbnb'&&c.type!=='construccion') return true;
                         return fieldPropIds.includes(c.propId);
