@@ -13674,8 +13674,68 @@ Motivo de cancelación (opcional):`);
         }
         const directPay = directHrs * rate;
 
+        // Calcular totales generales (igual que en pantalla) para la página de resumen impresa
+        const otRate = rate * 1.5;
+        const totalEmpPay = serviciosData.reduce((sum, s) => sum + s.pagoEmp, 0);
+        const hrsFromPct = rate > 0 ? totalEmpPay / rate : 0;
+        const totalHrsCalc = hrsFromPct + directHrs;
+        const regularHrsCalc = Math.min(totalHrsCalc, 40);
+        const otHrsCalc = Math.max(0, totalHrsCalc - 40);
+        let regularPayCalc, otPayCalc;
+        if (otHrsCalc > 0) {
+            regularPayCalc = regularHrsCalc * rate;
+            otPayCalc = otHrsCalc * otRate;
+        } else {
+            regularPayCalc = totalEmpPay + directPay;
+            otPayCalc = 0;
+        }
+        const totalGeneral = regularPayCalc + otPayCalc + bonus;
+        const fmt3 = n => '$' + n.toFixed(2);
+
+        const resumenHTML = `
+            <h1 style="color:#7c3aed;">📊 Resumen de la Semana</h1>
+            <h3 style="color:#555;font-weight:normal;">Semana: ${fmt2(mon)} — ${fmt2(sun)}</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+                <div style="background:#f9fafb;padding:16px;border-radius:8px;border:1px solid #e5e7eb;">
+                    <div style="color:#6b7280;font-size:0.8rem;margin-bottom:8px;text-transform:uppercase;">Resumen Semana</div>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb;">
+                        <span>Pago por empleado (${Math.round(pct*100)}%)</span><span style="color:#16a34a;font-weight:600;">${fmt3(totalEmpPay)}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb;">
+                        <span>Horas directas (${directHrs.toFixed(2)} hrs × ${fmt3(rate)})</span><span style="color:#16a34a;font-weight:600;">${fmt3(directPay)}</span>
+                    </div>
+                    ${otHrsCalc > 0 ? `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb;">
+                        <span>Overtime (${otHrsCalc.toFixed(2)} hrs × ${fmt3(otRate)})</span><span style="color:#d97706;font-weight:600;">${fmt3(otPayCalc)}</span>
+                    </div>` : ''}
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb;">
+                        <span>Bonus</span><span style="color:#16a34a;font-weight:600;">${fmt3(bonus)}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:700;font-size:1.1rem;">
+                        <span style="color:#7c3aed;">TOTAL A PAGAR</span><span style="color:#7c3aed;">${fmt3(totalGeneral)}</span>
+                    </div>
+                </div>
+                <div style="background:#f9fafb;padding:16px;border-radius:8px;border:1px solid #e5e7eb;">
+                    <div style="color:#6b7280;font-size:0.8rem;margin-bottom:8px;text-transform:uppercase;">Horas para QuickBooks</div>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb;">
+                        <span>Horas regulares</span><span style="color:#16a34a;font-weight:600;">${regularHrsCalc.toFixed(2)}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb;">
+                        <span>Horas overtime</span><span style="color:#d97706;font-weight:600;">${otHrsCalc.toFixed(2)}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e7eb;">
+                        <span>Total horas</span><span style="font-weight:600;">${totalHrsCalc.toFixed(2)}</span>
+                    </div>
+                    <div style="background:#ede9fe;border-radius:8px;padding:12px;margin-top:10px;border:1px solid #7c3aed;">
+                        <div style="font-size:0.75rem;color:#6d28d9;margin-bottom:4px;">INGRESAR EN QUICKBOOKS PAYROLL:</div>
+                        <div style="font-size:1.1rem;font-weight:700;color:#5b21b6;">Reg: ${regularHrsCalc.toFixed(2)} hrs &nbsp;|&nbsp; OT: ${otHrsCalc.toFixed(2)} hrs</div>
+                        <div style="font-size:1rem;color:#16a34a;font-weight:600;margin-top:4px;">Total: ${fmt3(totalGeneral)}</div>
+                    </div>
+                </div>
+            </div>
+            <div style="page-break-after:always;"></div>`;
+
         // Generar una sola ventana con todos los comprobantes
-        let allHTML = '';
+        let allHTML = resumenHTML;
         selectedIds.forEach((empId, idx) => {
             const emp = this.emps.find(e => String(e.id) === String(empId));
             const empName = emp ? emp.name : 'Empleado';
@@ -13784,6 +13844,14 @@ Motivo de cancelación (opcional):`);
         const directPay = directHrs * rate;
         const grandTotal = totalPago + directPay + bonus;
 
+        // Horas para QuickBooks (mismo cálculo que en pantalla)
+        const otRate = rate * 1.5;
+        const hrsFromPct = rate > 0 ? totalPago / rate : 0;
+        const totalHrsCalc = hrsFromPct + directHrs;
+        const regularHrsCalc = Math.min(totalHrsCalc, 40);
+        const otHrsCalc = Math.max(0, totalHrsCalc - 40);
+        const otPayCalc = otHrsCalc > 0 ? otHrsCalc * otRate : 0;
+
         const win = window.open('','_blank');
         win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
         <title>Comprobante ${empName} ${monStr}</title>
@@ -13818,8 +13886,20 @@ Motivo de cancelación (opcional):`);
         </table>
         <div class="summary">
             ${directHrs > 0 ? `<div class="summary-row"><span>Horas directas (${directHrs}h × $${rate})</span><span>$${directPay.toFixed(2)}</span></div>` : ''}
+            ${otHrsCalc > 0 ? `<div class="summary-row"><span>Overtime (${otHrsCalc.toFixed(2)}h × $${otRate.toFixed(2)})</span><span>$${otPayCalc.toFixed(2)}</span></div>` : ''}
             ${bonus > 0 ? `<div class="summary-row"><span>Bonus</span><span>$${bonus.toFixed(2)}</span></div>` : ''}
             <div class="grand-total">TOTAL: $${grandTotal.toFixed(2)}</div>
+        </div>
+        <div style="background:#f9fafb;padding:16px;border-radius:8px;margin-top:16px;border:1px solid #e5e7eb;">
+            <div style="color:#6b7280;font-size:0.8rem;margin-bottom:8px;text-transform:uppercase;">Horas para QuickBooks</div>
+            <div class="summary-row"><span>Horas regulares</span><span style="font-weight:600;">${regularHrsCalc.toFixed(2)}</span></div>
+            <div class="summary-row"><span>Horas overtime</span><span style="font-weight:600;">${otHrsCalc.toFixed(2)}</span></div>
+            <div class="summary-row" style="border-bottom:none;"><span>Total horas</span><span style="font-weight:600;">${totalHrsCalc.toFixed(2)}</span></div>
+            <div style="background:#ede9fe;border-radius:8px;padding:12px;margin-top:8px;border:1px solid #7c3aed;">
+                <div style="font-size:0.75rem;color:#6d28d9;margin-bottom:4px;">INGRESAR EN QUICKBOOKS PAYROLL:</div>
+                <div style="font-size:1.1rem;font-weight:700;color:#5b21b6;">Reg: ${regularHrsCalc.toFixed(2)} hrs &nbsp;|&nbsp; OT: ${otHrsCalc.toFixed(2)} hrs</div>
+                <div style="font-size:1rem;color:#16a34a;font-weight:600;margin-top:4px;">Total: $${grandTotal.toFixed(2)}</div>
+            </div>
         </div>
         <button onclick="window.print()" style="margin-top:20px;padding:10px 24px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:1rem;">🖨️ Imprimir</button>
         
