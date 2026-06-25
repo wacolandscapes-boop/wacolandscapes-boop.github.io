@@ -9494,6 +9494,11 @@ Motivo de cancelación (opcional):`);
     }
     
     autoSetPaymentTerms() {
+        // Si el usuario cambia manualmente de cliente dentro del modal (sin cerrarlo),
+        // se asume que ya no quiere editar la factura original — se limpia el número
+        // para no aplicarlo por error a una factura nueva de otro cliente.
+        const hiddenNum = document.getElementById('editingInvoiceNumber');
+        if (hiddenNum) hiddenNum.value = '';
         const clientId = document.getElementById('invoiceClient').value;
         if (!clientId) return;
         const cli = this.clis.find(c => String(c.id) === String(clientId));
@@ -10586,8 +10591,9 @@ Motivo de cancelación (opcional):`);
         const editingNum = document.getElementById('editingInvoiceNumber')?.value;
         const isEditingExisting = !!editingNum;
         let invoiceNumber = editingNum ? parseInt(editingNum) : (this._editingInvoiceNumber || (parseInt(localStorage.getItem('lastInvoiceNumber') || '0') + 1));
-        this._editingInvoiceNumber = null;
-        if (document.getElementById('editingInvoiceNumber')) document.getElementById('editingInvoiceNumber').value = '';
+        // NOTA: el campo editingInvoiceNumber ya NO se borra aquí — se borra al cerrar el modal
+        // (closeInvoice). Borrarlo aquí causaba que la 2da Vista Previa de una factura en edición
+        // generara un número NUEVO en vez de reutilizar el original.
         // El número mínimo configurado SOLO aplica a facturas NUEVAS, no al editar/regenerar una existente
         if (!isEditingExisting) {
             const startNumber = config.invoiceStartNumber || 1;
@@ -11185,8 +11191,7 @@ Motivo de cancelación (opcional):`);
         // Calcular próximo número (SIN guardarlo aún - se guarda al final)
         const editingNum2 = document.getElementById('editingInvoiceNumber')?.value;
         let invoiceNumber = editingNum2 ? parseInt(editingNum2) : (this._editingInvoiceNumber || (parseInt(localStorage.getItem('lastInvoiceNumber') || '0') + 1));
-        this._editingInvoiceNumber = null;
-        if (document.getElementById('editingInvoiceNumber')) document.getElementById('editingInvoiceNumber').value = '';
+        // NOTA: editingInvoiceNumber ya no se borra aquí — se borra al cerrar el modal (closeInvoice)
         const startNumber = config.invoiceStartNumber || 1;
         if (invoiceNumber < startNumber) invoiceNumber = startNumber;
         const invoiceNumberFormatted = invoiceNumber.toString().padStart(4, '0');
