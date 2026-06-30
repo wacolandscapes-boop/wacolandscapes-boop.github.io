@@ -1686,6 +1686,7 @@ class Scheduler {
         this.CLIENT_ID = '1032764332702-uvnqg0ccaer5gp2hr12gmniqe38ria1t.apps.googleusercontent.com';
         this.SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
         this.FOLDER_NAME = 'BrazosCleaningApp';
+        this.STRIPE_WORKER_URL = 'https://brazos-stripe-worker.ranulfocast.workers.dev';
         // Convertir grupos (objeto) a groups (array) para el filtro
         this.groups = Object.keys(this.grupos).map((name, idx) => ({
             id: idx + 1,
@@ -5051,6 +5052,7 @@ class Scheduler {
                     ${!isCancelled ? `
                         <div style="display:flex;gap:4px;flex-wrap:wrap;">
                             <button onclick="app.openCobroDetalle('${inv.id}')" class="btn" style="background: #16a085; color: white; padding: 5px 8px; font-size: 0.75rem;">💰 Pago</button>
+                            ${inv.status !== 'pagada' ? `<button id="btnCobrarTarjeta_${inv.id}" onclick="app.cobrarConTarjeta('${inv.id}')" class="btn" style="background: #635bff; color: white; padding: 5px 8px; font-size: 0.75rem;">💳 Cobrar</button>` : ''}
                             <button onclick="app.viewInvoiceItems('${inv.id}')" class="btn" style="background: #8e44ad; color: white; padding: 5px 8px; font-size: 0.75rem;">🔍 Detalle</button>
                             <button onclick="app.openInvoiceForEdit('${inv.id}')" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
                             <button onclick="app.editInvoiceNumber('${inv.id}', ${inv.invoiceNumber})" class="btn" style="background: #6c757d; color: white; padding: 5px 8px; font-size: 0.75rem;"># Nº</button>
@@ -5180,10 +5182,64 @@ class Scheduler {
                 <td style="padding:8px; text-align:center; font-size:0.8rem; color:#555;">${inv.paidAmount ? '$'+parseFloat(inv.paidAmount).toLocaleString('en-US',{minimumFractionDigits:2}) : paidFmt}</td>
                 <td style="padding:8px; text-align:center;">
                     <button onclick="app.openCobroDetalle('${inv.id}')" style="background:#16a085; color:white; border:none; border-radius:5px; padding:5px 10px; cursor:pointer; font-size:0.8rem;">✏️ Actualizar</button>
+                    ${inv.status !== 'pagada' ? `<button id="btnCobrarTarjeta_${inv.id}" onclick="app.cobrarConTarjeta('${inv.id}')" style="background:#635bff; color:white; border:none; border-radius:5px; padding:5px 10px; cursor:pointer; font-size:0.8rem; margin-top:3px;">💳 Cobrar</button>` : ''}
                     ${inv.clientEmail ? `<button onclick="app.sendPendingInvoiceByGmail('${inv.id}')" style="background:#ea4335; color:white; border:none; border-radius:5px; padding:5px 10px; cursor:pointer; font-size:0.8rem; margin-top:3px;">📧 Gmail</button>` : '<small style="color:#999;">Sin email</small>'}
                 </td>
             </tr>`;
         }).join('');
+    }
+
+    async cobrarConTarjeta(id) {
+        const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(id));
+        if (!inv) { alert('No se encontró la factura.'); return; }
+
+        const totalPaid = (inv.payments||[]).reduce((s,p) => s + parseFloat(p.amount||0), 0);
+        const balance = (inv.total||0) - totalPaid;
+        if (balance <= 0) { alert('Esta factura ya está saldada, no hay balance pendiente para cobrar.'); return; }
+
+        const monto = prompt(`Monto a cobrar con tarjeta para #${inv.invoiceNumber?.toString().padStart(4,'0')} — ${inv.clientName}\n(Balance pendiente: $${balance.toFixed(2)})`, balance.toFixed(2));
+        if (!monto) return;
+        const amount = parseFloat(monto);
+        if (isNaN(amount) || amount <= 0) { alert('Monto inválido.'); return; }
+
+        const btn = document.getElementById(`btnCobrarTarjeta_${id}`);
+        const originalText = btn ? btn.innerHTML : null;
+        if (btn) { btn.innerHTML = '⏳ Generando...'; btn.disabled = true; }
+
+        try {
+            const res = await fetch(`${this.STRIPE_WORKER_URL}/create-payment-link`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    invoiceId: inv.id,
+                    invoiceNumber: inv.invoiceNumber,
+                    clientName: inv.clientName,
+                    clientEmail: inv.clientEmail || '',
+                    amount: amount,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.url) {
+                throw new Error(data.error || 'No se pudo generar el link de cobro.');
+            }
+
+            // Copiar al portapapeles automáticamente para que sea fácil mandarlo
+            try { await navigator.clipboard.writeText(data.url); } catch(e) {}
+
+            const wa = inv.clientPhone ? `https://wa.me/${inv.clientPhone.replace(/\D/g,'')}?text=${encodeURIComponent('Hola '+inv.clientName+', aquí está el link para pagar su factura #'+inv.invoiceNumber+' con tarjeta: '+data.url)}` : null;
+
+            const mensaje = `✅ Link de cobro generado y copiado al portapapeles:\n\n${data.url}\n\nPégalo en un mensaje o correo para mandárselo al cliente.\n\nNota: en cuanto el cliente pague, la factura se va a marcar como pagada automáticamente (puede tardar unos minutos).`;
+            alert(mensaje);
+
+            if (wa && confirm('¿Quieres abrir WhatsApp para enviárselo directo al cliente?')) {
+                window.open(wa, '_blank');
+            }
+        } catch (err) {
+            console.error('Error generando link de cobro:', err);
+            alert('Error generando el link de cobro: ' + err.message);
+        } finally {
+            if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
+        }
     }
 
     openCobroDetalle(id) {
@@ -13011,6 +13067,40 @@ Motivo de cancelación (opcional):`);
         }
     }
 
+    // ── MERGE INTELIGENTE (Opción A: unión por id, gana el lado con timestamp global más reciente) ──
+    mergeArraysById(winnerArr = [], loserArr = [], idKeys = ['id']) {
+        const getKey = (item) => {
+            for (const k of idKeys) {
+                if (item && item[k] !== undefined && item[k] !== null && item[k] !== '') return k + ':' + String(item[k]);
+            }
+            return null; // sin id reconocible -> se conserva igual, sin deduplicar
+        };
+        const winnerKeys = new Set(winnerArr.map(getKey).filter(k => k !== null));
+        const merged = winnerArr.slice();
+        loserArr.forEach(item => {
+            const key = getKey(item);
+            if (key === null || !winnerKeys.has(key)) merged.push(item);
+        });
+        return merged;
+    }
+
+    mergeGrupos(winnerGrupos = {}, loserGrupos = {}) {
+        const merged = {};
+        const allNames = new Set([...Object.keys(winnerGrupos || {}), ...Object.keys(loserGrupos || {})]);
+        allNames.forEach(name => {
+            const winnerList = (winnerGrupos && winnerGrupos[name]) || [];
+            const loserList  = (loserGrupos  && loserGrupos[name])  || [];
+            if (winnerGrupos && winnerGrupos.hasOwnProperty(name)) {
+                const base = winnerList.slice();
+                loserList.forEach(id => { if (id && !base.includes(id)) base.push(id); });
+                merged[name] = base;
+            } else {
+                merged[name] = loserList;
+            }
+        });
+        return merged;
+    }
+
     async driveSyncNow() {
         if (!this.driveConnected || !this.driveFolderId) return;
         if (this.isSyncing) { this.pendingSync = true; return; }
@@ -13196,34 +13286,97 @@ Motivo de cancelación (opcional):`);
 
             console.log('🕐 Drive time:', data.lastSavedAt, '| Local time:', localSavedAt);
 
-            // Si no hay datos locales, siempre descargar de Drive
+            // Si no hay datos locales, siempre descargar de Drive tal cual (no hay nada que fusionar)
             const localIsEmpty = !localSavedAt || this.emps.length === 0;
 
-            if (!localIsEmpty && (driveTime <= localTime || this.localDirty)) {
-                // Local más reciente o hay cambios sin subir — subir en lugar de descargar
-                console.log('📤 Local más reciente que Drive (o localDirty), subiendo...');
-                this.driveSyncNow();
+            if (localIsEmpty) {
+                console.log('📥 Local vacío — descargando de Drive sin fusión...');
+                if (data.emps)             { this.emps = data.emps; localStorage.setItem('v35_emps', JSON.stringify(this.emps)); }
+                if (data.clis)             { this.clis = data.clis; localStorage.setItem('v35_clis', JSON.stringify(this.clis)); }
+                if (data.servs)            { this.servs = data.servs; localStorage.setItem('v35_servs', JSON.stringify(this.servs)); }
+                if (data.grupos)           { this.grupos = data.grupos; localStorage.setItem('v35_grupos', JSON.stringify(this.grupos)); }
+                if (data.gastos)           { this.gastos = data.gastos; localStorage.setItem('v35_gastos', JSON.stringify(this.gastos)); }
+                if (data.gastosCategories) { this.gastosCategories = data.gastosCategories; localStorage.setItem('v35_gastosCategories', JSON.stringify(this.gastosCategories)); }
+                if (data.generatedInvoices){ this.generatedInvoices = data.generatedInvoices; localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices)); }
+                if (data.pendingInvoices)  { this.pendingInvoices = data.pendingInvoices; localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices)); }
+                if (data.nominaTotales)    { this.nominaTotales = data.nominaTotales; localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales)); }
+                if (data.companyConfig)    localStorage.setItem('companyConfig', data.companyConfig);
+                if (data.companyLogo)      localStorage.setItem('companyLogo', data.companyLogo);
+                if (data.customColors)     localStorage.setItem('customColors', data.customColors);
+                this.refreshSels();
+                this.render();
                 return;
             }
 
-            // Drive más reciente o local vacío — descargar
-            console.log('📥 Descargando de Drive...');
-            // Cargar datos de Drive
-            if (data.emps)             { this.emps = data.emps; localStorage.setItem('v35_emps', JSON.stringify(this.emps)); }
-            if (data.clis)             { this.clis = data.clis; localStorage.setItem('v35_clis', JSON.stringify(this.clis)); }
-            if (data.servs)            { this.servs = data.servs; localStorage.setItem('v35_servs', JSON.stringify(this.servs)); }
-            if (data.grupos)           { this.grupos = data.grupos; localStorage.setItem('v35_grupos', JSON.stringify(this.grupos)); }
-            if (data.gastos)           { this.gastos = data.gastos; localStorage.setItem('v35_gastos', JSON.stringify(this.gastos)); }
-            if (data.gastosCategories) { this.gastosCategories = data.gastosCategories; localStorage.setItem('v35_gastosCategories', JSON.stringify(this.gastosCategories)); }
-            if (data.generatedInvoices){ this.generatedInvoices = data.generatedInvoices; localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices)); }
-            if (data.pendingInvoices)  { this.pendingInvoices = data.pendingInvoices; localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices)); }
-            if (data.nominaTotales)    { this.nominaTotales = data.nominaTotales; localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales)); }
-            if (data.companyConfig)    localStorage.setItem('companyConfig', data.companyConfig);
-            if (data.companyLogo)      localStorage.setItem('companyLogo', data.companyLogo);
-            if (data.customColors)     localStorage.setItem('customColors', data.customColors);
-            // Re-renderizar con datos nuevos
+            // ── MERGE INTELIGENTE (Opción A) ──
+            // En vez de "todo Drive" o "todo local", se fusionan los registros por id.
+            // El lado con el timestamp global más reciente (o localDirty) "gana" en caso de
+            // conflicto sobre el MISMO registro, pero los registros exclusivos del otro lado
+            // (creados ahí y no presentes en el ganador) NUNCA se pierden.
+            const localWins = (driveTime <= localTime || this.localDirty);
+            console.log(localWins
+                ? '🔀 Local más reciente — fusionando (gana local en conflictos sobre el mismo registro)...'
+                : '🔀 Drive más reciente — fusionando (gana Drive en conflictos sobre el mismo registro)...');
+
+            const localSide = {
+                emps: this.emps, clis: this.clis, servs: this.servs,
+                gastos: this.gastos || [], generatedInvoices: this.generatedInvoices || [],
+                pendingInvoices: this.pendingInvoices || [],
+            };
+            const driveSide = {
+                emps: data.emps || [], clis: data.clis || [], servs: data.servs || [],
+                gastos: data.gastos || [], generatedInvoices: data.generatedInvoices || [],
+                pendingInvoices: data.pendingInvoices || [],
+            };
+            const winner = localWins ? localSide : driveSide;
+            const loser  = localWins ? driveSide : localSide;
+
+            this.emps              = this.mergeArraysById(winner.emps, loser.emps);
+            this.clis               = this.mergeArraysById(winner.clis, loser.clis);
+            this.servs               = this.mergeArraysById(winner.servs, loser.servs);
+            this.gastos              = this.mergeArraysById(winner.gastos, loser.gastos);
+            this.generatedInvoices   = this.mergeArraysById(winner.generatedInvoices, loser.generatedInvoices);
+            this.pendingInvoices     = this.mergeArraysById(winner.pendingInvoices, loser.pendingInvoices);
+
+            this.grupos = this.mergeGrupos(
+                localWins ? this.grupos : (data.grupos || {}),
+                localWins ? (data.grupos || {}) : this.grupos
+            );
+
+            const winnerNomina = localWins ? (this.nominaTotales || []) : (data.nominaTotales || []);
+            const loserNomina  = localWins ? (data.nominaTotales || []) : (this.nominaTotales || []);
+            this.nominaTotales = this.mergeArraysById(winnerNomina, loserNomina, ['id', 'periodo', 'weekStart']);
+
+            const winnerCats = localWins ? (this.gastosCategories || {}) : (data.gastosCategories || {});
+            const loserCats  = localWins ? (data.gastosCategories || {}) : (this.gastosCategories || {});
+            this.gastosCategories = Object.assign({}, loserCats, winnerCats);
+
+            // Configuración simple (no se fusiona campo por campo): solo se toma del lado que gana
+            if (!localWins) {
+                if (data.companyConfig) localStorage.setItem('companyConfig', data.companyConfig);
+                if (data.companyLogo)   localStorage.setItem('companyLogo', data.companyLogo);
+                if (data.customColors)  localStorage.setItem('customColors', data.customColors);
+            }
+
+            // Guardar todo lo fusionado en localStorage
+            localStorage.setItem('v35_emps', JSON.stringify(this.emps));
+            localStorage.setItem('v35_clis', JSON.stringify(this.clis));
+            localStorage.setItem('v35_servs', JSON.stringify(this.servs));
+            localStorage.setItem('v35_grupos', JSON.stringify(this.grupos));
+            localStorage.setItem('v35_gastos', JSON.stringify(this.gastos));
+            localStorage.setItem('v35_gastosCategories', JSON.stringify(this.gastosCategories));
+            localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices));
+            localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices));
+            localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales));
+
             this.refreshSels();
             this.render();
+
+            // Subir el resultado fusionado para que ambos lados (Drive y este dispositivo)
+            // queden con la misma información unificada, sin importar quién "ganó".
+            this.localDirty = false;
+            console.log('📤 Subiendo resultado fusionado a Drive...');
+            await this.driveSyncNow();
         } catch(err) {
             if (!err.message.includes('__first_time__')) {
                 console.warn('driveDownloadData error:', err);
