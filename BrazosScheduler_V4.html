@@ -9677,16 +9677,63 @@ Motivo de cancelación (opcional):`);
     }
 
     populateManualInvClientSelect() {
-        const select = document.getElementById('manualInvClient');
-        const currentValue = select.value;
-        select.innerHTML = '<option value="">-- Selecciona Cliente --</option>';
-        this.clis.forEach(c => {
-            const option = document.createElement('option');
-            option.value = c.id;
-            option.textContent = c.name + (c.propId && c.propId !== c.name ? ' — ' + c.propId : '');
-            select.appendChild(option);
-        });
-        if (currentValue) select.value = currentValue;
+        // Refresca el buscador inteligente — no hace nada visual, solo limpia la selección si el cliente ya no existe
+        const hiddenInput = document.getElementById('manualInvClient');
+        const searchInput = document.getElementById('manualInvClientSearch');
+        if (hiddenInput && !hiddenInput.value) {
+            if (searchInput) searchInput.value = '';
+        }
+        // Cerrar el dropdown si estaba abierto
+        const dd = document.getElementById('manualInvClientDropdown');
+        if (dd) dd.style.display = 'none';
+    }
+
+    filterManualInvClients(query) {
+        const dd = document.getElementById('manualInvClientDropdown');
+        const hiddenInput = document.getElementById('manualInvClient');
+        if (!dd || !hiddenInput) return;
+
+        const q = (query || '').toLowerCase().trim();
+        // Filtrar clientes — si no hay query, mostrar todos
+        const matches = this.clis.filter(c =>
+            !q || c.name.toLowerCase().includes(q) ||
+            (c.propId && c.propId.toLowerCase().includes(q)) ||
+            (c.address && c.address.toLowerCase().includes(q))
+        ).slice(0, 30);
+
+        if (matches.length === 0) {
+            dd.innerHTML = '<div style="padding:10px; color:#999; font-size:0.85rem;">No se encontraron clientes</div>';
+        } else {
+            dd.innerHTML = matches.map(c => {
+                const label = c.name + (c.propId && c.propId !== c.name ? ' — ' + c.propId : '');
+                return `<div onclick="app.selectManualInvClient('${c.id}', '${label.replace(/'/g,"\\'")}')"
+                    style="padding:8px 12px; cursor:pointer; font-size:0.88rem; border-bottom:1px solid #f0f0f0;"
+                    onmouseover="this.style.background='#f0f7ff'" onmouseout="this.style.background='white'">
+                    ${label}
+                </div>`;
+            }).join('');
+        }
+        dd.style.display = 'block';
+
+        // Cerrar al hacer clic fuera
+        setTimeout(() => {
+            document.addEventListener('click', function closeDD(e) {
+                if (!e.target.closest('#manualInvClientDropdown') && e.target.id !== 'manualInvClientSearch') {
+                    dd.style.display = 'none';
+                    document.removeEventListener('click', closeDD);
+                }
+            });
+        }, 100);
+    }
+
+    selectManualInvClient(id, label) {
+        document.getElementById('manualInvClient').value = id;
+        document.getElementById('manualInvClientSearch').value = label;
+        document.getElementById('manualInvClientDropdown').style.display = 'none';
+        // Actualizar preview si ya hay items
+        if (document.getElementById('manualInvItemsList').children.length > 0) {
+            this.updateManualInvoiceTotals();
+        }
     }
 
     toggleManualTaxField() {
@@ -14337,9 +14384,14 @@ document.addEventListener('click', function(e) {
             </div>
             <div>
                 <label style="font-weight: bold; display: block; margin-bottom: 5px; font-size: 0.9rem;">Cliente:</label>
-                <select id="manualInvClient" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem;">
-                    <option value="">-- Selecciona Cliente --</option>
-                </select>
+                <input type="hidden" id="manualInvClient" value="">
+                <div style="position:relative;">
+                    <input type="text" id="manualInvClientSearch" placeholder="🔍 Buscar cliente..." autocomplete="off"
+                        style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:0.9rem;"
+                        oninput="app.filterManualInvClients(this.value)"
+                        onfocus="app.filterManualInvClients(this.value)">
+                    <div id="manualInvClientDropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:white; border:1px solid #ddd; border-radius:0 0 6px 6px; max-height:200px; overflow-y:auto; z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
+                </div>
             </div>
             <div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
