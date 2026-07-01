@@ -11130,7 +11130,7 @@ Motivo de cancelación (opcional):`);
             const noteYa = y_a + 50;
             doc.setDrawColor(44, 62, 80);
             doc.setFillColor(44, 62, 80);
-            doc.roundedRect(18, noteYa, 174, 20, 2, 2, 'FD');
+            doc.roundedRect(18, noteYa, 174, 38, 2, 2, 'FD');
             doc.setFontSize(8.5);
             doc.setFont(undefined, 'bold');
             doc.setTextColor(255, 255, 255);
@@ -11138,6 +11138,10 @@ Motivo de cancelación (opcional):`);
             doc.setTextColor(220, 220, 220);
             doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 23, noteYa + 12);
             doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 23, noteYa + 17);
+            doc.setTextColor(99, 202, 255);
+            doc.text('• Pay online with Credit/Debit Card:', 23, noteYa + 23);
+            doc.textWithLink('  Click here to pay securely with Stripe', 23, noteYa + 28,
+                { url: `https://brazos-stripe-worker.ranulfocast.workers.dev/pay-invoice?inv=${invoiceNumber}&client=${encodeURIComponent(client.name || '')}&amount=${(grandTotal_a || total).toFixed(2)}` });
             doc.setFont(undefined, 'normal');
 
             // Retornar sin ejecutar el bloque genérico
@@ -11277,9 +11281,10 @@ Motivo de cancelación (opcional):`);
         
         // Empujar el total hacia la parte inferior de la página
         const pageHeight = doc.internal.pageSize.getHeight();
-        const totalBlockHeight = (applyTax && taxRate > 0) ? 45 : 35;
-        const minY = pageHeight - totalBlockHeight - 28; // extra space for payment note
-        if (y < minY) y = minY;
+        const noteOffset = (applyTax && taxRate > 0) ? 44 : 37;
+        const totalNeeded = noteOffset + 38 + 5;
+        const minY = pageHeight - totalNeeded;
+        if (y > minY) { doc.addPage(); y = 20; }
 
         doc.setFillColor(44, 62, 80);
         doc.rect(20, y + 5, 170, applyTax && taxRate > 0 ? 22 : 12, 'F');
@@ -11316,10 +11321,10 @@ Motivo de cancelación (opcional):`);
         doc.text('Thank you for your business!', 105, y + (applyTax && taxRate > 0 ? 37 : 30), { align: 'center' });
         
         // ── PAYMENT OPTIONS NOTE ──
-        const noteY = y + (applyTax && taxRate > 0 ? 44 : 37);
+        const noteY = y + noteOffset;
         doc.setDrawColor(44, 62, 80);
         doc.setFillColor(44, 62, 80);
-        doc.roundedRect(20, noteY, 170, 22, 2, 2, 'FD');
+        doc.roundedRect(20, noteY, 170, 38, 2, 2, 'FD');
         doc.setFontSize(8);
         doc.setFont(undefined, 'bold');
         doc.setTextColor(255, 255, 255);
@@ -11327,6 +11332,10 @@ Motivo de cancelación (opcional):`);
         doc.setTextColor(220, 220, 220);
         doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 25, noteY + 12);
         doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 25, noteY + 17);
+        doc.setTextColor(99, 202, 255);
+        doc.text('• Pay online with Credit/Debit Card:', 25, noteY + 23);
+        doc.textWithLink('  Click here to pay securely with Stripe', 25, noteY + 28,
+            { url: `https://brazos-stripe-worker.ranulfocast.workers.dev/pay-invoice?inv=${invoiceNumber}&client=${encodeURIComponent(client.name || '')}&amount=${(typeof grandTotal !== 'undefined' ? grandTotal : total).toFixed(2)}` });
         doc.setFont(undefined, 'normal');
         
         // Retornar el PDF y el número de factura
@@ -11609,7 +11618,19 @@ Motivo de cancelación (opcional):`);
             doc.text('"Brazos Cleaning Services"', 20, y_b+22);
             doc.setFont(undefined,'normal');
             doc.setFont(undefined,'bold'); doc.text('• Mail to: P.O Box 7543, Waco, TX. 76714', 20, y_b+28); doc.setFont(undefined,'normal');
-            doc.text('  Waco, TX. 76714', 20, y_b+33);
+
+            // Link de pago con tarjeta — debajo del bloque de totales
+            const noteYb = y_b + 42;
+            doc.setDrawColor(44, 62, 80);
+            doc.setFillColor(44, 62, 80);
+            doc.roundedRect(18, noteYb, 174, 14, 2, 2, 'FD');
+            doc.setFontSize(8);
+            doc.setFont(undefined, 'bold');
+            doc.setTextColor(99, 202, 255);
+            doc.text('• Pay online with Credit/Debit Card:', 23, noteYb + 6);
+            doc.textWithLink('  Click here to pay securely with Stripe', 23, noteYb + 11,
+                { url: `https://brazos-stripe-worker.ranulfocast.workers.dev/pay-invoice?inv=${invoiceNumber}&client=${encodeURIComponent(client.name || '')}&amount=${(total_b + taxAmt_b).toFixed(2)}` });
+            doc.setFont(undefined, 'normal');
 
             // Thank you footer
             doc.setFont(undefined,'bold'); doc.setFontSize(10); doc.setTextColor(60,60,60);
