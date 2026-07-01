@@ -11639,6 +11639,28 @@ Motivo de cancelación (opcional):`);
             // Guardar número y descargar
             localStorage.setItem('lastInvoiceNumber', invoiceNumber.toString());
             const fname_b = `Factura_${client.name.replace(/\s+/g,'_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+
+            // ── PAYMENT OPTIONS NOTE (plantilla Anas) ──
+            const noteYb2 = y_b + 42;
+            const pageH_b = doc.internal.pageSize.getHeight();
+            if (noteYb2 + 38 > pageH_b) { doc.addPage(); }
+            const finalNoteY = noteYb2 + 38 > pageH_b ? 20 : noteYb2;
+            doc.setDrawColor(44, 62, 80);
+            doc.setFillColor(44, 62, 80);
+            doc.roundedRect(18, finalNoteY, 174, 38, 2, 2, 'FD');
+            doc.setFontSize(8);
+            doc.setFont(undefined, 'bold');
+            doc.setTextColor(255, 255, 255);
+            doc.text('PAYMENT OPTIONS:', 23, finalNoteY + 6);
+            doc.setTextColor(220, 220, 220);
+            doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 23, finalNoteY + 12);
+            doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 23, finalNoteY + 17);
+            doc.setTextColor(99, 202, 255);
+            doc.text('• Pay online with Credit/Debit Card:', 23, finalNoteY + 23);
+            doc.textWithLink('  Click here to pay securely with Stripe', 23, finalNoteY + 28,
+                { url: `https://brazos-stripe-worker.ranulfocast.workers.dev/pay-invoice?inv=${invoiceNumber}&client=${encodeURIComponent(client.name || '')}&amount=${(total_b + taxAmt_b).toFixed(2)}` });
+            doc.setFont(undefined, 'normal');
+
             doc.save(fname_b);
             alert('✅ Factura generada correctamente!');
             this.closeInvoice();
