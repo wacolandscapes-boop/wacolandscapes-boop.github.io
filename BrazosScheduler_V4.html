@@ -1214,6 +1214,14 @@
                             <option value="15" selected>Net 15 (15 días)</option>
                             <option value="30">Net 30 (30 días)</option>
                         </select>
+                        <div style="grid-column:span 2; background:#f0fff4; border:1px solid #27ae60; border-radius:6px; padding:8px; margin-top:6px;">
+                            <label style="font-size:0.8rem; font-weight:700; color:#27ae60; display:block; margin-bottom:4px;">💳 Cobro Automático con Tarjeta</label>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <input type="checkbox" id="cliAutoCharge" style="width:16px; height:16px; accent-color:#27ae60;">
+                                <label for="cliAutoCharge" style="font-size:0.8rem; color:#555;">Cliente autorizó cobro automático con tarjeta guardada</label>
+                            </div>
+                            <input type="text" id="cliStripeCustomerId" placeholder="Stripe Customer ID (se llena automáticamente)" style="margin-top:6px; width:100%; padding:4px 8px; border:1px solid #ddd; border-radius:4px; font-size:0.75rem; color:#888; background:#f9f9f9;">
+                        </div>
                     </div>
                     <div id="regenBlock" style="display:none; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:10px; margin-bottom:8px;">
                         <div style="font-size:0.8rem; font-weight:700; color:#856404; margin-bottom:6px;">🔄 Regenerar serie al guardar</div>
@@ -5045,7 +5053,7 @@ class Scheduler {
                         <option value="vencida" ${inv.status==='vencida'?'selected':''}>🔴 Vencida</option>
                         <option value="cancelada" ${inv.status==='cancelada'?'selected':''}>🚫 Cancelada</option>
                     </select>
-                    ${inv.status==='pagada' && inv.paidAt ? `<div style="font-size:0.7rem;color:#27ae60;margin-top:2px;">📅 ${inv.paidAt.split('-').slice(1).join('/')}/${inv.paidAt.split('-')[0].slice(2)}${inv.paymentMethod ? ' · '+{cash:'💵',check:'🏦',credit:'💳',zelle:'📱'}[inv.paymentMethod]||'💰' : ''}</div>` : ''}
+                    ${inv.status==='pagada' && inv.paidAt ? `<div style="font-size:0.7rem;color:#27ae60;margin-top:2px;">📅 ${inv.paidAt.split('T')[0].split('-').slice(1).join('/')}/${inv.paidAt.split('T')[0].split('-')[0].slice(2)}${inv.paymentMethod ? ' · '+({cash:'💵',check:'🏦',credit:'💳',zelle:'📱'}[inv.paymentMethod] || (inv.paymentMethod.includes('Stripe') ? '💳 Stripe' : '💰')) : ''}</div>` : ''}
                     ${inv.paymentRef ? `<div style="font-size:0.68rem;color:#888;">${inv.paymentRef}</div>` : ''}
                 </td>
                 <td>
@@ -5053,6 +5061,7 @@ class Scheduler {
                         <div style="display:flex;gap:4px;flex-wrap:wrap;">
                             <button onclick="app.openCobroDetalle('${inv.id}')" class="btn" style="background: #16a085; color: white; padding: 5px 8px; font-size: 0.75rem;">💰 Pago</button>
                             ${inv.status !== 'pagada' ? `<button id="btnCobrarTarjeta_${inv.id}" onclick="app.cobrarConTarjeta('${inv.id}')" class="btn" style="background: #635bff; color: white; padding: 5px 8px; font-size: 0.75rem;">💳 Cobrar</button>` : ''}
+                            ${(() => { const _cli = (app.clis||[]).find(c => c.name === inv.clientName); return (_cli && _cli.autoCharge && _cli.stripeCustomerId && inv.status !== 'pagada') ? `<button onclick="app.cobrarTarjetaGuardada('${inv.id}')" class="btn" style="background: #00a650; color: white; padding: 5px 8px; font-size: 0.75rem;">⚡ Auto</button>` : ''; })()}
                             <button onclick="app.viewInvoiceItems('${inv.id}')" class="btn" style="background: #8e44ad; color: white; padding: 5px 8px; font-size: 0.75rem;">🔍 Detalle</button>
                             <button onclick="app.openInvoiceForEdit('${inv.id}')" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
                             <button onclick="app.editInvoiceNumber('${inv.id}', ${inv.invoiceNumber})" class="btn" style="background: #6c757d; color: white; padding: 5px 8px; font-size: 0.75rem;"># Nº</button>
@@ -5223,22 +5232,79 @@ class Scheduler {
                 throw new Error(data.error || 'No se pudo generar el link de cobro.');
             }
 
-            // Copiar al portapapeles automáticamente para que sea fácil mandarlo
-            try { await navigator.clipboard.writeText(data.url); } catch(e) {}
-
-            const wa = inv.clientPhone ? `https://wa.me/${inv.clientPhone.replace(/\D/g,'')}?text=${encodeURIComponent('Hola '+inv.clientName+', aquí está el link para pagar su factura #'+inv.invoiceNumber+' con tarjeta: '+data.url)}` : null;
-
-            const mensaje = `✅ Link de cobro generado y copiado al portapapeles:\n\n${data.url}\n\nPégalo en un mensaje o correo para mandárselo al cliente.\n\nNota: en cuanto el cliente pague, la factura se va a marcar como pagada automáticamente (puede tardar unos minutos).`;
-            alert(mensaje);
-
-            if (wa && confirm('¿Quieres abrir WhatsApp para enviárselo directo al cliente?')) {
-                window.open(wa, '_blank');
+            // Confirmar visualmente sin interrumpir
+            if (btn) {
+                btn.innerHTML = '✅ Listo';
+                setTimeout(() => { btn.innerHTML = '💳 Cobrar'; btn.disabled = false; }, 2000);
             }
         } catch (err) {
             console.error('Error generando link de cobro:', err);
             alert('Error generando el link de cobro: ' + err.message);
         } finally {
             if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
+        }
+    }
+
+    async cobrarTarjetaGuardada(id) {
+        const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(id));
+        if (!inv) { alert('No se encontró la factura.'); return; }
+
+        const cli = (this.clis||[]).find(c => c.name === inv.clientName);
+        if (!cli || !cli.stripeCustomerId) {
+            alert('Este cliente no tiene una tarjeta guardada en Stripe.\nUsa el botón "💳 Cobrar" para que el cliente pague y guarde su tarjeta primero.');
+            return;
+        }
+        if (!cli.autoCharge) {
+            alert('Este cliente no tiene autorización de cobro automático activada.\nActívala en la ficha del cliente primero.');
+            return;
+        }
+
+        const totalPaid = (inv.payments||[]).reduce((s,p) => s + parseFloat(p.amount||0), 0);
+        const balance = parseFloat(inv.total||0) - totalPaid;
+        if (balance <= 0) { alert('Esta factura ya está saldada.'); return; }
+
+        if (!confirm(`⚡ Cobrar $${balance.toFixed(2)} a la tarjeta guardada de ${inv.clientName}?\n\nFactura #${inv.invoiceNumber}\n\nEsta acción cargará la tarjeta inmediatamente.`)) return;
+
+        const btn = event?.target;
+        if (btn) { btn.innerHTML = '⏳...'; btn.disabled = true; }
+
+        try {
+            const res = await fetch(`${this.STRIPE_WORKER_URL}/charge-saved-card`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    invoiceId: inv.id,
+                    invoiceNumber: inv.invoiceNumber,
+                    clientName: inv.clientName,
+                    stripeCustomerId: cli.stripeCustomerId,
+                    amount: balance,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) throw new Error(data.error || 'Error procesando el cobro.');
+
+            // Registrar el pago localmente de inmediato (el webhook también lo hará, pero así es instantáneo)
+            if (!inv.payments) inv.payments = [];
+            inv.payments.push({
+                date: new Date().toISOString(),
+                amount: balance,
+                method: 'Tarjeta Guardada (Stripe)',
+                ref: data.paymentIntentId || '',
+                notes: 'Cobro automático con tarjeta guardada',
+            });
+            const totalPaidNow = inv.payments.reduce((s,p) => s + parseFloat(p.amount||0), 0);
+            inv.paidAmount = totalPaidNow;
+            inv.status = totalPaidNow >= parseFloat(inv.total||0) ? 'pagada' : 'parcial';
+            inv.paidAt = new Date().toISOString();
+            inv.paymentMethod = 'Tarjeta Guardada (Stripe)';
+
+            this.save();
+            this.render();
+            alert(`✅ ¡Cobro exitoso!\n$${balance.toFixed(2)} cargados a la tarjeta de ${inv.clientName}.\nFactura #${inv.invoiceNumber} marcada como ${inv.status}.`);
+        } catch(err) {
+            console.error('Error cobro automático:', err);
+            alert('Error procesando el cobro: ' + err.message);
+            if (btn) { btn.innerHTML = '⚡ Auto'; btn.disabled = false; }
         }
     }
 
@@ -7593,6 +7659,8 @@ Motivo de cancelación (opcional):`);
                 const oldType = this.clis[idx].type;
                 const invoicingType = document.getElementById('cliInvoicingType') ? document.getElementById('cliInvoicingType').value : (this.clis[idx].invoicingType || 'monthly');
                 const payTerms = document.getElementById('cliPaymentTerms') ? parseInt(document.getElementById('cliPaymentTerms').value) : 15;
+                const autoCharge = document.getElementById('cliAutoCharge') ? document.getElementById('cliAutoCharge').checked : (this.clis[idx].autoCharge || false);
+                const stripeCustomerId = document.getElementById('cliStripeCustomerId') ? document.getElementById('cliStripeCustomerId').value.trim() : (this.clis[idx].stripeCustomerId || '');
 
                 if(isMulti) {
                     // Para multi-propiedad: actualizar datos base y agregar/quitar propiedades
@@ -7609,6 +7677,8 @@ Motivo de cancelación (opcional):`);
                         c.paymentTerms = payTerms;
                         c.type = type; c.serviceType = serviceType;
                         c.billingPeriod = billingPeriod; c.invoicingType = invoicingType;
+                        c.autoCharge = autoCharge;
+                        if (stripeCustomerId) c.stripeCustomerId = stripeCustomerId;
                     };
 
                     // Actualizar datos base en todos los registros que YA eran multipropiedad
@@ -7741,6 +7811,8 @@ Motivo de cancelación (opcional):`);
         } else {
             // Para otros tipos, crear normalmente
             const invTypeNew = document.getElementById('cliInvoicingType') ? document.getElementById('cliInvoicingType').value : 'monthly';
+            const autoCharge = document.getElementById('cliAutoCharge') ? document.getElementById('cliAutoCharge').checked : false;
+            const stripeCustomerId = document.getElementById('cliStripeCustomerId') ? document.getElementById('cliStripeCustomerId').value.trim() : '';
             const newCli = {
                 id: Date.now(),
                 name: name,
@@ -7754,7 +7826,9 @@ Motivo de cancelación (opcional):`);
                 type: type,
                 serviceType: serviceType,
                 billingPeriod: billingPeriod,
-                invoicingType: invTypeNew
+                invoicingType: invTypeNew,
+                autoCharge: autoCharge,
+                stripeCustomerId: stripeCustomerId,
             };
             this.clis.push(newCli);
         }
@@ -7794,6 +7868,12 @@ Motivo de cancelación (opcional):`);
                 document.getElementById('cliInvoicingType').value = cli.invoicingType || 'monthly';
                 if (document.getElementById('cliPaymentTerms'))
                     document.getElementById('cliPaymentTerms').value = cli.paymentTerms !== undefined ? String(cli.paymentTerms) : '15';
+            }
+            if (document.getElementById('cliAutoCharge')) {
+                document.getElementById('cliAutoCharge').checked = cli.autoCharge || false;
+            }
+            if (document.getElementById('cliStripeCustomerId')) {
+                document.getElementById('cliStripeCustomerId').value = cli.stripeCustomerId || '';
             }
             document.getElementById('editCliId').value = cli.id;
             // Bloque de regeneración
@@ -10673,8 +10753,11 @@ Motivo de cancelación (opcional):`);
         }
         // DISEÑO SEGÚN PLANTILLA
         if (template === 'modern') {
-            doc.setFillColor(44, 62, 80);
+            doc.setFillColor(245, 245, 245);
             doc.rect(0, 0, 210, 52, 'F');
+            doc.setDrawColor(200, 200, 200);
+            doc.setLineWidth(0.3);
+            doc.line(0, 52, 210, 52);
             
             if (companyLogo) {
                 try {
@@ -10687,12 +10770,13 @@ Motivo de cancelación (opcional):`);
                 } catch (e) {}
             }
             
-            doc.setTextColor(255, 255, 255);
+            doc.setTextColor(44, 62, 80);
             doc.setFontSize(10);
             doc.setFont(undefined, 'bold');
             doc.text(companyName, 20, companyLogo ? 33 : 15);
             doc.setFont(undefined, 'normal');
             doc.setFontSize(8);
+            doc.setTextColor(80, 80, 80);
             doc.text(companyAddress, 20, companyLogo ? 37 : 20);
             doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
             if (companyRFC) doc.text('RFC: ' + companyRFC, 20, companyLogo ? 45 : 30);
@@ -10700,6 +10784,7 @@ Motivo de cancelación (opcional):`);
             
             doc.setFontSize(24);
             doc.setFont(undefined, 'bold');
+            doc.setTextColor(44, 62, 80);
             doc.text('INVOICE', 105, 24, { align: 'center' });
             
             doc.setFontSize(12);
@@ -10711,54 +10796,6 @@ Motivo de cancelación (opcional):`);
                               String(today1.getDate()).padStart(2, '0') + '/' + 
                               today1.getFullYear();
             doc.text(headerDate1, 190, 23, { align: 'right' });
-            
-        } else if (template === 'classic') {
-            // Logo izquierda - MISMO LAYOUT QUE OTRAS
-            if (companyLogo) {
-                try {
-                    const img = new Image();
-                    img.src = companyLogo;
-                    const aspectRatio = img.width / img.height;
-                    const logoHeight = config.logoSize || 25;
-                    const logoWidth = logoHeight * aspectRatio;
-                    doc.addImage(companyLogo, 'PNG', 20, 5, logoWidth, logoHeight);
-                } catch (e) {}
-            }
-            
-            // Datos empresa - MISMO LAYOUT
-            doc.setTextColor(0, 0, 0);
-            doc.setFontSize(10);
-            doc.setFont(undefined, 'bold');
-            doc.text(companyName, 20, companyLogo ? 33 : 15);
-            doc.setFont(undefined, 'normal');
-            doc.setFontSize(8);
-            doc.text(companyAddress, 20, companyLogo ? 37 : 20);
-            doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
-            if (companyRFC) doc.text('RFC: ' + companyRFC, 20, companyLogo ? 45 : 30);
-            if (companyWebsite) doc.text(companyWebsite, 20, companyLogo ? 48 : 35);
-            
-            // FACTURA centro
-            doc.setFontSize(28);
-            doc.setFont(undefined, 'bold');
-            doc.text('INVOICE', 105, 28, { align: 'center' });
-            
-            // Número derecha
-            doc.setFontSize(12);
-            doc.text('No. ' + invoiceNumberFormatted, 190, 20, { align: 'right' });
-            doc.setFont(undefined, 'normal');
-            doc.setFontSize(9);
-            const today2 = new Date();
-            const headerDate2 = String(today2.getMonth() + 1).padStart(2, '0') + '/' + 
-                              String(today2.getDate()).padStart(2, '0') + '/' + 
-                              today2.getFullYear();
-            doc.text(headerDate2, 190, 25, { align: 'right' });
-            
-            // Línea doble elegante - más arriba
-            doc.setDrawColor(100, 100, 100);
-            doc.setLineWidth(0.5);
-            doc.line(20, 52, 190, 52);
-            doc.line(20, 54, 190, 54);
-            doc.setLineWidth(0.2);
             
         } else if (template === 'colorful') {
             doc.setFillColor(52, 152, 219);
@@ -11010,7 +11047,7 @@ Motivo de cancelación (opcional):`);
             doc.setFont(undefined,'bold');
             doc.text(companyName, 20, y_a+24);
             doc.setFont(undefined,'normal');
-            doc.text('Mail to: P.O Box 7543, Waco, TX. 76714', 20, y_a+30);
+            doc.setFont(undefined,'bold'); doc.text('Mail to: P.O Box 7543, Waco, TX. 76714', 20, y_a+30); doc.setFont(undefined,'normal');
 
             // Thank you footer
             doc.setFont(undefined,'bold');
@@ -11027,10 +11064,10 @@ Motivo de cancelación (opcional):`);
             doc.setFont(undefined, 'bold');
             doc.setTextColor(255, 255, 255);
             doc.text('PAYMENT OPTIONS:', 23, noteYa + 6);
-            doc.setFont(undefined, 'normal');
             doc.setTextColor(220, 220, 220);
             doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 23, noteYa + 12);
             doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 23, noteYa + 17);
+            doc.setFont(undefined, 'normal');
 
             // Retornar sin ejecutar el bloque genérico
             return {
@@ -11216,10 +11253,10 @@ Motivo de cancelación (opcional):`);
         doc.setFont(undefined, 'bold');
         doc.setTextColor(255, 255, 255);
         doc.text('PAYMENT OPTIONS:', 25, noteY + 6);
-        doc.setFont(undefined, 'normal');
         doc.setTextColor(220, 220, 220);
         doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 25, noteY + 12);
         doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 25, noteY + 17);
+        doc.setFont(undefined, 'normal');
         
         // Retornar el PDF y el número de factura
         return {
@@ -11269,11 +11306,12 @@ Motivo de cancelación (opcional):`);
         // DISEÑO SEGÚN PLANTILLA SELECCIONADA
         if (template === 'modern') {
             // ========== PLANTILLA MODERNA ==========
-            // Fondo oscuro superior - MÁS PEQUEÑO
-            doc.setFillColor(44, 62, 80);
+            doc.setFillColor(245, 245, 245);
             doc.rect(0, 0, 210, 52, 'F');
+            doc.setDrawColor(200, 200, 200);
+            doc.setLineWidth(0.3);
+            doc.line(0, 52, 210, 52);
             
-            // Logo izquierda (fondo oscuro) - MÁS ARRIBA
             if (companyLogo) {
                 try {
                     const img = new Image();
@@ -11285,24 +11323,23 @@ Motivo de cancelación (opcional):`);
                 } catch (e) {}
             }
             
-            // Datos empresa (blanco sobre fondo oscuro) - MÁS ARRIBA
-            doc.setTextColor(255, 255, 255);
+            doc.setTextColor(44, 62, 80);
             doc.setFontSize(10);
             doc.setFont(undefined, 'bold');
             doc.text(companyName, 20, companyLogo ? 33 : 15);
             doc.setFont(undefined, 'normal');
             doc.setFontSize(8);
+            doc.setTextColor(80, 80, 80);
             doc.text(companyAddress, 20, companyLogo ? 37 : 20);
             doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
             if (companyRFC) doc.text('RFC: ' + companyRFC, 20, companyLogo ? 45 : 30);
             if (companyWebsite) doc.text(companyWebsite, 20, companyLogo ? 46 : 35);
             
-            // FACTURA centro (blanco)
             doc.setFontSize(24);
             doc.setFont(undefined, 'bold');
+            doc.setTextColor(44, 62, 80);
             doc.text('INVOICE', 105, 24, { align: 'center' });
             
-            // Número derecha (blanco)
             doc.setFontSize(12);
             doc.text('No. ' + invoiceNumberFormatted, 190, 18, { align: 'right' });
             doc.setFontSize(8);
@@ -11312,59 +11349,6 @@ Motivo de cancelación (opcional):`);
                               String(today1.getDate()).padStart(2, '0') + '/' + 
                               today1.getFullYear();
             doc.text(headerDate1, 190, 23, { align: 'right' });
-            
-        } else if (template === 'classic') {
-            // Logo izquierda - MISMO LAYOUT QUE OTRAS
-            if (companyLogo) {
-                try {
-                    const img = new Image();
-                    img.src = companyLogo;
-                    const aspectRatio = img.width / img.height;
-                    const logoHeight = config.logoSize || 25;
-                    const logoWidth = logoHeight * aspectRatio;
-                    doc.addImage(companyLogo, 'PNG', 20, 5, logoWidth, logoHeight);
-                } catch (e) {}
-            }
-            
-            // Datos empresa - MISMO LAYOUT
-            doc.setTextColor(0, 0, 0);
-            doc.setFontSize(10);
-            doc.setFont(undefined, 'bold');
-            doc.text(companyName, 20, companyLogo ? 33 : 15);
-            doc.setFont(undefined, 'normal');
-            doc.setFontSize(8);
-            doc.text(companyAddress, 20, companyLogo ? 37 : 20);
-            doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
-            if (companyRFC) doc.text('RFC: ' + companyRFC, 20, companyLogo ? 45 : 30);
-            if (companyWebsite) doc.text(companyWebsite, 20, companyLogo ? 48 : 35);
-            
-            // FACTURA centro
-            doc.setFontSize(28);
-            doc.setFont(undefined, 'bold');
-            doc.text('INVOICE', 105, 28, { align: 'center' });
-            
-            // Número derecha
-            doc.setFontSize(12);
-            doc.text('No. ' + invoiceNumberFormatted, 190, 20, { align: 'right' });
-            doc.setFont(undefined, 'normal');
-            doc.setFontSize(9);
-            const today2 = new Date();
-            const headerDate2 = String(today2.getMonth() + 1).padStart(2, '0') + '/' + 
-                              String(today2.getDate()).padStart(2, '0') + '/' + 
-                              today2.getFullYear();
-            doc.text(headerDate2, 190, 25, { align: 'right' });
-            
-            // Línea doble elegante - más arriba
-            doc.setDrawColor(100, 100, 100);
-            doc.setLineWidth(0.5);
-            doc.line(20, 52, 190, 52);
-            doc.line(20, 54, 190, 54);
-            doc.setLineWidth(0.2);
-            
-       } else if (template === 'colorful') {
-            // ========== PLANTILLA COLORIDA ==========
-            // Fondo azul superior - MÁS PEQUEÑO
-            doc.setFillColor(52, 152, 219);
             doc.rect(0, 0, 210, 52, 'F');
             
             // Logo izquierda (sobre azul) - MÁS ARRIBA
@@ -11553,7 +11537,7 @@ Motivo de cancelación (opcional):`);
             doc.setFont(undefined,'bold');
             doc.text('"Brazos Cleaning Services"', 20, y_b+22);
             doc.setFont(undefined,'normal');
-            doc.text('• Mail to: P.O Box 7543', 20, y_b+28);
+            doc.setFont(undefined,'bold'); doc.text('• Mail to: P.O Box 7543, Waco, TX. 76714', 20, y_b+28); doc.setFont(undefined,'normal');
             doc.text('  Waco, TX. 76714', 20, y_b+33);
 
             // Thank you footer
@@ -11707,15 +11691,19 @@ Motivo de cancelación (opcional):`);
         const noteY2 = y + (applyTax && taxRate > 0 ? 44 : 37);
         doc.setDrawColor(44, 62, 80);
         doc.setFillColor(44, 62, 80);
-        doc.roundedRect(20, noteY2, 170, 22, 2, 2, 'FD');
+        doc.roundedRect(20, noteY2, 170, 30, 2, 2, 'FD');
         doc.setFontSize(8);
         doc.setFont(undefined, 'bold');
         doc.setTextColor(255, 255, 255);
         doc.text('PAYMENT OPTIONS:', 25, noteY2 + 6);
-        doc.setFont(undefined, 'normal');
         doc.setTextColor(220, 220, 220);
         doc.text('• Check: Make payable to: "Brazos Cleaning Services"', 25, noteY2 + 12);
         doc.text('  Mail to: P.O Box 7543, Waco, TX. 76714', 25, noteY2 + 17);
+        doc.setTextColor(99, 202, 255);
+        doc.text('• Pay online with Credit/Debit Card:', 25, noteY2 + 23);
+        doc.textWithLink('  Click here to pay securely with Stripe', 25, noteY2 + 28,
+            { url: `https://brazos-stripe-worker.ranulfocast.workers.dev/pay-invoice?inv=${invoiceNumber}&client=${encodeURIComponent(client.name || '')}&amount=${((applyTax && taxRate > 0) ? grandTotal : total).toFixed(2)}` });
+        doc.setFont(undefined, 'normal');
         
         // Guardar
         // AHORA SÍ guardar el número de factura (después de generar el PDF)
