@@ -11695,7 +11695,7 @@ Motivo de cancelación (opcional):`);
         // Empujar el total hacia la parte inferior
         const pageHeight2 = doc.internal.pageSize.getHeight();
         const totalBlockHeight2 = (applyTax && taxRate > 0) ? 45 : 35;
-        const minY2 = pageHeight2 - totalBlockHeight2 - 28; // extra space for payment note
+        const minY2 = pageHeight2 - totalBlockHeight2 - 45; // extra space for payment note with card link
         if (y < minY2) y = minY2;
 
         // TOTAL
@@ -11738,7 +11738,7 @@ Motivo de cancelación (opcional):`);
         const noteY2 = y + (applyTax && taxRate > 0 ? 44 : 37);
         doc.setDrawColor(44, 62, 80);
         doc.setFillColor(44, 62, 80);
-        doc.roundedRect(20, noteY2, 170, 30, 2, 2, 'FD');
+        doc.roundedRect(20, noteY2, 170, 36, 2, 2, 'FD');
         doc.setFontSize(8);
         doc.setFont(undefined, 'bold');
         doc.setTextColor(255, 255, 255);
