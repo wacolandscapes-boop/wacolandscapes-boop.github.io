@@ -5476,33 +5476,57 @@ class Scheduler {
     }
 
     openInvoiceForEdit(id) {
-        // Buscar por id directamente — evita problemas de index con filtros activos
         const invoice = (this.generatedInvoices || []).find(inv => 
             (inv.id && inv.id == id) || inv.invoiceNumber == id
         );
         if (!invoice) { alert('No se encontró la factura'); return; }
 
-        // Cerrar modal de generadas
         this.closeGeneratedInvoices();
-
-        // Abrir modal de Facturación
         this.openInvoice();
 
-        // Cargar datos de la factura
         setTimeout(() => {
-            const clientSel = document.getElementById('invoiceClient');
-            if (clientSel) {
-                const client = this.clis.find(c => c.name === invoice.clientName);
-                if (client) {
-                    clientSel.value = client.id;
-                    this.onInvoiceClientChange && this.onInvoiceClientChange();
+            // Detectar si es una factura manual (tiene items pero no servicios del calendario)
+            const isManual = invoice.items && invoice.items.length > 0 &&
+                !this.servs.some(s => s.cliId && this.clis.find(c => c.name === invoice.clientName && String(c.id) === String(s.cliId)) &&
+                    s.date >= invoice.startDate && s.date <= invoice.endDate);
+
+            if (isManual || (invoice.items && invoice.items.length > 0 && invoice.startDate === invoice.endDate)) {
+                // Abrir tab Manual y cargar los datos
+                this.switchInvoiceTab('manual');
+                const cli = this.clis.find(c => c.name === invoice.clientName);
+                if (cli) {
+                    const label = cli.name + (cli.propId && cli.propId !== cli.name ? ' — ' + cli.propId : '');
+                    document.getElementById('manualInvClient').value = cli.id;
+                    document.getElementById('manualInvClientSearch').value = label;
                 }
+                // Cargar items
+                const listEl = document.getElementById('manualInvItemsList');
+                if (listEl) {
+                    listEl.innerHTML = '';
+                    (invoice.items || []).forEach(item => {
+                        this.addManualInvoiceItem(item.fecha || item.date || invoice.startDate, item.descripcion || item.name || '', item.precio || item.price || 0);
+                    });
+                }
+                if (document.getElementById('manualInvPaymentDue')) {
+                    document.getElementById('manualInvPaymentDue').value = invoice.invoiceConfig?.paymentDue || '';
+                }
+                const hiddenNum = document.getElementById('editingInvoiceNumber');
+                if (hiddenNum) hiddenNum.value = invoice.invoiceNumber;
+            } else {
+                // Factura normal — abrir tab Generar
+                const clientSel = document.getElementById('invoiceClient');
+                if (clientSel) {
+                    const client = this.clis.find(c => c.name === invoice.clientName);
+                    if (client) {
+                        clientSel.value = client.id;
+                        this.onInvoiceClientChange && this.onInvoiceClientChange();
+                    }
+                }
+                if (document.getElementById('invoiceStart')) document.getElementById('invoiceStart').value = invoice.startDate;
+                if (document.getElementById('invoiceEnd')) document.getElementById('invoiceEnd').value = invoice.endDate;
+                const hiddenNum = document.getElementById('editingInvoiceNumber');
+                if (hiddenNum) hiddenNum.value = invoice.invoiceNumber;
             }
-            if (document.getElementById('invoiceStart')) document.getElementById('invoiceStart').value = invoice.startDate;
-            if (document.getElementById('invoiceEnd')) document.getElementById('invoiceEnd').value = invoice.endDate;
-            // Guardar número original en campo oculto
-            const hiddenNum = document.getElementById('editingInvoiceNumber');
-            if (hiddenNum) hiddenNum.value = invoice.invoiceNumber;
         }, 300);
     }
 
@@ -11692,11 +11716,19 @@ Motivo de cancelación (opcional):`);
             }
         });
         
-        // Empujar el total hacia la parte inferior
+        // Empujar el total hacia arriba para que quepan: bloque total + "Thank you" + caja Payment Options (36mm)
         const pageHeight2 = doc.internal.pageSize.getHeight();
-        const totalBlockHeight2 = (applyTax && taxRate > 0) ? 45 : 35;
-        const minY2 = pageHeight2 - totalBlockHeight2 - 45; // extra space for payment note with card link
-        if (y < minY2) y = minY2;
+        const totalBlockHeight2 = (applyTax && taxRate > 0) ? 25 : 15;
+        const noteBoxHeight2 = 38; // altura caja Payment Options
+        const thankYouOffset2 = (applyTax && taxRate > 0) ? 37 : 30;
+        const noteOffset2 = (applyTax && taxRate > 0) ? 44 : 37;
+        const totalNeeded2 = noteOffset2 + noteBoxHeight2 + 5; // margen inferior
+        const minY2 = pageHeight2 - totalNeeded2;
+        if (y > minY2) {
+            // Si no cabe en esta página, agregar nueva página
+            doc.addPage();
+            y = 20;
+        }
 
         // TOTAL
         doc.setFillColor(44, 62, 80);
@@ -11738,7 +11770,7 @@ Motivo de cancelación (opcional):`);
         const noteY2 = y + (applyTax && taxRate > 0 ? 44 : 37);
         doc.setDrawColor(44, 62, 80);
         doc.setFillColor(44, 62, 80);
-        doc.roundedRect(20, noteY2, 170, 36, 2, 2, 'FD');
+        doc.roundedRect(20, noteY2, 170, 38, 2, 2, 'FD');
         doc.setFontSize(8);
         doc.setFont(undefined, 'bold');
         doc.setTextColor(255, 255, 255);
