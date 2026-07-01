@@ -13225,6 +13225,7 @@ Motivo de cancelación (opcional):`);
                     );
                     const driveData = await driveFileRes.json();
                     if (driveData.generatedInvoices) {
+                        let changed = false;
                         driveData.generatedInvoices.forEach(driveInv => {
                             if (driveInv.status === 'pagada' || driveInv.status === 'parcial') {
                                 const localInv = (this.generatedInvoices || []).find(i => String(i.id) === String(driveInv.id));
@@ -13235,12 +13236,15 @@ Motivo de cancelación (opcional):`);
                                     localInv.paymentMethod = driveInv.paymentMethod;
                                     localInv.paymentRef = driveInv.paymentRef;
                                     localInv.payments = driveInv.payments || localInv.payments;
-                                    localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices));
-                                    this.refreshGeneratedInvoices && this.refreshGeneratedInvoices();
+                                    changed = true;
                                     console.log('💳 Pago de Stripe preservado para factura', driveInv.invoiceNumber);
                                 }
                             }
                         });
+                        if (changed) {
+                            localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices));
+                            this.render();
+                        }
                     }
                 }
             } catch(e) { console.warn('No se pudo verificar pagos de Stripe en Drive:', e); }
