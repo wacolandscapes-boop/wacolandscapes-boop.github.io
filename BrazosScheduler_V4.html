@@ -13208,6 +13208,43 @@ Motivo de cancelación (opcional):`);
         await this.refreshTokenIfNeeded();
         try {
             document.getElementById('driveSyncLabel').textContent = 'Guardando...';
+
+            // Antes de subir, verificar si Drive tiene facturas pagadas que no están en local
+            // (pagadas por el Worker de Stripe) y preservarlas
+            try {
+                const fileName2 = 'brazosCS_sync.json';
+                const searchRes2 = await fetch(
+                    `https://www.googleapis.com/drive/v3/files?q=name='${fileName2}'+and+'${this.driveFolderId}'+in+parents+and+trashed=false`,
+                    { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                );
+                const searchData2 = await searchRes2.json();
+                if (searchData2.files && searchData2.files.length > 0) {
+                    const driveFileRes = await fetch(
+                        `https://www.googleapis.com/drive/v3/files/${searchData2.files[0].id}?alt=media`,
+                        { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                    );
+                    const driveData = await driveFileRes.json();
+                    if (driveData.generatedInvoices) {
+                        driveData.generatedInvoices.forEach(driveInv => {
+                            if (driveInv.status === 'pagada' || driveInv.status === 'parcial') {
+                                const localInv = (this.generatedInvoices || []).find(i => String(i.id) === String(driveInv.id));
+                                if (localInv && localInv.status !== 'pagada' && localInv.status !== 'parcial') {
+                                    localInv.status = driveInv.status;
+                                    localInv.paidAt = driveInv.paidAt;
+                                    localInv.paidAmount = driveInv.paidAmount;
+                                    localInv.paymentMethod = driveInv.paymentMethod;
+                                    localInv.paymentRef = driveInv.paymentRef;
+                                    localInv.payments = driveInv.payments || localInv.payments;
+                                    localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices));
+                                    this.refreshGeneratedInvoices && this.refreshGeneratedInvoices();
+                                    console.log('💳 Pago de Stripe preservado para factura', driveInv.invoiceNumber);
+                                }
+                            }
+                        });
+                    }
+                }
+            } catch(e) { console.warn('No se pudo verificar pagos de Stripe en Drive:', e); }
+
             const data = {
                 exportType: 'anaCS_sync',
                 exportDate: new Date().toISOString(),
@@ -13436,8 +13473,7 @@ Motivo de cancelación (opcional):`);
             this.servs               = this.mergeArraysById(winner.servs, loser.servs);
             this.gastos              = this.mergeArraysById(winner.gastos, loser.gastos);
 
-            // Para facturas: merge especial — si Drive tiene una factura como "pagada" o "parcial"
-            // y local la tiene como "enviada", siempre prevalece el status de pago de Drive
+            // Para facturas: merge especial — el status de pago SIEMPRE viene de Drive
             // (porque el Worker de Stripe actualiza Drive directamente sin pasar por local)
             const mergedInvoices = this.mergeArraysById(winner.generatedInvoices, loser.generatedInvoices);
             const driveInvoices = data.generatedInvoices || [];
