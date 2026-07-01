@@ -5200,7 +5200,7 @@ class Scheduler {
 
     // ── HELPER: dibuja la caja de Payment Options compacta con iconos de tarjetas ──
     drawPaymentOptions(doc, x, y, width, invoiceNumber, clientName, amount) {
-        const h = 26; // altura compacta
+        const h = 26;
         // Fondo oscuro
         doc.setDrawColor(44, 62, 80);
         doc.setFillColor(44, 62, 80);
@@ -5212,7 +5212,7 @@ class Scheduler {
         doc.setTextColor(255, 255, 255);
         doc.text('PAYMENT OPTIONS:', x + 4, y + 5.5);
 
-        // Iconos de tarjetas (pequeños rectángulos de colores)
+        // Iconos de tarjetas
         const iconY = y + 1.5;
         const iconH = 5;
         const iconW = 11;
@@ -5220,35 +5220,36 @@ class Scheduler {
         doc.setFillColor(26, 31, 113); doc.setDrawColor(200,200,200);
         doc.roundedRect(x + width - 48, iconY, iconW, iconH, 1, 1, 'FD');
         doc.setTextColor(255,255,255); doc.setFontSize(4.5); doc.setFont(undefined,'bold');
-        doc.text('VISA', x + width - 47.5 + iconW/2, iconY + 3.4, {align:'center'});
+        doc.text('VISA', x + width - 42.5, iconY + 3.4, {align:'center'});
         // MC
-        doc.setFillColor(235, 0, 27);
+        doc.setFillColor(235, 0, 27); doc.setDrawColor(200,200,200);
         doc.roundedRect(x + width - 36, iconY, iconW, iconH, 1, 1, 'FD');
         doc.setFillColor(247, 158, 27); doc.setDrawColor(247,158,27);
         doc.roundedRect(x + width - 31, iconY, 6, iconH, 1, 1, 'FD');
-        doc.setTextColor(255,255,255); doc.setFontSize(4);
+        doc.setTextColor(255,255,255); doc.setFontSize(4.5); doc.setFont(undefined,'bold');
         doc.text('MC', x + width - 30.5, iconY + 3.4, {align:'center'});
         // AMEX
         doc.setFillColor(0, 123, 193); doc.setDrawColor(200,200,200);
         doc.roundedRect(x + width - 24, iconY, iconW, iconH, 1, 1, 'FD');
-        doc.setTextColor(255,255,255); doc.setFontSize(3.8); doc.setFont(undefined,'bold');
-        doc.text('AMEX', x + width - 23.5 + iconW/2, iconY + 3.4, {align:'center'});
+        doc.setTextColor(255,255,255); doc.setFontSize(4.5); doc.setFont(undefined,'bold');
+        doc.text('AMEX', x + width - 18.5, iconY + 3.4, {align:'center'});
         // DISC
         doc.setFillColor(255, 102, 0); doc.setDrawColor(200,200,200);
         doc.roundedRect(x + width - 12, iconY, iconW, iconH, 1, 1, 'FD');
-        doc.setTextColor(255,255,255); doc.setFontSize(3.5);
-        doc.text('DISC', x + width - 11.5 + iconW/2, iconY + 3.4, {align:'center'});
+        doc.setTextColor(255,255,255); doc.setFontSize(4.5); doc.setFont(undefined,'bold');
+        doc.text('DISC', x + width - 6.5, iconY + 3.4, {align:'center'});
 
         // Línea 1: Cheque
         doc.setFontSize(7); doc.setFont(undefined, 'bold');
         doc.setTextColor(220, 220, 220);
-        doc.text('• Check payable to: "Brazos Cleaning Services"  |  Mail to: P.O Box 7543, Waco, TX. 76714', x + 4, y + 11);
+        doc.text('• Check payable to: "Brazos Cleaning Services"   |   Mail to: P.O Box 7543, Waco, TX. 76714', x + 4, y + 12);
 
-        // Línea 2: Tarjeta con link
+        // Línea 2: Tarjeta con link — URL simple sin encodeURIComponent para evitar caracteres corruptos
+        const clientSafe = (clientName || '').replace(/[^a-zA-Z0-9 ]/g, '').trim().replace(/ /g, '+');
+        const payUrl = 'https://brazos-stripe-worker.ranulfocast.workers.dev/pay-invoice?inv=' + invoiceNumber + '&client=' + clientSafe + '&amount=' + parseFloat(amount || 0).toFixed(2);
         doc.setTextColor(99, 202, 255);
-        doc.text('• Pay with Credit/Debit Card: ', x + 4, y + 17);
-        doc.textWithLink('Click here to pay securely with Stripe →', x + 54, y + 17,
-            { url: `https://brazos-stripe-worker.ranulfocast.workers.dev/pay-invoice?inv=${invoiceNumber}&client=${encodeURIComponent(clientName || '')}&amount=${parseFloat(amount || 0).toFixed(2)}` });
+        doc.text('• Pay with Credit/Debit Card:', x + 4, y + 20);
+        doc.textWithLink(' Click here to pay securely with Stripe', x + 53, y + 20, { url: payUrl });
 
         doc.setFont(undefined, 'normal');
         doc.setTextColor(0, 0, 0);
@@ -11327,6 +11328,7 @@ Motivo de cancelación (opcional):`);
         const totalNeeded = noteOffset + 26 + 5;
         const minY = pageHeight - totalNeeded;
         if (y > minY) { doc.addPage(); y = 20; }
+        else { y = minY; } // Siempre al fondo de la página
 
         doc.setFillColor(44, 62, 80);
         doc.rect(20, y + 5, 170, applyTax && taxRate > 0 ? 22 : 12, 'F');
@@ -11775,6 +11777,8 @@ Motivo de cancelación (opcional):`);
         if (y > minY2) {
             doc.addPage();
             y = 20;
+        } else {
+            y = minY2; // Siempre al fondo de la página
         }
 
         // TOTAL
