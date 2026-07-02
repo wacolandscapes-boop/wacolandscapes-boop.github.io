@@ -9745,9 +9745,11 @@ Motivo de cancelación (opcional):`);
         document.getElementById('invoiceTabGenerar').style.display = (tab === 'generar') ? 'grid' : 'none';
         document.getElementById('invoiceTabConfig').style.display = (tab === 'config') ? 'block' : 'none';
         document.getElementById('invoiceTabManual').style.display = (tab === 'manual') ? 'grid' : 'none';
+        document.getElementById('invoiceTabDashboard').style.display = (tab === 'dashboard') ? 'block' : 'none';
         document.getElementById('tabGenerar').style.background = (tab === 'generar') ? '#e67e22' : '#bdc3c7';
         document.getElementById('tabConfig').style.background = (tab === 'config') ? '#e67e22' : '#bdc3c7';
         document.getElementById('tabManual').style.background = (tab === 'manual') ? '#e67e22' : '#bdc3c7';
+        document.getElementById('tabDashboard').style.background = (tab === 'dashboard') ? '#2c3e50' : '#bdc3c7';
         document.getElementById('btnGeneratePDF').style.display = (tab === 'generar') ? 'block' : 'none';
         if (tab === 'manual') {
             this.populateManualInvClientSelect();
@@ -9755,6 +9757,126 @@ Motivo de cancelación (opcional):`);
                 this.addManualInvoiceItem();
             }
         }
+        if (tab === 'dashboard') {
+            const dashMonth = document.getElementById('dashMonth');
+            if (!dashMonth.value) {
+                const now = new Date();
+                dashMonth.value = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            }
+            this.renderInvoiceDashboard();
+        }
+    }
+
+    renderInvoiceDashboard() {
+        const monthVal = document.getElementById('dashMonth')?.value;
+        if (!monthVal) return;
+        const [year, month] = monthVal.split('-').map(Number);
+        const periodStart = `${year}-${String(month).padStart(2,'0')}-01`;
+        const lastDay = new Date(year, month, 0).getDate();
+        const periodEnd = `${year}-${String(month).padStart(2,'0')}-${lastDay}`;
+
+        // Facturas generadas para este período
+        const allInvoices = this.generatedInvoices || [];
+        const periodInvoices = allInvoices.filter(inv => {
+            const s = inv.startDate || '';
+            const e = inv.endDate || '';
+            return (s >= periodStart && s <= periodEnd) ||
+                   (e >= periodStart && e <= periodEnd) ||
+                   (s <= periodStart && e >= periodEnd);
+        });
+
+        // Servicios del calendario para este período (clientes con servicios pero sin factura)
+        const periodServs = (this.servs || []).filter(s => s.date >= periodStart && s.date <= periodEnd);
+        const clientsWithServs = [...new Set(periodServs.map(s => s.cliId))];
+        const invoicedClientIds = new Set(periodInvoices.map(inv => {
+            const cli = (this.clis || []).find(c => c.name === inv.clientName);
+            return cli ? String(cli.id) : null;
+        }).filter(Boolean));
+
+        // Clientes con servicios pero SIN factura (pendientes reales)
+        const pendingClients = clientsWithServs
+            .filter(cliId => !invoicedClientIds.has(String(cliId)))
+            .map(cliId => {
+                const cli = (this.clis || []).find(c => String(c.id) === String(cliId));
+                const servCount = periodServs.filter(s => String(s.cliId) === String(cliId)).length;
+                const total = periodServs.filter(s => String(s.cliId) === String(cliId))
+                    .reduce((sum, s) => sum + parseFloat(s.price || cli?.price || 0), 0);
+                return { cli, servCount, total };
+            }).filter(x => x.cli);
+
+        // Facturas generadas (pendientes de enviar — status no enviada/pagada)
+        const generatedNotSent = periodInvoices.filter(inv =>
+            inv.status !== 'enviada' && inv.status !== 'pagada' && inv.status !== 'parcial' && inv.status !== 'cancelada'
+        );
+
+        // Facturas enviadas/pagadas
+        const sentInvoices = periodInvoices.filter(inv =>
+            inv.status === 'enviada' || inv.status === 'pagada' || inv.status === 'parcial'
+        );
+
+        // Render columna Pendientes
+        const colPending = document.getElementById('dashColPending');
+        const totalPending = pendingClients.reduce((s, x) => s + x.total, 0);
+        document.getElementById('dashCountPending').textContent = pendingClients.length;
+        document.getElementById('dashTotalPending').textContent = '$' + totalPending.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        colPending.innerHTML = pendingClients.length === 0
+            ? '<p style="color:#999; font-size:0.8rem; text-align:center; padding:20px;">Sin pendientes ✅</p>'
+            : pendingClients.map(({cli, servCount, total}) => `
+                <div style="background:white; border:1px solid #fde8cc; border-radius:6px; padding:8px; margin-bottom:6px;">
+                    <div style="font-weight:bold; font-size:0.82rem; color:#2c3e50;">${cli.name}</div>
+                    <div style="font-size:0.75rem; color:#666;">${servCount} servicio${servCount !== 1 ? 's' : ''} · Est. $${total.toFixed(2)}</div>
+                    <button onclick="app.openInvoiceForClient('${cli.id}')" style="margin-top:4px; background:#e67e22; color:white; border:none; border-radius:4px; padding:3px 8px; font-size:0.72rem; cursor:pointer;">📄 Generar</button>
+                </div>`).join('');
+
+        // Render columna Generadas
+        const colGenerated = document.getElementById('dashColGenerated');
+        const totalGenerated = generatedNotSent.reduce((s, inv) => s + parseFloat(inv.total || 0), 0);
+        document.getElementById('dashCountGenerated').textContent = generatedNotSent.length;
+        document.getElementById('dashTotalGenerated').textContent = '$' + totalGenerated.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        colGenerated.innerHTML = generatedNotSent.length === 0
+            ? '<p style="color:#999; font-size:0.8rem; text-align:center; padding:20px;">Sin facturas generadas pendientes</p>'
+            : generatedNotSent.map(inv => `
+                <div style="background:white; border:1px solid #cce3f8; border-radius:6px; padding:8px; margin-bottom:6px;">
+                    <div style="font-weight:bold; font-size:0.82rem; color:#2c3e50;">${inv.clientName}</div>
+                    <div style="font-size:0.75rem; color:#666;">#${inv.invoiceNumber} · $${parseFloat(inv.total||0).toFixed(2)} · ${inv.serviceCount || 1} serv.</div>
+                    <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
+                        <button onclick="app.sendPendingInvoiceByGmail('${inv.id}')" style="background:#ea4335; color:white; border:none; border-radius:4px; padding:3px 8px; font-size:0.72rem; cursor:pointer;">📧 Enviar</button>
+                        ${inv.status !== 'pagada' ? `<button id="btnCobrarTarjeta_dash_${inv.id}" onclick="app.cobrarConTarjeta('${inv.id}')" style="background:#635bff; color:white; border:none; border-radius:4px; padding:3px 8px; font-size:0.72rem; cursor:pointer;">💳 Cobrar</button>` : ''}
+                    </div>
+                </div>`).join('');
+
+        // Render columna Enviadas/Pagadas
+        const colSent = document.getElementById('dashColSent');
+        const totalSent = sentInvoices.reduce((s, inv) => s + parseFloat(inv.total || 0), 0);
+        document.getElementById('dashCountSent').textContent = sentInvoices.length;
+        document.getElementById('dashTotalSent').textContent = '$' + totalSent.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        colSent.innerHTML = sentInvoices.length === 0
+            ? '<p style="color:#999; font-size:0.8rem; text-align:center; padding:20px;">Sin facturas enviadas</p>'
+            : sentInvoices.map(inv => {
+                const statusColor = inv.status === 'pagada' ? '#27ae60' : inv.status === 'parcial' ? '#f39c12' : '#3498db';
+                const statusLabel = inv.status === 'pagada' ? '✅ Pagada' : inv.status === 'parcial' ? '⚠️ Parcial' : '📧 Enviada';
+                return `<div style="background:white; border:1px solid #c3f0d4; border-radius:6px; padding:8px; margin-bottom:6px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="font-weight:bold; font-size:0.82rem; color:#2c3e50;">${inv.clientName}</div>
+                        <span style="font-size:0.7rem; color:${statusColor}; font-weight:bold;">${statusLabel}</span>
+                    </div>
+                    <div style="font-size:0.75rem; color:#666;">#${inv.invoiceNumber} · $${parseFloat(inv.total||0).toFixed(2)} · ${inv.serviceCount || 1} serv.</div>
+                    ${inv.status !== 'pagada' ? `<button onclick="app.openCobroDetalle('${inv.id}')" style="margin-top:4px; background:#16a085; color:white; border:none; border-radius:4px; padding:3px 8px; font-size:0.72rem; cursor:pointer;">💰 Registrar Pago</button>` : ''}
+                </div>`;
+            }).join('');
+
+        // Resumen
+        const totalAll = pendingClients.length + generatedNotSent.length + sentInvoices.length;
+        document.getElementById('dashSummary').textContent =
+            `Total clientes: ${totalAll} | Pendientes: ${pendingClients.length} | Generadas: ${generatedNotSent.length} | Enviadas/Pagadas: ${sentInvoices.length}`;
+    }
+
+    openInvoiceForClient(cliId) {
+        this.switchInvoiceTab('generar');
+        setTimeout(() => {
+            const sel = document.getElementById('invoiceClient');
+            if (sel) { sel.value = cliId; this.autoSetPaymentTerms && this.autoSetPaymentTerms(); }
+        }, 200);
     }
 
     populateManualInvClientSelect() {
@@ -13857,18 +13979,13 @@ Motivo de cancelación (opcional):`);
         const hrsFromPct = rate > 0 ? totalEmpPay / rate : 0;
         const totalHrs = hrsFromPct + directHrs;
 
-        // Overtime (>40 hrs)
-        const regularHrs = Math.min(totalHrs, 40);
-        const otHrs = Math.max(0, totalHrs - 40);
-
-        let regularPay, otPay;
-        if (otHrs > 0) {
-            regularPay = regularHrs * rate;
-            otPay = otHrs * otRate;
-        } else {
-            regularPay = totalEmpPay + directPay;
-            otPay = 0;
-        }
+        // Overtime — primero 40 hrs normales, el resto se convierte en OT
+        const regularPay40 = Math.min(totalEmpPay + directPay, 40 * rate);
+        const remainderPay = Math.max(0, (totalEmpPay + directPay) - regularPay40);
+        const regularHrs = regularPay40 / rate;
+        const otHrs = remainderPay > 0 ? remainderPay / otRate : 0;
+        const regularPay = regularPay40;
+        const otPay = remainderPay;
 
         const subtotal = regularPay + otPay;
         const total = subtotal + bonus;
@@ -13992,18 +14109,14 @@ Motivo de cancelación (opcional):`);
         // Calcular totales generales (igual que en pantalla) para la página de resumen impresa
         const otRate = rate * 1.5;
         const totalEmpPay = serviciosData.reduce((sum, s) => sum + s.pagoEmp, 0);
-        const hrsFromPct = rate > 0 ? totalEmpPay / rate : 0;
-        const totalHrsCalc = hrsFromPct + directHrs;
-        const regularHrsCalc = Math.min(totalHrsCalc, 40);
-        const otHrsCalc = Math.max(0, totalHrsCalc - 40);
-        let regularPayCalc, otPayCalc;
-        if (otHrsCalc > 0) {
-            regularPayCalc = regularHrsCalc * rate;
-            otPayCalc = otHrsCalc * otRate;
-        } else {
-            regularPayCalc = totalEmpPay + directPay;
-            otPayCalc = 0;
-        }
+        const totalToPay = totalEmpPay + directPay;
+        const regularPay40Calc = Math.min(totalToPay, 40 * rate);
+        const remainderPayCalc = Math.max(0, totalToPay - regularPay40Calc);
+        const regularHrsCalc = regularPay40Calc / rate;
+        const otHrsCalc = remainderPayCalc > 0 ? remainderPayCalc / otRate : 0;
+        const regularPayCalc = regularPay40Calc;
+        const otPayCalc = remainderPayCalc;
+        const totalHrsCalc = regularHrsCalc + otHrsCalc;
         const totalGeneral = regularPayCalc + otPayCalc + bonus;
         const fmt3 = n => '$' + n.toFixed(2);
 
@@ -14387,7 +14500,10 @@ document.addEventListener('click', function(e) {
         
         <!-- Tabs -->
         <div style="display: flex; gap: 5px; margin-bottom: 12px; border-bottom: 2px solid #ddd;">
-            <button id="tabGenerar" onclick="app.switchInvoiceTab('generar')" style="flex: 1; padding: 8px; border: none; background: #e67e22; color: white; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; font-size: 0.9rem;">
+            <button id="tabDashboard" onclick="app.switchInvoiceTab('dashboard')" style="flex: 1; padding: 8px; border: none; background: #2c3e50; color: white; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; font-size: 0.9rem;">
+                📊 Dashboard
+            </button>
+            <button id="tabGenerar" onclick="app.switchInvoiceTab('generar')" style="flex: 1; padding: 8px; border: none; background: #bdc3c7; color: white; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; font-size: 0.9rem;">
                 📄 Generar
             </button>
             <button id="tabConfig" onclick="app.switchInvoiceTab('config')" style="flex: 1; padding: 8px; border: none; background: #bdc3c7; color: white; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; font-size: 0.9rem;">
@@ -14396,6 +14512,54 @@ document.addEventListener('click', function(e) {
             <button id="tabManual" onclick="app.switchInvoiceTab('manual')" style="flex: 1; padding: 8px; border: none; background: #bdc3c7; color: white; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; font-size: 0.9rem;">
                 🧾 Manual
             </button>
+        </div>
+
+        <!-- TAB DASHBOARD -->
+        <div id="invoiceTabDashboard" style="display: none;">
+            <!-- Filtro de período -->
+            <div style="display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap;">
+                <label style="font-weight:bold; font-size:0.9rem;">📅 Período:</label>
+                <input type="month" id="dashMonth" style="padding:6px 10px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem;"
+                    onchange="app.renderInvoiceDashboard()">
+                <button onclick="app.renderInvoiceDashboard()" class="btn" style="background:#2c3e50; color:white; padding:6px 14px; font-size:0.85rem;">🔄 Actualizar</button>
+                <span id="dashSummary" style="font-size:0.85rem; color:#666; margin-left:auto;"></span>
+            </div>
+            <!-- 3 columnas -->
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; min-height:400px;">
+                <!-- Columna 1: Urgentes/Pendientes -->
+                <div style="background:#fef9f0; border:2px solid #e67e22; border-radius:8px; overflow:hidden;">
+                    <div style="background:#e67e22; color:white; padding:10px 12px; font-weight:bold; font-size:0.9rem; display:flex; justify-content:space-between; align-items:center;">
+                        <span>⚡ Pendientes</span>
+                        <span id="dashCountPending" style="background:rgba(255,255,255,0.3); border-radius:12px; padding:2px 8px; font-size:0.8rem;">0</span>
+                    </div>
+                    <div style="padding:8px; font-size:0.75rem; color:#e67e22; font-weight:bold; border-bottom:1px solid #fde8cc;">
+                        Total: <span id="dashTotalPending">$0.00</span>
+                    </div>
+                    <div id="dashColPending" style="padding:6px; overflow-y:auto; max-height:500px;"></div>
+                </div>
+                <!-- Columna 2: Generadas (no enviadas) -->
+                <div style="background:#f0f7ff; border:2px solid #3498db; border-radius:8px; overflow:hidden;">
+                    <div style="background:#3498db; color:white; padding:10px 12px; font-weight:bold; font-size:0.9rem; display:flex; justify-content:space-between; align-items:center;">
+                        <span>📄 Generadas</span>
+                        <span id="dashCountGenerated" style="background:rgba(255,255,255,0.3); border-radius:12px; padding:2px 8px; font-size:0.8rem;">0</span>
+                    </div>
+                    <div style="padding:8px; font-size:0.75rem; color:#3498db; font-weight:bold; border-bottom:1px solid #cce3f8;">
+                        Total: <span id="dashTotalGenerated">$0.00</span>
+                    </div>
+                    <div id="dashColGenerated" style="padding:6px; overflow-y:auto; max-height:500px;"></div>
+                </div>
+                <!-- Columna 3: Enviadas -->
+                <div style="background:#f0fff4; border:2px solid #27ae60; border-radius:8px; overflow:hidden;">
+                    <div style="background:#27ae60; color:white; padding:10px 12px; font-weight:bold; font-size:0.9rem; display:flex; justify-content:space-between; align-items:center;">
+                        <span>✅ Enviadas/Pagadas</span>
+                        <span id="dashCountSent" style="background:rgba(255,255,255,0.3); border-radius:12px; padding:2px 8px; font-size:0.8rem;">0</span>
+                    </div>
+                    <div style="padding:8px; font-size:0.75rem; color:#27ae60; font-weight:bold; border-bottom:1px solid #c3f0d4;">
+                        Total: <span id="dashTotalSent">$0.00</span>
+                    </div>
+                    <div id="dashColSent" style="padding:6px; overflow-y:auto; max-height:500px;"></div>
+                </div>
+            </div>
         </div>
         
         <!-- TAB GENERAR -->
