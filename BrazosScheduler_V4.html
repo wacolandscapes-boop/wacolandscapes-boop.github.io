@@ -4520,10 +4520,10 @@ class Scheduler {
                 // Precio fijo mensual
                 total = parseFloat(cli.price || 0);
             } else {
-                // Suma de visitas del mes (mensual por servicio, biweekly, perservice, etc.)
+                // Suma de visitas del mes
                 total = monthServs.reduce((sum, s) => {
-                    const c = this.clis.find(c => c.id == s.cliId);
-                    return sum + parseFloat(c?.price || 0);
+                    const c = this.clis.find(c => String(c.id) === String(s.cliId));
+                    return sum + parseFloat(c?.price || cli.price || 0);
                 }, 0);
             }
 
@@ -10685,6 +10685,13 @@ Motivo de cancelación (opcional):`);
         localStorage.setItem('lastInvoiceNumber', invoiceNumber.toString());
         this.save();
         this.updatePendingBadge();
+        // Sincronizar a Drive inmediatamente para que el Worker de Stripe
+        // pueda encontrar la factura cuando el cliente pague con tarjeta
+        if (this.driveConnected) {
+            setTimeout(() => {
+                this.driveSyncNow().catch(e => console.warn('⚠️ No se pudo sincronizar a Drive:', e));
+            }, 500);
+        }
     }
 
     async sendInvoiceByGmail(pdfBlob, client, invoiceNumber, total, startDate, endDate) {
@@ -10765,6 +10772,13 @@ Motivo de cancelación (opcional):`);
                 );
             }
             this.save();
+            // Sincronizar a Drive inmediatamente para que el Worker de Stripe
+            // pueda encontrar la factura cuando el cliente pague con tarjeta
+            if (this.driveConnected) {
+                this.driveSyncNow().then(() => {
+                    console.log('✅ Factura sincronizada a Drive después de enviar por email');
+                }).catch(e => console.warn('⚠️ No se pudo sincronizar a Drive:', e));
+            }
             // Actualizar contador de pendientes si está visible
             const pendBadge = document.getElementById('pendingInvoicesBadge');
             if (pendBadge) pendBadge.textContent = (this.pendingInvoices || []).length;
@@ -13265,7 +13279,6 @@ Motivo de cancelación (opcional):`);
                 // ☁️ Auto-sync cada 5 minutos
                 if (this._autoSyncInterval) clearInterval(this._autoSyncInterval);
                 this._autoSyncInterval = setInterval(async () => {
-                    // Verificar token antes de cualquier llamada
                     if (!this.driveConnected || !this.driveToken) return;
                     if (this.tokenExpiry && Date.now() > this.tokenExpiry) {
                         this.driveConnected = false;
@@ -13275,14 +13288,31 @@ Motivo de cancelación (opcional):`);
                         clearInterval(this._autoSyncInterval);
                         return;
                     }
-                        await this.driveSyncNow();
-                        // Descargar horarios por fecha para actualizar calendario
-                        try { await this.descargarHorariosGrupos(); } catch(e) {}
-                        const now = new Date();
-                        const t = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
-                        document.getElementById('driveSyncLabel').textContent = 'Sync ' + t;
-                        document.getElementById('driveSyncBtn').style.background = '#27ae60';
+                    await this.driveSyncNow();
+                    try { await this.descargarHorariosGrupos(); } catch(e) {}
+                    const now = new Date();
+                    const t = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
+                    document.getElementById('driveSyncLabel').textContent = 'Sync ' + t;
+                    document.getElementById('driveSyncBtn').style.background = '#27ae60';
                 }, 5 * 60 * 1000);
+
+                // ☁️ Verificar pagos de Stripe cuando la app recupera el foco
+                document.addEventListener('visibilitychange', async () => {
+                    if (document.visibilityState === 'visible' && this.driveConnected) {
+                        // Verificar si hay facturas enviadas recientemente sin pago registrado
+                        const recentUnpaid = (this.generatedInvoices || []).some(inv =>
+                            (inv.status === 'enviada' || inv.status === 'pendiente') &&
+                            inv.sentAt && (new Date() - new Date(inv.sentAt)) < 7 * 24 * 60 * 60 * 1000
+                        );
+                        if (recentUnpaid) {
+                            console.log('👀 App recuperó foco — verificando pagos de Stripe en Drive...');
+                            await this.driveSyncNow();
+                            const now = new Date();
+                            const t = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
+                            document.getElementById('driveSyncLabel').textContent = 'Sync ' + t;
+                        }
+                    }
+                });
             }
         });
         this.tokenClient.requestAccessToken({ prompt: '' });
