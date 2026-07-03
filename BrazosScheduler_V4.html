@@ -4489,73 +4489,53 @@ class Scheduler {
             }
 
         // Recurrentes → mostrar a partir del día 15 con servicios del mes actual
-        // También revisar el mes anterior si ya pasó el día 15 y no se facturó
-        const monthsToCheck = [];
+        if (currentDay < 15) return;
 
-        // Mes actual (si ya es día 15 o más)
-        if (currentDay >= 15) {
-            monthsToCheck.push({ year: currentYear, month: currentMonth });
+        const periodStart = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
+        const periodEnd = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
+        const periodKey = `${clientName}-${currentYear}-${String(currentMonth+1).padStart(2,'0')}-recurrente`;
+
+        if (this.pendingInvoices.some(p => p.periodKey === periodKey)) return;
+        const alreadyGenerated = hasGeneratedInvoice(clientName, periodStart, periodEnd);
+        if (alreadyGenerated) return;
+
+        const monthServs = this.servs.filter(s =>
+            clients.some(c => c.id == s.cliId) &&
+            !s.cancelled &&
+            s.date >= periodStart && s.date <= periodEnd
+        );
+        if (monthServs.length === 0) return;
+
+        let total = 0;
+        if ((billingPeriod === 'monthly' || billingPeriod === 'fixed_monthly') &&
+            cli.invoicingType !== 'monthly') {
+            total = parseFloat(cli.price || 0);
+        } else {
+            total = monthServs.reduce((sum, s) => {
+                const c = this.clis.find(c => String(c.id) === String(s.cliId));
+                return sum + parseFloat(c?.price || cli.price || 0);
+            }, 0);
         }
 
-        // Mes anterior (si no tiene factura generada — captura facturas perdidas)
-        const prevMonth2 = currentMonth === 0 ? 11 : currentMonth - 1;
-        const prevYear2 = currentMonth === 0 ? currentYear - 1 : currentYear;
-        monthsToCheck.push({ year: prevYear2, month: prevMonth2 });
+        const typeLabel = cliType === 'semanal' ? 'Semanal' :
+                          cliType === 'quincenal' ? 'Quincenal' : 'Mensual';
+        const lastDay = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
 
-        monthsToCheck.forEach(({ year, month }) => {
-            const periodStart = new Date(year, month, 1).toISOString().split('T')[0];
-            const periodEnd = new Date(year, month + 1, 0).toISOString().split('T')[0];
-            const periodKey = `${clientName}-${year}-${String(month+1).padStart(2,'0')}-recurrente`;
-
-            if (this.pendingInvoices.some(p => p.periodKey === periodKey)) return;
-            
-            // Verificar si ya existe factura generada/enviada/pagada para este período
-            const alreadyGenerated = hasGeneratedInvoice(clientName, periodStart, periodEnd);
-            if (alreadyGenerated) return;
-
-            const monthServs = this.servs.filter(s =>
-                clients.some(c => c.id == s.cliId) &&
-                !s.cancelled &&
-                s.date >= periodStart && s.date <= periodEnd
-            );
-            if (monthServs.length === 0) return;
-
-            let total = 0;
-            if ((billingPeriod === 'monthly' || billingPeriod === 'fixed_monthly') && 
-                cli.invoicingType !== 'monthly') {
-                // Precio fijo mensual
-                total = parseFloat(cli.price || 0);
-            } else {
-                // Suma de visitas del mes
-                total = monthServs.reduce((sum, s) => {
-                    const c = this.clis.find(c => String(c.id) === String(s.cliId));
-                    return sum + parseFloat(c?.price || cli.price || 0);
-                }, 0);
-            }
-
-            const typeLabel = cliType === 'semanal' ? 'Semanal' :
-                              cliType === 'quincenal' ? 'Quincenal' : 'Mensual';
-            const isPastMonth = (year < currentYear) || (year === currentYear && month < currentMonth);
-            const lastDay = new Date(year, month + 1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
-
-            this.pendingInvoices.push({
-                id: Date.now() + Math.random(),
-                periodKey,
-                clientName,
-                clientEmail: cli.email || '',
-                clientIds: clients.map(c => c.id),
-                type: cliType,
-                billingPeriod,
-                startDate: periodStart,
-                endDate: periodEnd,
-                serviceCount: monthServs.length,
-                total,
-                urgency: isPastMonth ? 'overdue' : 'normal',
-                reason: isPastMonth
-                    ? `⚠️ ${typeLabel} — Factura pendiente del mes anterior`
-                    : `📋 ${typeLabel} — Revisar y enviar el ${lastDay}`,
-                createdAt: today.toISOString()
-            });
+        this.pendingInvoices.push({
+            id: Date.now() + Math.random(),
+            periodKey,
+            clientName,
+            clientEmail: cli.email || '',
+            clientIds: clients.map(c => c.id),
+            type: cliType,
+            billingPeriod,
+            startDate: periodStart,
+            endDate: periodEnd,
+            serviceCount: monthServs.length,
+            total,
+            urgency: 'normal',
+            reason: `📋 ${typeLabel} — Revisar y enviar el ${lastDay}`,
+            createdAt: today.toISOString()
         });
         });
 
