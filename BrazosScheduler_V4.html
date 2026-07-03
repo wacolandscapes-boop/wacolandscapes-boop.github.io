@@ -1214,6 +1214,12 @@
                             <option value="15" selected>Net 15 (15 días)</option>
                             <option value="30">Net 30 (30 días)</option>
                         </select>
+                        <div style="grid-column:span 2; display:flex; align-items:center; gap:8px; margin-top:4px;">
+                            <label style="font-size:0.8rem; color:#555; white-space:nowrap;">🏛️ Tax Rate:</label>
+                            <input type="number" id="cliTaxRate" step="0.01" min="0" max="10" placeholder="8.25" 
+                                style="width:80px; padding:4px 8px; border:1px solid #ddd; border-radius:4px; font-size:0.85rem;">
+                            <span style="font-size:0.8rem; color:#555;">% (default 8.25% — verificar en gis.cpa.texas.gov/search)</span>
+                        </div>
                         <div style="grid-column:span 2; background:#f0fff4; border:1px solid #27ae60; border-radius:6px; padding:8px; margin-top:6px;">
                             <label style="font-size:0.8rem; font-weight:700; color:#27ae60; display:block; margin-bottom:4px;">💳 Cobro Automático con Tarjeta</label>
                             <div style="display:flex; align-items:center; gap:8px;">
@@ -5230,59 +5236,67 @@ class Scheduler {
 
     // ── HELPER: dibuja la caja de Payment Options compacta con iconos de tarjetas ──
     drawPaymentOptions(doc, x, y, width, invoiceNumber, clientName, amount) {
-        const h = 26;
-        // Fondo oscuro
-        doc.setDrawColor(44, 62, 80);
-        doc.setFillColor(44, 62, 80);
+        const h = 32;
+        // Fondo blanco con borde verde llamativo
+        doc.setDrawColor(39, 174, 96);
+        doc.setFillColor(240, 255, 244);
+        doc.setLineWidth(1.5);
         doc.roundedRect(x, y, width, h, 2, 2, 'FD');
+        doc.setLineWidth(0.2);
 
-        // Título
-        doc.setFontSize(7.5);
+        // Título llamativo
+        doc.setFontSize(9);
         doc.setFont(undefined, 'bold');
-        doc.setTextColor(255, 255, 255);
-        doc.text('PAYMENT OPTIONS:', x + 4, y + 5.5);
+        doc.setTextColor(39, 174, 96);
+        doc.text('💳 PAYMENT OPTIONS — HOW TO PAY YOUR INVOICE:', x + 4, y + 6);
 
         // Iconos de tarjetas
         const iconY = y + 1.5;
         const iconH = 5;
         const iconW = 11;
-        // VISA
-        doc.setFillColor(26, 31, 113); doc.setDrawColor(200,200,200);
+        doc.setFillColor(26, 31, 113); doc.setDrawColor(200,200,200); doc.setLineWidth(0.2);
         doc.roundedRect(x + width - 48, iconY, iconW, iconH, 1, 1, 'FD');
         doc.setTextColor(255,255,255); doc.setFontSize(4.5); doc.setFont(undefined,'bold');
         doc.text('VISA', x + width - 42.5, iconY + 3.4, {align:'center'});
-        // MC
         doc.setFillColor(235, 0, 27); doc.setDrawColor(200,200,200);
         doc.roundedRect(x + width - 36, iconY, iconW, iconH, 1, 1, 'FD');
         doc.setFillColor(247, 158, 27); doc.setDrawColor(247,158,27);
         doc.roundedRect(x + width - 31, iconY, 6, iconH, 1, 1, 'FD');
         doc.setTextColor(255,255,255); doc.setFontSize(4.5); doc.setFont(undefined,'bold');
         doc.text('MC', x + width - 30.5, iconY + 3.4, {align:'center'});
-        // AMEX
         doc.setFillColor(0, 123, 193); doc.setDrawColor(200,200,200);
         doc.roundedRect(x + width - 24, iconY, iconW, iconH, 1, 1, 'FD');
         doc.setTextColor(255,255,255); doc.setFontSize(4.5); doc.setFont(undefined,'bold');
         doc.text('AMEX', x + width - 18.5, iconY + 3.4, {align:'center'});
-        // DISC
         doc.setFillColor(255, 102, 0); doc.setDrawColor(200,200,200);
         doc.roundedRect(x + width - 12, iconY, iconW, iconH, 1, 1, 'FD');
         doc.setTextColor(255,255,255); doc.setFontSize(4.5); doc.setFont(undefined,'bold');
         doc.text('DISC', x + width - 6.5, iconY + 3.4, {align:'center'});
 
-        // Línea 1: Cheque
-        doc.setFontSize(7); doc.setFont(undefined, 'bold');
-        doc.setTextColor(220, 220, 220);
-        doc.text('• Check payable to: "Brazos Cleaning Services"   |   Mail to: P.O Box 7543, Waco, TX. 76714', x + 4, y + 12);
+        // Línea 1: Cheque en negro sobre fondo claro
+        doc.setFontSize(7.5); doc.setFont(undefined, 'bold');
+        doc.setTextColor(44, 62, 80);
+        doc.text('✉ CHECK:', x + 4, y + 13);
+        doc.setFont(undefined, 'normal');
+        doc.text('Make payable to "Brazos Cleaning Services"  |  Mail to: P.O Box 7543, Waco, TX. 76714', x + 22, y + 13);
 
-        // Línea 2: Tarjeta con link — URL simple sin encodeURIComponent para evitar caracteres corruptos
+        // Línea 2: Tarjeta con link prominente
+        doc.setFontSize(8); doc.setFont(undefined, 'bold');
+        doc.setTextColor(41, 128, 185);
+        doc.text('💳 CREDIT/DEBIT CARD:', x + 4, y + 21);
+        doc.setFontSize(8);
         const clientSafe = (clientName || '').replace(/[^a-zA-Z0-9 ]/g, '').trim().replace(/ /g, '+');
         const payUrl = 'https://brazos-stripe-worker.ranulfocast.workers.dev/pay-invoice?inv=' + invoiceNumber + '&client=' + clientSafe + '&amount=' + parseFloat(amount || 0).toFixed(2);
-        doc.setTextColor(99, 202, 255);
-        doc.text('• Pay with Credit/Debit Card:', x + 4, y + 20);
-        doc.textWithLink(' Click here to pay securely with Stripe', x + 53, y + 20, { url: payUrl });
+        doc.textWithLink('CLICK HERE TO PAY SECURELY ONLINE', x + 55, y + 21, { url: payUrl });
+
+        // Línea 3: nota pequeña
+        doc.setFontSize(6.5); doc.setFont(undefined, 'normal');
+        doc.setTextColor(100, 100, 100);
+        doc.text('Secure payment powered by Stripe. Accepted: Visa, Mastercard, Amex, Discover, and more.', x + 4, y + 28);
 
         doc.setFont(undefined, 'normal');
         doc.setTextColor(0, 0, 0);
+        doc.setLineWidth(0.2);
     }
 
     async cobrarConTarjeta(id) {
@@ -7772,6 +7786,7 @@ Motivo de cancelación (opcional):`);
                 const payTerms = document.getElementById('cliPaymentTerms') ? parseInt(document.getElementById('cliPaymentTerms').value) : 15;
                 const autoCharge = document.getElementById('cliAutoCharge') ? document.getElementById('cliAutoCharge').checked : (this.clis[idx].autoCharge || false);
                 const stripeCustomerId = document.getElementById('cliStripeCustomerId') ? document.getElementById('cliStripeCustomerId').value.trim() : (this.clis[idx].stripeCustomerId || '');
+                const taxRate = document.getElementById('cliTaxRate') ? parseFloat(document.getElementById('cliTaxRate').value) || 8.25 : (this.clis[idx].taxRate || 8.25);
 
                 if(isMulti) {
                     // Para multi-propiedad: actualizar datos base y agregar/quitar propiedades
@@ -7789,6 +7804,7 @@ Motivo de cancelación (opcional):`);
                         c.type = type; c.serviceType = serviceType;
                         c.billingPeriod = billingPeriod; c.invoicingType = invoicingType;
                         c.autoCharge = autoCharge;
+                        c.taxRate = taxRate;
                         if (stripeCustomerId) c.stripeCustomerId = stripeCustomerId;
                     };
 
@@ -7816,14 +7832,19 @@ Motivo de cancelación (opcional):`);
                     }
 
                     // Agregar propiedades genuinamente nuevas (que no correspondan a ningún registro existente)
-                    const fieldPropIds = fieldProps.map(p => p.propId);
+                    const fieldPropIds = fieldProps.map(p => p.propId.trim().toLowerCase());
+                    const existingPropIdsNorm = existingPropIds.map(p => (p || '').trim().toLowerCase());
                     fieldProps.forEach((fp, i) => {
-                        if(!existingPropIds.includes(fp.propId) && fp.propId) {
+                        const fpNorm = (fp.propId || '').trim().toLowerCase();
+                        if(!existingPropIdsNorm.includes(fpNorm) && fp.propId.trim()) {
                             this.clis.push({
-                                id: String(Date.now() + i * 100), name, propId: fp.propId,
+                                id: String(Date.now() + i * 100 + Math.floor(Math.random() * 1000)), 
+                                name, propId: fp.propId.trim(),
                                 price: fp.price || price, tel, address, city, zip, type,
-                                serviceType, billingPeriod, invoicingType
+                                serviceType, billingPeriod, invoicingType,
+                                taxRate: taxRate,
                             });
+                            existingPropIdsNorm.push(fpNorm); // evitar duplicados en el mismo save
                         }
                     });
 
@@ -7832,7 +7853,7 @@ Motivo de cancelación (opcional):`);
                         if(c.id === mainCli.id) return true;
                         if(c.name !== name) return true;
                         if(c.type!=='airbnb'&&c.type!=='construccion') return true;
-                        return fieldPropIds.includes(c.propId);
+                        return fieldPropIds.includes((c.propId || '').trim().toLowerCase());
                     });
 
                 } else {
@@ -7924,6 +7945,7 @@ Motivo de cancelación (opcional):`);
             const invTypeNew = document.getElementById('cliInvoicingType') ? document.getElementById('cliInvoicingType').value : 'monthly';
             const autoCharge = document.getElementById('cliAutoCharge') ? document.getElementById('cliAutoCharge').checked : false;
             const stripeCustomerId = document.getElementById('cliStripeCustomerId') ? document.getElementById('cliStripeCustomerId').value.trim() : '';
+            const taxRate = document.getElementById('cliTaxRate') ? parseFloat(document.getElementById('cliTaxRate').value) || 8.25 : 8.25;
             const newCli = {
                 id: Date.now(),
                 name: name,
@@ -7940,6 +7962,7 @@ Motivo de cancelación (opcional):`);
                 invoicingType: invTypeNew,
                 autoCharge: autoCharge,
                 stripeCustomerId: stripeCustomerId,
+                taxRate: taxRate,
             };
             this.clis.push(newCli);
         }
@@ -7985,6 +8008,9 @@ Motivo de cancelación (opcional):`);
             }
             if (document.getElementById('cliStripeCustomerId')) {
                 document.getElementById('cliStripeCustomerId').value = cli.stripeCustomerId || '';
+            }
+            if (document.getElementById('cliTaxRate')) {
+                document.getElementById('cliTaxRate').value = cli.taxRate !== undefined ? cli.taxRate : 8.25;
             }
             document.getElementById('editCliId').value = cli.id;
             // Bloque de regeneración
@@ -9741,19 +9767,28 @@ Motivo de cancelación (opcional):`);
     }
     
     autoSetPaymentTerms() {
-        // Si el usuario cambia manualmente de cliente dentro del modal (sin cerrarlo),
-        // se asume que ya no quiere editar la factura original — se limpia el número
-        // para no aplicarlo por error a una factura nueva de otro cliente.
         const hiddenNum = document.getElementById('editingInvoiceNumber');
         if (hiddenNum) hiddenNum.value = '';
         const clientId = document.getElementById('invoiceClient').value;
         if (!clientId) return;
         const cli = this.clis.find(c => String(c.id) === String(clientId));
-        if (!cli || cli.paymentTerms === undefined) return;
+        if (!cli) return;
         const offsetSel = document.getElementById('invoicePaymentDueOffset');
-        if (offsetSel) {
+        if (offsetSel && cli.paymentTerms !== undefined) {
             offsetSel.value = String(cli.paymentTerms);
             this.updatePaymentDueDate();
+        }
+        // Auto-llenar la tasa de tax del cliente si tiene una configurada
+        if (cli.taxRate !== undefined && cli.taxRate > 0) {
+            const applyTaxCheckbox = document.getElementById('invoiceApplyTax');
+            const taxRateInput = document.getElementById('invoiceTaxRate');
+            if (applyTaxCheckbox && taxRateInput) {
+                applyTaxCheckbox.checked = true;
+                taxRateInput.value = cli.taxRate;
+                this.toggleTaxField && this.toggleTaxField();
+                const container = document.getElementById('taxFieldContainer');
+                if (container) container.style.display = 'block';
+            }
         }
     }
 
@@ -11491,7 +11526,7 @@ Motivo de cancelación (opcional):`);
         // Empujar el total hacia la parte inferior de la página
         const pageHeight = doc.internal.pageSize.getHeight();
         const noteOffset = (applyTax && taxRate > 0) ? 44 : 37;
-        const totalNeeded = noteOffset + 26 + 5;
+        const totalNeeded = noteOffset + 32 + 5;
         const minY = pageHeight - totalNeeded;
         if (y > minY) { doc.addPage(); y = 20; }
         else { y = minY; } // Siempre al fondo de la página
@@ -11935,7 +11970,7 @@ Motivo de cancelación (opcional):`);
         // Empujar el total hacia arriba para que quepan: bloque total + "Thank you" + caja Payment Options (26mm)
         const pageHeight2 = doc.internal.pageSize.getHeight();
         const totalBlockHeight2 = (applyTax && taxRate > 0) ? 25 : 15;
-        const noteBoxHeight2 = 26;
+        const noteBoxHeight2 = 32;
         const thankYouOffset2 = (applyTax && taxRate > 0) ? 37 : 30;
         const noteOffset2 = (applyTax && taxRate > 0) ? 44 : 37;
         const totalNeeded2 = noteOffset2 + noteBoxHeight2 + 5;
