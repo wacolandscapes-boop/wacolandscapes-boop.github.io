@@ -5237,61 +5237,70 @@ class Scheduler {
     // ── HELPER: dibuja la caja de Payment Options compacta con iconos de tarjetas ──
     drawPaymentOptions(doc, x, y, width, invoiceNumber, clientName, amount) {
         const h = 32;
-        // Fondo blanco con borde verde llamativo
         doc.setDrawColor(39, 174, 96);
         doc.setFillColor(240, 255, 244);
         doc.setLineWidth(1.5);
         doc.roundedRect(x, y, width, h, 2, 2, 'FD');
         doc.setLineWidth(0.2);
 
-        // Título
         doc.setFontSize(9);
         doc.setFont(undefined, 'bold');
         doc.setTextColor(39, 174, 96);
         doc.text('PAYMENT OPTIONS — HOW TO PAY YOUR INVOICE:', x + 4, y + 6);
 
-        // Iconos de tarjetas como imágenes SVG
-        const iconW = 11, iconH = 7, iconY2 = y + 1;
-        const visaB64 = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0NCcgaGVpZ2h0PScyOCcgdmlld0JveD0nMCAwIDQ0IDI4Jz48cmVjdCB3aWR0aD0nNDQnIGhlaWdodD0nMjgnIHJ4PSc0JyBmaWxsPSd3aGl0ZScgc3Ryb2tlPScjZGRkJyBzdHJva2Utd2lkdGg9JzEnLz48dGV4dCB4PScyMicgeT0nMTknIGZvbnQtZmFtaWx5PSdBcmlhbCcgZm9udC1zaXplPScxMicgZm9udC13ZWlnaHQ9J2JvbGQnIGZvbnQtc3R5bGU9J2l0YWxpYycgZmlsbD0nIzFBMUY3MScgdGV4dC1hbmNob3I9J21pZGRsZSc+VklTQTwvdGV4dD48L3N2Zz4=';
-        const mcB64   = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0NCcgaGVpZ2h0PScyOCcgdmlld0JveD0nMCAwIDQ0IDI4Jz48cmVjdCB3aWR0aD0nNDQnIGhlaWdodD0nMjgnIHJ4PSc0JyBmaWxsPSd3aGl0ZScgc3Ryb2tlPScjZGRkJyBzdHJva2Utd2lkdGg9JzEnLz48Y2lyY2xlIGN4PScxNycgY3k9JzE0JyByPSc5JyBmaWxsPScjRUIwMDFCJy8+PGNpcmNsZSBjeD0nMjcnIGN5PScxNCcgcj0nOScgZmlsbD0nI0Y3OUUxQicvPjxwYXRoIGQ9J00yMiA3LjNhOSA5IDAgMCAxIDAgMTMuNEE5IDkgMCAwIDEgMjIgNy4zeicgZmlsbD0nI0ZGNUYwMCcvPjwvc3ZnPg==';
-        const amexB64 = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0NCcgaGVpZ2h0PScyOCcgdmlld0JveD0nMCAwIDQ0IDI4Jz48cmVjdCB3aWR0aD0nNDQnIGhlaWdodD0nMjgnIHJ4PSc0JyBmaWxsPScjMkU3N0JDJy8+PHRleHQgeD0nMjInIHk9JzE5JyBmb250LWZhbWlseT0nQXJpYWwnIGZvbnQtc2l6ZT0nOScgZm9udC13ZWlnaHQ9J2JvbGQnIGZpbGw9J3doaXRlJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5BTUVYPC90ZXh0Pjwvc3ZnPg==';
-        const discB64 = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0NCcgaGVpZ2h0PScyOCcgdmlld0JveD0nMCAwIDQ0IDI4Jz48cmVjdCB3aWR0aD0nNDQnIGhlaWdodD0nMjgnIHJ4PSc0JyBmaWxsPSd3aGl0ZScgc3Ryb2tlPScjZGRkJyBzdHJva2Utd2lkdGg9JzEnLz48cmVjdCB4PScxJyB5PScxJyB3aWR0aD0nNDInIGhlaWdodD0nOCcgcng9JzInIGZpbGw9JyNGRjY2MDAnLz48dGV4dCB4PScyMicgeT0nMjEnIGZvbnQtZmFtaWx5PSdBcmlhbCcgZm9udC1zaXplPSc4JyBmb250LXdlaWdodD0nYm9sZCcgZmlsbD0nI0ZGNjYwMCcgdGV4dC1hbmNob3I9J21pZGRsZSc+RElTQ09WRVI8L3RleHQ+PC9zdmc+';
-        try {
-            doc.addImage(visaB64, 'SVG', x + width - 49, iconY2, iconW, iconH);
-            doc.addImage(mcB64,   'SVG', x + width - 37, iconY2, iconW, iconH);
-            doc.addImage(amexB64, 'SVG', x + width - 25, iconY2, iconW, iconH);
-            doc.addImage(discB64, 'SVG', x + width - 13, iconY2, iconW, iconH);
-        } catch(e) {
-            // Fallback si SVG no es soportado — rectángulos simples
-            doc.setFillColor(26,31,113); doc.roundedRect(x+width-49, iconY2, iconW, iconH, 1,1,'F');
-            doc.setFillColor(235,0,27);  doc.roundedRect(x+width-37, iconY2, iconW, iconH, 1,1,'F');
-            doc.setFillColor(46,119,188);doc.roundedRect(x+width-25, iconY2, iconW, iconH, 1,1,'F');
-            doc.setFillColor(255,102,0); doc.roundedRect(x+width-13, iconY2, iconW, iconH, 1,1,'F');
-        }
+        // Iconos de tarjetas usando canvas del navegador (PNG real)
+        const makeCardPng = (drawFn) => {
+            try {
+                const cv = document.createElement('canvas');
+                cv.width = 88; cv.height = 56;
+                const ctx = cv.getContext('2d');
+                ctx.fillStyle = '#ffffff'; ctx.beginPath();
+                ctx.roundRect(0,0,88,56,8); ctx.fill();
+                ctx.strokeStyle = '#cccccc'; ctx.lineWidth = 2; ctx.stroke();
+                drawFn(ctx);
+                return cv.toDataURL('image/png');
+            } catch(e) { return null; }
+        };
+        const iconW = 12, iconH = 7.5, iconY2 = y + 1.2;
+        const cardPngs = [
+            makeCardPng(ctx => {
+                ctx.fillStyle = '#1A1F71'; ctx.font = 'bold italic 22px Arial';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText('VISA', 44, 28);
+            }),
+            makeCardPng(ctx => {
+                ctx.fillStyle = '#EB001B'; ctx.beginPath(); ctx.arc(30,28,18,0,Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#F79E1B'; ctx.beginPath(); ctx.arc(58,28,18,0,Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#FF5F00';
+                ctx.beginPath(); ctx.moveTo(44,11); ctx.bezierCurveTo(52,17,52,39,44,45);
+                ctx.bezierCurveTo(36,39,36,17,44,11); ctx.fill();
+            }),
+            makeCardPng(ctx => {
+                ctx.fillStyle = '#2E77BC'; ctx.beginPath(); ctx.roundRect(0,0,88,56,8); ctx.fill();
+                ctx.fillStyle = '#ffffff'; ctx.font = 'bold 18px Arial';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText('AMEX', 44, 28);
+            }),
+            makeCardPng(ctx => {
+                ctx.fillStyle = '#231F20'; ctx.font = 'bold 13px Arial';
+                ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+                ctx.fillText('DISC', 5, 28);
+                ctx.fillStyle = '#FF6600'; ctx.beginPath(); ctx.arc(68,28,20,0,Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#ffffff'; ctx.font = 'bold 15px Arial';
+                ctx.textAlign = 'center'; ctx.fillText('D', 68, 28);
+            }),
+        ];
+        cardPngs.forEach((png, i) => {
+            if (png) {
+                try { doc.addImage(png, 'PNG', x + width - 51 + i*13.5, iconY2, iconW, iconH); }
+                catch(e2) {
+                    const cols = [[26,31,113],[235,0,27],[46,119,188],[255,102,0]];
+                    doc.setFillColor(...cols[i]);
+                    doc.roundedRect(x+width-51+i*13.5, iconY2, iconW, iconH, 1,1,'F');
+                }
+            }
+        });
 
-        // Línea 1: Cheque
-        doc.setFontSize(7.5); doc.setFont(undefined, 'bold');
-        doc.setTextColor(44, 62, 80);
-        doc.text('CHECK:', x + 4, y + 13);
-        doc.setFont(undefined, 'normal');
-        doc.text('Make payable to "Brazos Cleaning Services"  |  Mail to: P.O Box 7543, Waco, TX. 76714', x + 22, y + 13);
-
-        // Línea 2: Tarjeta con link prominente
-        doc.setFontSize(8); doc.setFont(undefined, 'bold');
-        doc.setTextColor(41, 128, 185);
-        doc.text('CREDIT/DEBIT CARD:', x + 4, y + 21);
-        const clientSafe = (clientName || '').replace(/[^a-zA-Z0-9 ]/g, '').trim().replace(/ /g, '+');
-        const payUrl = 'https://brazos-stripe-worker.ranulfocast.workers.dev/pay-invoice?inv=' + invoiceNumber + '&client=' + clientSafe + '&amount=' + parseFloat(amount || 0).toFixed(2);
-        doc.textWithLink('CLICK HERE TO PAY SECURELY ONLINE', x + 55, y + 21, { url: payUrl });
-
-        // Nota pequeña
-        doc.setFontSize(6.5); doc.setFont(undefined, 'normal');
-        doc.setTextColor(100, 100, 100);
-        doc.text('Secure payment powered by Stripe. Accepted: Visa, Mastercard, Amex, Discover, and more.', x + 4, y + 28);
-
-        doc.setFont(undefined, 'normal');
-        doc.setTextColor(0, 0, 0);
-        doc.setLineWidth(0.2);
     }
 
     async cobrarConTarjeta(id) {
