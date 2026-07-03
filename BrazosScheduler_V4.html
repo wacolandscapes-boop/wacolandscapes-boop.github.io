@@ -5281,6 +5281,29 @@ class Scheduler {
             }
         });
 
+        // Línea 1: Cheque
+        doc.setFontSize(7.5); doc.setFont(undefined, 'bold');
+        doc.setTextColor(44, 62, 80);
+        doc.text('CHECK:', x + 4, y + 13);
+        doc.setFont(undefined, 'normal');
+        doc.text('Make payable to "Brazos Cleaning Services"  |  Mail to: P.O Box 7543, Waco, TX. 76714', x + 22, y + 13);
+
+        // Línea 2: Tarjeta con link
+        doc.setFontSize(8); doc.setFont(undefined, 'bold');
+        doc.setTextColor(41, 128, 185);
+        doc.text('CREDIT/DEBIT CARD:', x + 4, y + 21);
+        const clientSafe = (clientName || '').replace(/[^a-zA-Z0-9 ]/g, '').trim().replace(/ /g, '+');
+        const payUrl = 'https://brazos-stripe-worker.ranulfocast.workers.dev/pay-invoice?inv=' + invoiceNumber + '&client=' + clientSafe + '&amount=' + parseFloat(amount || 0).toFixed(2);
+        doc.textWithLink('CLICK HERE TO PAY SECURELY ONLINE', x + 55, y + 21, { url: payUrl });
+
+        // Nota pequeña
+        doc.setFontSize(6.5); doc.setFont(undefined, 'normal');
+        doc.setTextColor(100, 100, 100);
+        doc.text('Secure payment powered by Stripe. Accepted: Visa, Mastercard, Amex, Discover, and more.', x + 4, y + 28);
+
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(0, 0, 0);
+        doc.setLineWidth(0.2);
     }
 
     async cobrarConTarjeta(id) {
