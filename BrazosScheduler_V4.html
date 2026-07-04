@@ -4399,7 +4399,7 @@ class Scheduler {
             }
 
             // ── REGLA 2: SERVICIO ÚNICO → el día del servicio ──
-            if (cliType === 'unico' || cliType === 'construccion') {
+            if (cliType === 'unico') {
                 // Buscar servicios de hoy o esta semana sin factura
                 const weekAhead = new Date(today);
                 weekAhead.setDate(today.getDate() + 6);
@@ -4435,6 +4435,92 @@ class Scheduler {
                         total,
                         urgency: isToday ? 'high' : 'normal',
                         reason: isToday ? '📧 Servicio hoy — Enviar factura' : `📅 Servicio el ${s.date} — Preparar factura`,
+                        createdAt: today.toISOString()
+                    });
+                });
+                return;
+            }
+
+            // ── REGLA 2B: CONSTRUCCIÓN → una factura POR PROPIEDAD, cada semana (mismo
+            // patrón que AirBnB Semanal: se arma el lunes/martes con los servicios de la
+            // semana que acaba de terminar). A diferencia de "único", aquí NO se agrupa
+            // por nombre de cliente sino por cada registro individual (cada propiedad tiene
+            // su propio cliId, propId y precio). El precio siempre queda editable porque
+            // varía por trabajo — por eso esto se abre en la pestaña "Factura Manual"
+            // pre-llenada, en vez de generarse automático de un clic.
+            // ── REGLA 2B: CONSTRUCCIÓN → una factura POR PROPIEDAD. Cada propiedad puede
+            // tener su propio periodo (semanal o mensual) según su campo `billingPeriod` —
+            // por ejemplo, la residencia de Joe bajo JGM Properties es mensual, mientras que
+            // otras propiedades de construcción se facturan cada semana. A diferencia de
+            // "único", aquí NO se agrupa por nombre de cliente sino por cada registro
+            // individual (cada propiedad tiene su propio cliId, propId, precio y periodo).
+            // El precio siempre queda editable porque varía por trabajo — por eso esto se
+            // abre en la pestaña "Factura Manual" pre-llenada, en vez de generarse solo.
+            if (cliType === 'construccion') {
+                const alreadyInvoiced = (svcDate) => (this.generatedInvoices || []).some(g =>
+                    g.clientName === clientName && g.status !== 'cancelada' &&
+                    g.startDate <= svcDate && g.endDate >= svcDate
+                );
+
+                clients.forEach(propCli => {
+                    const propBilling = propCli.billingPeriod || 'weekly';
+                    const isMonthly = (propBilling === 'monthly' || propBilling === 'fixed_monthly');
+                    let periodEnd, backlogStart, periodLabel;
+
+                    if (isMonthly) {
+                        // Igual que AirBnB Mensual: se arma a partir del día 15, con el mes anterior completo
+                        if (currentDay < 15) return;
+                        const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+                        const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+                        periodEnd = new Date(prevYear, prevMonth + 1, 0); // último día del mes anterior
+                        backlogStart = new Date(periodEnd);
+                        backlogStart.setDate(backlogStart.getDate() - 90); // respaldo de 3 meses por si se saltó un mes
+                        periodLabel = 'Mes';
+                    } else {
+                        // Semanal (default): igual que AirBnB Semanal — lunes/martes con la semana pasada
+                        if (dayOfWeek !== 1 && dayOfWeek !== 2) return;
+                        const thisMonday = new Date(today);
+                        thisMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+                        periodEnd = new Date(thisMonday);
+                        periodEnd.setDate(thisMonday.getDate() - 1); // domingo pasado
+                        backlogStart = new Date(thisMonday);
+                        backlogStart.setDate(thisMonday.getDate() - 60); // respaldo de 60 días por si se saltó una semana
+                        periodLabel = 'Semana';
+                    }
+
+                    const periodEndStr = periodEnd.toISOString().split('T')[0];
+                    const backlogStartStr = backlogStart.toISOString().split('T')[0];
+
+                    const propServs = this.servs.filter(s =>
+                        String(s.cliId) === String(propCli.id) && !s.cancelled &&
+                        s.date >= backlogStartStr && s.date <= periodEndStr
+                    );
+                    const uninvoiced = propServs.filter(s => !alreadyInvoiced(s.date));
+                    if (uninvoiced.length === 0) return;
+
+                    // Refrescar: si ya había un pendiente de esta propiedad, lo reemplazamos con datos actualizados
+                    this.pendingInvoices = this.pendingInvoices.filter(p => !(p.type === 'construccion' && p.cliId === propCli.id));
+
+                    const dates = uninvoiced.map(s => s.date).sort();
+                    const propLabel = (propCli.propId && propCli.propId !== clientName) ? propCli.propId : clientName;
+                    const total = uninvoiced.reduce((sum) => sum + parseFloat(propCli.price || 0), 0);
+
+                    this.pendingInvoices.push({
+                        id: Date.now() + Math.random(),
+                        periodKey: `${clientName}-construccion-${propCli.id}-${periodEndStr}`,
+                        clientName, clientEmail: cli.email || '',
+                        clientIds: [propCli.id],
+                        cliId: propCli.id,
+                        propLabel,
+                        serviceIds: uninvoiced.map(s => s.id),
+                        serviceDates: dates,
+                        type: cliType,
+                        serviceType: propCli.serviceType || 'construccion',
+                        billingPeriod: propBilling,
+                        startDate: dates[0], endDate: dates[dates.length - 1],
+                        serviceCount: uninvoiced.length, total,
+                        urgency: isMonthly ? 'normal' : 'high',
+                        reason: `🏗️ ${propLabel} — ${periodLabel} ${dates[0]} a ${dates[dates.length-1]} — ${uninvoiced.length} servicio(s) (precio editable antes de enviar)`,
                         createdAt: today.toISOString()
                     });
                 });
@@ -4492,6 +4578,47 @@ class Scheduler {
                         reason: isToday ? '📧 Servicio hoy — Enviar factura' : 
                                 isPast ? `⚠️ Servicio del ${svc.date} — Pendiente de enviar` :
                                 `📅 Servicio el ${svc.date} — Preparar factura`,
+                        createdAt: today.toISOString()
+                    });
+                });
+                return;
+            }
+
+            // Mensual → mostrar TODOS los servicios de la SEMANA ACTUAL como urgentes (lunes
+            // a domingo de esta semana), no solo si es la única visita del mes ni solo el día
+            // exacto — así se ve de una vez todo lo que hay que facturar esta semana.
+            if (cliType === 'mensual') {
+                const curWeekStart = new Date(today);
+                curWeekStart.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // lunes de esta semana
+                const curWeekEnd = new Date(curWeekStart);
+                curWeekEnd.setDate(curWeekStart.getDate() + 6); // domingo de esta semana
+                const curWeekStartStr = curWeekStart.toISOString().split('T')[0];
+                const curWeekEndStr = curWeekEnd.toISOString().split('T')[0];
+
+                const weekServs = thisMonthServs.filter(s => s.date >= curWeekStartStr && s.date <= curWeekEndStr);
+                weekServs.forEach(svc => {
+                    const svcKey = `${clientName}-mensualsemana-${svc.date}-${svc.id}`;
+                    if (this.pendingInvoices.some(p => p.periodKey === svcKey)) return;
+                    if ((this.generatedInvoices || []).some(g =>
+                        g.clientName === clientName && g.startDate === svc.date)) return;
+                    const total = parseFloat(cli.price || 0);
+                    const isToday = svc.date === todayStr;
+                    const isPastThisWeek = svc.date < todayStr;
+                    this.pendingInvoices.push({
+                        id: Date.now() + Math.random(),
+                        periodKey: svcKey,
+                        clientName, clientEmail: cli.email || '',
+                        clientIds: clients.map(c => c.id),
+                        type: cliType, billingPeriod,
+                        startDate: svc.date, endDate: svc.date,
+                        serviceCount: 1, total,
+                        // "high" si ya tocaba enviarla (hoy o días pasados de esta semana);
+                        // "thisweek" si es un servicio de esta semana que todavía no llega —
+                        // igual se muestra en Urgentes/Mensuales para que se vea toda la semana junta.
+                        urgency: (isToday || isPastThisWeek) ? 'high' : 'thisweek',
+                        reason: isToday ? '📧 Servicio hoy — Enviar factura' :
+                                isPastThisWeek ? `⚠️ Servicio del ${svc.date} (esta semana) — Enviar factura` :
+                                `📅 Servicio programado el ${svc.date} (esta semana)`,
                         createdAt: today.toISOString()
                     });
                 });
@@ -4594,9 +4721,15 @@ class Scheduler {
                 (p.reason || '').toLowerCase().includes(pendingSearch))
             : this.pendingInvoices;
 
-        // Separar en urgentes y programadas
-        const urgentes = filteredPending.filter(p => p.urgency === 'high' || p.urgency === 'overdue');
-        const programadas = filteredPending.filter(p => p.urgency !== 'high' && p.urgency !== 'overdue');
+        // Separar en urgentes y por-enviar-fin-de-mes ("thisweek" = mensual de esta semana, también va en urgentes)
+        const urgentes = filteredPending.filter(p => p.urgency === 'high' || p.urgency === 'overdue' || p.urgency === 'thisweek');
+        const porEnviarFinMes = filteredPending.filter(p => !['high','overdue','thisweek'].includes(p.urgency));
+
+        // Sub-clasificar Urgentes por tipo, como pediste: Airbnb / Construcción / Mensuales
+        const urgAirbnb = urgentes.filter(p => p.type === 'airbnb');
+        const urgConstruccion = urgentes.filter(p => p.type === 'construccion');
+        const urgMensuales = urgentes.filter(p => p.type === 'mensual');
+        const urgOtros = urgentes.filter(p => !['airbnb','construccion','mensual'].includes(p.type));
 
         const buildCard = (pending, index) => {
             const [startYear, startMonth, startDay] = pending.startDate.split('-');
@@ -4617,60 +4750,71 @@ class Scheduler {
             
             const isUrgent = pending.urgency === 'high';
             const isOverdue = pending.urgency === 'overdue';
-            const cardBorder = isOverdue ? '#c0392b' : isUrgent ? '#e74c3c' : '#f39c12';
-            const cardBg = isOverdue ? '#fde8e8' : isUrgent ? '#fff5f5' : 'white';
+            const isThisWeek = pending.urgency === 'thisweek';
+            const cardBorder = isOverdue ? '#c0392b' : (isUrgent || isThisWeek) ? '#e74c3c' : '#f39c12';
+            const cardBg = isOverdue ? '#fde8e8' : (isUrgent || isThisWeek) ? '#fff5f5' : 'white';
             return `
-                <div style="background: ${cardBg}; border: 2px solid ${cardBorder}; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
-                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: start;">
-                        <div>
-                            <h3 style="margin: 0 0 10px 0; color: #2c3e50; display:flex; align-items:center; gap:8px;">
-                                ${serviceTypeIcon} ${pending.clientName}
-                                ${isOverdue ? '<span style="background:#c0392b; color:white; font-size:0.7rem; padding:2px 8px; border-radius:20px; font-weight:700;">⚠️ ATRASADA</span>' : isUrgent ? '<span style="background:#e74c3c; color:white; font-size:0.7rem; padding:2px 8px; border-radius:20px; font-weight:700;">⚡ HOY</span>' : ''}
-                            </h3>
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; color: #666; font-size: 0.9rem;">
-                                <div><strong>Tipo:</strong> ${pending.type.toUpperCase()}</div>
-                                <div><strong>Período:</strong> ${startFormatted} - ${endFormatted}</div>
-                                <div><strong>Servicios:</strong> ${pending.serviceCount}</div>
-                                <div><strong>Total:</strong> <span style="color: #27ae60; font-weight: bold; font-size: 1.1rem;">$${pending.total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span></div>
-                            </div>
-                            <div style="margin-top: 10px; padding: 8px 12px; background: ${isUrgent ? '#fde8e8' : '#fff3cd'}; border-left: 3px solid ${isUrgent ? '#e74c3c' : '#f39c12'}; border-radius: 4px; font-size: 0.85rem; color: ${isUrgent ? '#c0392b' : '#856404'};">
-                                ${pending.reason}
-                            </div>
-                        </div>
-                        <div style="display: flex; flex-direction: column; gap: 8px;">
-                            <button onclick="app.openInvoiceFromPending(${index})" class="btn" style="background: #27ae60; color: white; padding: 10px 20px; white-space: nowrap; font-weight: bold;">
-                                💼 Abrir en Facturación
-                            </button>
-                            <button onclick="app.deletePendingInvoice(${index})" class="btn" style="background: #e74c3c; color: white; padding: 10px 20px; white-space: nowrap;">
-                                ❌ Cancelar
-                            </button>
-                        </div>
+                <div style="background: ${cardBg}; border: 2px solid ${cardBorder}; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+                    <h3 style="margin: 0 0 8px 0; color: #2c3e50; display:flex; align-items:center; gap:6px; font-size:0.95rem; flex-wrap:wrap;">
+                        ${serviceTypeIcon} ${pending.clientName}
+                        ${isOverdue ? '<span style="background:#c0392b; color:white; font-size:0.65rem; padding:2px 7px; border-radius:20px; font-weight:700;">⚠️ ATRASADA</span>' : isUrgent ? '<span style="background:#e74c3c; color:white; font-size:0.65rem; padding:2px 7px; border-radius:20px; font-weight:700;">⚡ HOY</span>' : ''}
+                    </h3>
+                    <div style="color: #666; font-size: 0.8rem; line-height:1.6;">
+                        <div><strong>Período:</strong> ${startFormatted} - ${endFormatted}</div>
+                        <div><strong>Servicios:</strong> ${pending.serviceCount} &nbsp; <strong>Total:</strong> <span style="color: #27ae60; font-weight: bold;">$${pending.total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span></div>
+                    </div>
+                    <div style="margin-top: 8px; padding: 6px 10px; background: ${(isUrgent||isThisWeek) ? '#fde8e8' : '#fff3cd'}; border-left: 3px solid ${(isUrgent||isThisWeek) ? '#e74c3c' : '#f39c12'}; border-radius: 4px; font-size: 0.78rem; color: ${(isUrgent||isThisWeek) ? '#c0392b' : '#856404'};">
+                        ${pending.reason}
+                    </div>
+                    <div style="display: flex; gap: 6px; margin-top: 8px;">
+                        <button onclick="app.openInvoiceFromPending(${index})" class="btn" style="flex:1; background: #27ae60; color: white; padding: 8px; font-size:0.8rem; white-space: nowrap; font-weight: bold;">
+                            💼 Facturar
+                        </button>
+                        <button onclick="app.deletePendingInvoice(${index})" class="btn" style="background: #e74c3c; color: white; padding: 8px 10px; font-size:0.8rem;">
+                            ❌
+                        </button>
                     </div>
                 </div>
             `;
         };
 
-        // Build 2-column layout
+        // Layout: URGENTES (dividido en Airbnb / Construcción / Mensuales / Otros) junto a
+        // POR ENVIAR AL FIN DE MES — tal como lo pediste, para ver de un vistazo qué urgente
+        // pertenece a cada categoría en vez de una sola lista mezclada.
         const _now = new Date();
         const lastDayLabel = new Date(_now.getFullYear(), _now.getMonth()+1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
-        let urgentesHtml = urgentes.map((p, i) => buildCard(p, this.pendingInvoices.indexOf(p))).join('');
-        let programadasHtml = programadas.map((p, i) => buildCard(p, this.pendingInvoices.indexOf(p))).join('');
+        const htmlOf = (list) => list.map(p => buildCard(p, this.pendingInvoices.indexOf(p))).join('') ||
+            '<div style="text-align:center; padding:20px 8px; color:#aaa; font-size:0.78rem;">Ninguna</div>';
+
+        const subCol = (title, icon, list) => `
+            <div>
+                <div style="background:#fde8e8; color:#c0392b; padding:6px 10px; border-radius:6px; font-weight:700; font-size:0.78rem; margin-bottom:8px; text-align:center;">
+                    ${icon} ${title} <span style="background:#c0392b; color:white; border-radius:20px; padding:0px 7px; margin-left:4px;">${list.length}</span>
+                </div>
+                ${htmlOf(list)}
+            </div>`;
+
+        const urgentesSubCols = [
+            subCol('Airbnb', '🏖️', urgAirbnb),
+            subCol('Construcción', '🏗️', urgConstruccion),
+            subCol('Mensuales', '📆', urgMensuales),
+        ];
+        if (urgOtros.length > 0) urgentesSubCols.push(subCol('Otros', '📦', urgOtros));
+        const numUrgCols = urgentesSubCols.length;
 
         container.innerHTML = `
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start;">
-                <div>
-                    <div style="background:#e74c3c; color:white; padding:8px 14px; border-radius:8px 8px 0 0; font-weight:700; font-size:0.9rem; margin-bottom:8px;">
-                        ⚡ Urgentes — Enviar Hoy
-                        <span style="background:white; color:#e74c3c; border-radius:20px; padding:1px 8px; margin-left:8px; font-size:0.8rem;">${urgentes.length}</span>
-                    </div>
-                    ${urgentesHtml || '<div style="text-align:center; padding:30px; color:#aaa; font-size:0.85rem;">Sin facturas urgentes</div>'}
+            <div style="display:grid; grid-template-columns:repeat(${numUrgCols}, 1fr) 1.3fr; gap:14px; align-items:start;">
+                <div style="grid-column: span ${numUrgCols}; background:#e74c3c; color:white; padding:8px 14px; border-radius:8px; font-weight:700; font-size:0.9rem; text-align:center;">
+                    ⚡ URGENTES — Enviar Hoy
+                    <span style="background:white; color:#e74c3c; border-radius:20px; padding:1px 8px; margin-left:8px; font-size:0.8rem;">${urgentes.length}</span>
                 </div>
+                <div style="background:#f39c12; color:white; padding:8px 14px; border-radius:8px; font-weight:700; font-size:0.9rem; text-align:center;">
+                    📋 Por Enviar al Fin de Mes (${lastDayLabel})
+                    <span style="background:white; color:#f39c12; border-radius:20px; padding:1px 8px; margin-left:8px; font-size:0.8rem;">${porEnviarFinMes.length}</span>
+                </div>
+                ${urgentesSubCols.join('')}
                 <div>
-                    <div style="background:#f39c12; color:white; padding:8px 14px; border-radius:8px 8px 0 0; font-weight:700; font-size:0.9rem; margin-bottom:8px;">
-                        📋 Programadas — Enviar el ${lastDayLabel}
-                        <span style="background:white; color:#f39c12; border-radius:20px; padding:1px 8px; margin-left:8px; font-size:0.8rem;">${programadas.length}</span>
-                    </div>
-                    ${programadasHtml || '<div style="text-align:center; padding:30px; color:#aaa; font-size:0.85rem;">Sin facturas programadas</div>'}
+                    ${htmlOf(porEnviarFinMes)}
                 </div>
             </div>
         `;
@@ -4697,6 +4841,30 @@ class Scheduler {
         
         // Abrir modal de facturación
         this.openInvoice();
+
+        // Construcción: precio siempre editable por trabajo → abrir en la pestaña Manual,
+        // pre-llenada con la propiedad y una línea por cada servicio sin facturar.
+        if (pending.type === 'construccion') {
+            setTimeout(() => {
+                this.switchInvoiceTab('manual');
+                const propCli = this.clis.find(c => String(c.id) === String(pending.cliId));
+                if (propCli) {
+                    const label = propCli.name + (propCli.propId && propCli.propId !== propCli.name ? ' — ' + propCli.propId : '');
+                    document.getElementById('manualInvClient').value = propCli.id;
+                    document.getElementById('manualInvClientSearch').value = label;
+                }
+                const listEl = document.getElementById('manualInvItemsList');
+                if (listEl) {
+                    listEl.innerHTML = '';
+                    const defaultPrice = propCli ? (propCli.price || 0) : 0;
+                    (pending.serviceDates || [pending.startDate]).forEach(date => {
+                        this.addManualInvoiceItem(date, `Limpieza — ${pending.propLabel || pending.clientName}`, defaultPrice);
+                    });
+                }
+                document.getElementById('btnBackToPending').style.display = 'block';
+            }, 200);
+            return;
+        }
         
         // Precargar datos DESPUÉS de que el modal esté completamente abierto
         setTimeout(() => {
@@ -4776,18 +4944,30 @@ class Scheduler {
             alert('No hay facturas pendientes para generar');
             return;
         }
-        
-        if (!confirm(`¿Generar TODAS las ${this.pendingInvoices.length} facturas pendientes?`)) {
+
+        // Construcción queda fuera del "generar todas": el precio varía por trabajo y
+        // siempre debe revisarse/editarse a mano antes de enviar (usa "Abrir en Facturación").
+        const autoGenerables = this.pendingInvoices.filter(p => p.type !== 'construccion');
+        const construccionCount = this.pendingInvoices.length - autoGenerables.length;
+
+        if (autoGenerables.length === 0) {
+            alert(`Las ${construccionCount} pendiente(s) de construcción requieren revisar el precio manualmente — usa "Abrir en Facturación" en cada una.`);
+            return;
+        }
+
+        let msg = `¿Generar ${autoGenerables.length} factura(s) pendiente(s)?`;
+        if (construccionCount > 0) msg += `\n\n(${construccionCount} de construcción se dejarán aparte — requieren revisar el precio a mano)`;
+        if (!confirm(msg)) {
             return;
         }
         
-        // Generar todas y registrarlas
-        this.pendingInvoices.forEach(pending => {
+        // Generar todas y registrarlas (excepto construcción)
+        autoGenerables.forEach(pending => {
             this.registerGeneratedInvoice(pending);
         });
         
-        const count = this.pendingInvoices.length;
-        this.pendingInvoices = [];
+        const count = autoGenerables.length;
+        this.pendingInvoices = this.pendingInvoices.filter(p => p.type === 'construccion');
         this.updatePendingBadge();
         this.renderPendingInvoices();
         this.save();
@@ -5608,7 +5788,7 @@ class Scheduler {
                 !this.servs.some(s => s.cliId && this.clis.find(c => c.name === invoice.clientName && String(c.id) === String(s.cliId)) &&
                     s.date >= invoice.startDate && s.date <= invoice.endDate);
 
-            if (isManual || (invoice.items && invoice.items.length > 0 && invoice.startDate === invoice.endDate)) {
+            if (isManual) {
                 // Abrir tab Manual y cargar los datos
                 this.switchInvoiceTab('manual');
                 const cli = this.clis.find(c => c.name === invoice.clientName);
@@ -7713,7 +7893,7 @@ Motivo de cancelación (opcional):`);
         this.save(); this.renderCat(); this.refreshSels();
     }
 
-    addPropField(value='', price='') {
+    addPropField(value='', price='', billing='weekly') {
         const list = document.getElementById('propFieldsList');
         if (!list) return;
         const row = document.createElement('div');
@@ -7723,6 +7903,10 @@ Motivo de cancelación (opcional):`);
                 style="flex:2;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;">
             <input type="number" placeholder="$Precio" value="${price}"
                 style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;" min="0" step="0.01">
+            <select title="Periodo de facturación de esta propiedad" style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.78rem;">
+                <option value="weekly" ${billing==='weekly'?'selected':''}>📅 Semanal</option>
+                <option value="monthly" ${billing==='monthly'?'selected':''}>🗓️ Mensual</option>
+            </select>
             <button type="button" onclick="this.parentElement.remove()" 
                 style="background:#e74c3c;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.8rem;">✕</button>`;
         list.appendChild(row);
@@ -7743,9 +7927,11 @@ Motivo de cancelación (opcional):`);
         if (!list) return [];
         return [...list.children].map(row => {
             const inputs = row.querySelectorAll('input');
+            const select = row.querySelector('select');
             const propId = inputs[0]?.value.trim() || '';
             const price = inputs[1]?.value.trim() || '';
-            return propId ? { propId, price } : null;
+            const billingPeriod = select?.value || 'weekly';
+            return propId ? { propId, price, billingPeriod } : null;
         }).filter(Boolean);
     }
 
@@ -7819,7 +8005,7 @@ Motivo de cancelación (opcional):`);
                         c.address = address; c.city = city; c.zip = zip;
                         c.paymentTerms = payTerms;
                         c.type = type; c.serviceType = serviceType;
-                        c.billingPeriod = billingPeriod; c.invoicingType = invoicingType;
+                        c.invoicingType = invoicingType; // billingPeriod ya NO se fuerza aquí — cada propiedad tiene el suyo
                         c.autoCharge = autoCharge;
                         c.taxRate = taxRate;
                         if (stripeCustomerId) c.stripeCustomerId = stripeCustomerId;
@@ -7827,9 +8013,14 @@ Motivo de cancelación (opcional):`);
 
                     // Actualizar datos base en todos los registros que YA eran multipropiedad
                     existingProps.forEach(c => {
-                        // Precio individual por propiedad
+                        // Precio y periodo individual por propiedad
                         const fp = fieldProps.find(p => p.propId === c.propId);
-                        if (fp) c.price = fp.price || price;
+                        if (fp) {
+                            c.price = fp.price || price;
+                            c.billingPeriod = fp.billingPeriod || c.billingPeriod || billingPeriod;
+                        } else {
+                            c.billingPeriod = c.billingPeriod || billingPeriod;
+                        }
                         applyCommon(c);
                     });
 
@@ -7843,6 +8034,7 @@ Motivo de cancelación (opcional):`);
                         if (leftoverField) {
                             mainCli.propId = leftoverField.propId;
                             mainCli.price = leftoverField.price || price;
+                            mainCli.billingPeriod = leftoverField.billingPeriod || billingPeriod;
                             existingPropIds.push(leftoverField.propId);
                         }
                         applyCommon(mainCli);
@@ -7858,7 +8050,7 @@ Motivo de cancelación (opcional):`);
                                 id: String(Date.now() + i * 100 + Math.floor(Math.random() * 1000)), 
                                 name, propId: fp.propId.trim(),
                                 price: fp.price || price, tel, address, city, zip, type,
-                                serviceType, billingPeriod, invoicingType,
+                                serviceType, billingPeriod: fp.billingPeriod || billingPeriod, invoicingType,
                                 taxRate: taxRate,
                             });
                             existingPropIdsNorm.push(fpNorm); // evitar duplicados en el mismo save
@@ -8044,9 +8236,9 @@ Motivo de cancelación (opcional):`);
                 if(isMulti) {
                     const allProps = this.clis.filter(c => c.name.trim().toLowerCase() === cli.name.trim().toLowerCase() && (c.type==='airbnb'||c.type==='unico'||c.type==='construccion'));
                     if(allProps.length > 0) {
-                        allProps.forEach(p => this.addPropField(p.propId || '', p.price || ''));
+                        allProps.forEach(p => this.addPropField(p.propId || '', p.price || '', p.billingPeriod || 'weekly'));
                     } else if(cli.propId) {
-                        this.addPropField(cli.propId);
+                        this.addPropField(cli.propId, '', cli.billingPeriod || 'weekly');
                     }
                 }
             }
