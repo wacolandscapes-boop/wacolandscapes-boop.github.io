@@ -728,6 +728,11 @@
 </head>
 <body>
 
+<div id="schedulerDriveWarnBanner" onclick="app && app.driveSync()" style="display:none;align-items:center;gap:8px;padding:9px 16px;background:#fef2f2;border-bottom:2px solid #ef4444;color:#b91c1c;font-size:13px;font-weight:700;cursor:pointer;">
+    <span style="font-size:16px;flex-shrink:0;">⚠️</span>
+    <span>Drive desconectado — los cambios que hagas NO se están respaldando en la nube. Toca aquí para reconectar.</span>
+</div>
+
 <div class="container">
     <div class="final-header">
         <!-- Fila 1: Logo + Fecha + Botones de Acción -->
@@ -1698,6 +1703,7 @@ class Scheduler {
         this.isSyncing = false;
         this.pendingSync = false;
         this.CLIENT_ID = '1032764332702-uvnqg0ccaer5gp2hr12gmniqe38ria1t.apps.googleusercontent.com';
+        this.DRIVE_ACCOUNT_HINT = 'wacolandscapes@gmail.com'; // cuenta de Drive correcta — evita que Google pida elegir cuenta
         this.SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
         this.FOLDER_NAME = 'BrazosCleaningApp';
         this.STRIPE_WORKER_URL = 'https://brazos-stripe-worker.ranulfocast.workers.dev';
@@ -2010,18 +2016,20 @@ class Scheduler {
         localStorage.setItem('v35_serviceCatalog', JSON.stringify(this.serviceCatalog || []));
         localStorage.setItem('anaCS_lastSavedAt', new Date().toISOString());
         this.localDirty = true;
-        if (this.driveConnected) {
-            // Mostrar indicador de sync pendiente
-            const btn = document.getElementById('driveSyncBtn');
-            const lbl = document.getElementById('driveSyncLabel');
-            if(btn) btn.style.background = '#f39c12';
-            if(lbl) lbl.textContent = 'Guardando...';
-            this.driveSyncNow().then(() => {
-                if(btn) btn.style.background = '#27ae60';
-                const now = new Date();
-                if(lbl) lbl.textContent = 'Sync ' + now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
-            });
-        }
+        const btn = document.getElementById('driveSyncBtn');
+        const lbl = document.getElementById('driveSyncLabel');
+        ensureSchedulerDriveConnected(this).then((ok) => {
+            updateSchedulerDriveBanner();
+            if (ok) {
+                if(btn) btn.style.background = '#f39c12';
+                if(lbl) lbl.textContent = 'Guardando...';
+                this.driveSyncNow().then(() => {
+                    if(btn) btn.style.background = '#27ae60';
+                    const now = new Date();
+                    if(lbl) lbl.textContent = 'Sync ' + now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
+                });
+            }
+        });
         // Mostrar última importación de nómina si existe
         const lastImp = localStorage.getItem('anaCS_lastNominaImport');
         if (lastImp) {
@@ -12813,8 +12821,10 @@ Motivo de cancelación (opcional):`);
                         { headers: { Authorization: `Bearer ${this.driveToken}` } }
                     );
                     const dayData = await fr.json();
-                    localStorage.setItem(key, JSON.stringify(dayData));
-                    allReports[date] = dayData;
+                    const existingLocal = JSON.parse(localStorage.getItem(key) || '{}');
+                    const mergedDay = this.mergeHorariosDay(existingLocal, dayData);
+                    localStorage.setItem(key, JSON.stringify(mergedDay));
+                    allReports[date] = mergedDay;
                     cargados++;
                 } catch(e) {}
             }));
@@ -13270,10 +13280,12 @@ Motivo de cancelación (opcional):`);
                     { headers: { Authorization: `Bearer ${this.driveToken}` } }
                 );
                 const dayData = await fr.json();
-                localStorage.setItem(key, JSON.stringify(dayData));
+                const existingLocal = JSON.parse(localStorage.getItem(key) || '{}');
+                const mergedDay = this.mergeHorariosDay(existingLocal, dayData);
+                localStorage.setItem(key, JSON.stringify(mergedDay));
                 if (!this._prodReports[date]) this._prodReports[date] = {};
-                Object.keys(dayData).forEach(empId => {
-                    this._prodReports[date][empId] = dayData[empId];
+                Object.keys(mergedDay).forEach(empId => {
+                    this._prodReports[date][empId] = mergedDay[empId];
                 });
                 updated = true;
             } catch(e) { console.log('❌ Error en fecha', date, e.message); }
@@ -13297,6 +13309,7 @@ Motivo de cancelación (opcional):`);
             client_id: this.CLIENT_ID,
             scope: this.SCOPES,
             prompt: '',
+            login_hint: this.DRIVE_ACCOUNT_HINT,
             callback: async (response) => {
                 if (response.error) { alert('❌ Error: ' + response.error); return; }
                 this.driveToken = response.access_token;
@@ -13357,7 +13370,7 @@ Motivo de cancelación (opcional):`);
                 });
             }
         });
-        this.tokenClient.requestAccessToken({ prompt: '' });
+        this.tokenClient.requestAccessToken({ prompt: '', login_hint: this.DRIVE_ACCOUNT_HINT });
     }
 
     async refreshTokenIfNeeded() {
@@ -13371,7 +13384,7 @@ Motivo de cancelación (opcional):`);
                     this.driveConnected = true;
                     resolve();
                 };
-                this.tokenClient.requestAccessToken({ prompt: '' });
+                this.tokenClient.requestAccessToken({ prompt: '', login_hint: this.DRIVE_ACCOUNT_HINT });
             });
         }
     }
@@ -13396,6 +13409,35 @@ Motivo de cancelación (opcional):`);
     }
 
     // ── MERGE INTELIGENTE (Opción A: unión por id, gana el lado con timestamp global más reciente) ──
+    mergeHorariosDay(localData = {}, driveData = {}) {
+        // Fusiona los horarios de un día (por empId) entre lo que ya hay en localStorage
+        // y lo que baja de Drive. Regla de oro: un array de "services" VACÍO nunca puede
+        // borrar servicios reales del otro lado — eso es lo que causaba la pérdida de
+        // Lynn Maxwell / Stacey Irvine / etc. cuando Drive traía una copia parcial o conflictuada.
+        const merged = {};
+        const allEmpIds = new Set([...Object.keys(localData || {}), ...Object.keys(driveData || {})]);
+        allEmpIds.forEach(empId => {
+            const l = localData[empId], d = driveData[empId];
+            if (l && !d) { merged[empId] = l; return; }
+            if (d && !l) { merged[empId] = d; return; }
+            const lSvcs = Array.isArray(l.services) ? l.services : [];
+            const dSvcs = Array.isArray(d.services) ? d.services : [];
+            let winner, loser;
+            if (lSvcs.length === 0 && dSvcs.length > 0) { winner = d; loser = l; }
+            else if (dSvcs.length === 0 && lSvcs.length > 0) { winner = l; loser = d; }
+            else {
+                const lTime = l.savedAt ? new Date(l.savedAt).getTime() : 0;
+                const dTime = d.savedAt ? new Date(d.savedAt).getTime() : 0;
+                winner = (lTime >= dTime) ? l : d;
+                loser  = (lTime >= dTime) ? d : l;
+            }
+            const winnerSvcs = Array.isArray(winner.services) ? winner.services : [];
+            const loserSvcs  = Array.isArray(loser.services)  ? loser.services  : [];
+            merged[empId] = Object.assign({}, winner, { services: this.mergeArraysById(winnerSvcs, loserSvcs) });
+        });
+        return merged;
+    }
+
     mergeArraysById(winnerArr = [], loserArr = [], idKeys = ['id']) {
         const getKey = (item) => {
             for (const k of idKeys) {
@@ -14442,7 +14484,58 @@ Motivo de cancelación (opcional):`);
     }
 
 }
+// ── Advertencia visible + reconexión automática a Drive ──
+// Declaradas ANTES de instanciar Scheduler porque el constructor a veces llama
+// a this.save() durante una migración de datos, y esa llamada ya necesita estas
+// variables disponibles (si no, "zona muerta temporal" -> ReferenceError).
+let _schedDriveReconnectPromise = null;
+let _schedDriveReconnectLastTry = 0;
+
 const app = new Scheduler();
+
+// Mismo patrón usado en BrazosCalendar: si Mariela olvida conectar Drive al hacer
+// ajustes, mostramos un banner imposible de ignorar e intentamos reconectar sola
+// (silenciosamente) en vez de dejar los cambios varados en el dispositivo.
+function updateSchedulerDriveBanner() {
+    const el = document.getElementById('schedulerDriveWarnBanner');
+    if (!el) return;
+    const connected = !!(app && app.driveConnected && app.driveToken && app.tokenExpiry && Date.now() < app.tokenExpiry);
+    el.style.display = connected ? 'none' : 'flex';
+}
+
+function ensureSchedulerDriveConnected(instance) {
+    const a = instance;
+    const validToken = a.driveConnected && a.driveToken && a.tokenExpiry && Date.now() < a.tokenExpiry;
+    if (validToken && a.driveFolderId) return Promise.resolve(true);
+    if (_schedDriveReconnectPromise) return _schedDriveReconnectPromise; // ya hay un intento en curso
+    const now = Date.now();
+    if (now - _schedDriveReconnectLastTry < 15000) return Promise.resolve(false); // no martillar reintentos
+    _schedDriveReconnectLastTry = now;
+    _schedDriveReconnectPromise = new Promise((resolve) => {
+        if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) { resolve(false); return; }
+        try {
+            const tcAuto = google.accounts.oauth2.initTokenClient({
+                client_id: a.CLIENT_ID, scope: a.SCOPES, prompt: '', login_hint: a.DRIVE_ACCOUNT_HINT,
+                callback: async (r) => {
+                    if (r.error) { resolve(false); return; }
+                    a.driveToken = r.access_token;
+                    a.driveConnected = true;
+                    a.tokenExpiry = Date.now() + (55 * 60 * 1000);
+                    try {
+                        if (!a.driveFolderId) await a.driveGetOrCreateFolder();
+                    } catch (e) {}
+                    resolve(!!a.driveFolderId);
+                }
+            });
+            tcAuto.requestAccessToken({ prompt: '' });
+        } catch (e) { resolve(false); }
+    }).finally(() => { _schedDriveReconnectPromise = null; updateSchedulerDriveBanner(); });
+    return _schedDriveReconnectPromise;
+}
+
+setInterval(() => { try { updateSchedulerDriveBanner(); } catch (e) {} }, 4000);
+document.addEventListener('DOMContentLoaded', () => { setTimeout(updateSchedulerDriveBanner, 1500); });
+
 
 // Funciones simples para manejar dropdowns
 function toggleDropdown(dropdownId) {

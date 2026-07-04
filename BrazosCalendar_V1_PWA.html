@@ -25,7 +25,7 @@ const _blob=new Blob([JSON.stringify(_manifest)],{type:'application/json'});
 document.getElementById('pwaManifest').href=URL.createObjectURL(_blob);
 
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.2.1';
 const APP_URL = 'https://wacolandscapes-boop.github.io/brazos-cleaning/BrazosCalendar_V1_PWA.html';
 
 async function checkForUpdate() {
@@ -42,24 +42,12 @@ async function checkForUpdate() {
   } catch(e) {}
 }
 
+// Desregistrar cualquier Service Worker previo para siempre cargar versión fresca
 if('serviceWorker' in navigator){
-  const _sw=`const CACHE='brazozcalendar-v${APP_VERSION}';const ASSETS=['./'];self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).catch(()=>caches.match('./'))));});`;
-  navigator.serviceWorker.register(URL.createObjectURL(new Blob([_sw],{type:'text/javascript'}))).then(reg=>{
-    reg.addEventListener('updatefound',()=>{
-      const newWorker=reg.installing;
-      newWorker.addEventListener('statechange',()=>{
-        if(newWorker.state==='installed'&&navigator.serviceWorker.controller){
-          const banner=document.createElement('div');
-          banner.style.cssText='position:fixed;top:0;left:0;right:0;background:#0ea5e9;color:white;padding:12px 16px;z-index:9999;display:flex;justify-content:space-between;align-items:center;font-family:Barlow Condensed,sans-serif;font-size:15px;font-weight:700;';
-          banner.innerHTML='🔄 Nueva versión disponible <button onclick="window.location.reload()" style="background:white;color:#0ea5e9;border:none;padding:6px 14px;border-radius:6px;font-weight:700;cursor:pointer;">Actualizar</button>';
-          document.body.appendChild(banner);
-        }
-      });
-    });
-  }).catch(()=>{});
+  navigator.serviceWorker.getRegistrations().then(regs=>regs.forEach(r=>r.unregister()));
 }
 let _installPrompt=null;
-window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();_installPrompt=e;setTimeout(()=>{if(!window.matchMedia('(display-mode: standalone)').matches)showInstallBanner();},2000);});
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault(); _installPrompt=null; }); // Deshabilitar instalación PWA
 function showInstallBanner(){
   if(document.getElementById('_pwaBanner'))return;
   const b=document.createElement('div');b.id='_pwaBanner';
@@ -86,6 +74,9 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-
 .hdr-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:5px 10px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Barlow',sans-serif}
 .sync{display:flex;align-items:center;gap:7px;padding:7px 16px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)}
 .sdot{width:6px;height:6px;border-radius:50%;background:var(--muted);flex-shrink:0}.sdot.ok{background:var(--green)}.sdot.err{background:#ef4444}.sdot.spin{background:var(--yellow);animation:blink 1s infinite}
+.drive-warn{display:none;align-items:center;gap:8px;padding:10px 16px;background:#fef2f2;border-bottom:2px solid #ef4444;color:#b91c1c;font-size:12.5px;font-weight:700;cursor:pointer;line-height:1.35}
+.drive-warn.show{display:flex}
+.drive-warn .dw-ic{font-size:16px;flex-shrink:0}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 
 /* ── SETUP / WELCOME ── */
@@ -175,7 +166,7 @@ select:focus,input:focus{outline:none;border-color:var(--brand)}
 .wgdn{font-size:9px;color:var(--muted);text-align:center}.wgdd{font-size:15px;font-weight:700;font-family:'Barlow Condensed',sans-serif;text-align:center;margin-bottom:3px}.wgc.today .wgdd{color:var(--brand)}
 
 /* Bottom nav */
-.bnav{position:fixed;bottom:0;left:0;right:0;max-width:430px;margin:0 auto;background:var(--s1);border-top:1px solid var(--border);display:none;padding:8px 0 12px}
+.bnav{display:none!important}
 .bnav-i{display:flex}.ni{flex:1;text-align:center;cursor:pointer;padding:3px 0;display:flex;flex-direction:column;align-items:center;gap:2px}
 .ni-ic{font-size:19px}.ni-lb{font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.4px}.ni.active .ni-lb{color:var(--brand)}
 
@@ -264,17 +255,32 @@ select:focus,input:focus{outline:none;border-color:var(--brand)}
       <button class="hdr-btn" id="btnSuplente" onclick="openSuplenteModal()" title="Modo Suplente" style="display:none;">🔑</button>
       <button class="hdr-btn" id="btnSupervisor" onclick="openSupervisorModal()" title="Modo Supervisor" style="display:none;">🔐</button>
       <button class="hdr-btn" onclick="openSett()">⚙</button>
+      <button id="btnDriveHeader" onclick="connectDriveFromHeader()" 
+        style="border:none;border-radius:8px;padding:5px 10px;font-size:0.75rem;font-weight:700;cursor:pointer;background:#ef4444;color:white;">
+        ☁️ Drive
+      </button>
     </div>
+  </div>
+  <div class="drive-warn" id="driveWarnBanner" onclick="connectDriveFromHeader()">
+    <span class="dw-ic">⚠️</span><span>Drive desconectado — tus registros de hoy NO se están respaldando en la nube. Toca aquí para reconectar.</span>
   </div>
   <div class="sync"><div class="sdot" id="syncDot"></div><span id="syncLbl">—</span></div>
   <div class="week-nav">
-    <div class="week-label" id="weekLabel">Hoy</div>
+    <div class="week-label" id="weekLabel" style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+      <span id="weekLabelText">—</span>
+      <span style="font-size:0.7rem;opacity:0.6;">✏️</span>
+    </div>
     <div class="week-tabs">
       <div class="wtab active" id="tabDay" onclick="setView('day')">DÍA</div>
       <div class="wtab" id="tabWeek" onclick="setView('week')">SEMANA</div>
     </div>
   </div>
-  <div class="day-strip" id="dayStrip"></div>
+  <div style="display:flex;align-items:center;gap:4px;padding:0 8px;">
+    <button onclick="navWeek(-1)" style="background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;padding:4px 8px;">◀</button>
+    <div class="day-strip" id="dayStrip" style="flex:1;overflow-x:auto;"></div>
+    <button onclick="navWeek(1)" style="background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;padding:4px 8px;">▶</button>
+    <button onclick="irAHoy()" style="background:var(--brand);color:white;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;font-weight:700;cursor:pointer;">Hoy</button>
+  </div>
   <div id="viewDay"><div class="agenda" id="agendaEl"></div></div>
   <div id="viewWeek" style="display:none"><div class="wg"><div class="wgh" id="wgHead"></div><div class="wgc-wrap" id="wgCells"></div></div></div>
 </div>
@@ -369,6 +375,7 @@ select:focus,input:focus{outline:none;border-color:var(--brand)}
 
 <script>
 const CLIENT_ID='1032764332702-uvnqg0ccaer5gp2hr12gmniqe38ria1t.apps.googleusercontent.com';
+const DRIVE_ACCOUNT_HINT='wacolandscapes@gmail.com'; // cuenta de Drive correcta — se usa para evitar el selector de cuentas
 const SCOPES='https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
 const FOLDER='BrazosCleaningApp', FILE='brazosCS_sync.json', RFILE='quiktrack_bra_reports.json';
 const RPTS_KEY='qt_bra_reports';
@@ -389,6 +396,21 @@ let allEmpsList = [];
 
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState === 'visible'){
+    updateDriveHeaderBtn();
+    // Verificar si token está expirado o por expirar
+    const exp=parseInt(localStorage.getItem(TEXP)||'0');
+    if(S.driveToken && exp && Date.now() > exp - (5*60*1000)){
+      // Token expirado o expira en menos de 5 min — renovar silenciosamente
+      try{
+        const tcS=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPES,prompt:'',callback:function(r){
+          if(r.error) return;
+          S.driveToken=r.access_token;
+          localStorage.setItem(TKEY,r.access_token);
+          localStorage.setItem(TEXP,(Date.now()+(r.expires_in||3600)*1000).toString());
+        }});
+        tcS.requestAccessToken({prompt:''});
+      }catch(e){}
+    }
     setTimeout(()=>{ try{ refreshData() }catch(e){} }, 800);
   }
 });
@@ -435,11 +457,13 @@ function tryRestoreSession(){
     if(sess && sess.empId && sess.group){
       Object.assign(S, sess);
       if(S.emps && S.emps.length) buildEmpsList();
+      showEmpSelected(S.empName, S.group);
       launch(false);
-      // Si hay token válido, refrescar desde Drive automáticamente
       const tok=localStorage.getItem(TKEY);
       const exp=parseInt(localStorage.getItem(TEXP)||'0');
-      if(tok && Date.now() < exp){ setTimeout(()=>refreshData(), 1500); } try{checkBtnSuplente();}catch(e){} try{checkBtnSupervisor();}catch(e2){}
+      if(tok && Date.now() < exp){ setTimeout(()=>refreshData(), 1500); } 
+      setTimeout(updateDriveHeaderBtn, 500);
+      try{checkBtnSuplente();}catch(e){} try{checkBtnSupervisor();}catch(e2){}
       return;
     }
   }catch(e){}
@@ -450,19 +474,69 @@ let tc=null;
 function connectDrive(){
   if(S.driveToken){loadSyncFile();return;}
   if(typeof google==='undefined'){setDS('err','⚠ Google API no cargó');return;}
-  tc=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPES,callback:async(r)=>{
+  const onAuthed=async(r)=>{
     if(r.error){setDS('err','⚠ '+r.error);return;}
     S.driveToken=r.access_token;
     localStorage.setItem(TKEY,r.access_token);
     localStorage.setItem(TEXP,(Date.now()+(r.expires_in||3600)*1000).toString());
-    markConnected(); await loadSyncFile();
-  }});
-  tc.requestAccessToken({prompt:'select_account', login_hint:'wacolandscapes@gmail.com'});
+    markConnected();
+    await loadSyncFile();
+    // Subir horarios pendientes en localStorage que no se pudieron subir antes
+    if(S.group){ setTimeout(function(){ try{ saveHorariosToDrive(); }catch(e){} }, 1000); }
+    // Iniciar refresh silencioso cada 50 minutos
+    startSilentRefresh();
+  };
+  // 1) Intento silencioso con la cuenta correcta — si ya hay sesión y permiso previo, conecta sin mostrar nada.
+  const tcSilentFirst=google.accounts.oauth2.initTokenClient({
+    client_id:CLIENT_ID, scope:SCOPES, prompt:'', login_hint:DRIVE_ACCOUNT_HINT,
+    callback:async(r)=>{
+      if(r.error){
+        // 2) Si el silencioso falla, pedir acceso SIN forzar el selector de cuentas.
+        // (prompt:'select_account' es lo que obligaba a elegir cuenta siempre; sin él,
+        // Google intenta ir directo a la cuenta de login_hint y solo pregunta si de
+        // verdad no puede determinarla.)
+        tc=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPES,callback:onAuthed});
+        tc.requestAccessToken({login_hint:DRIVE_ACCOUNT_HINT});
+        return;
+      }
+      await onAuthed(r);
+    }
+  });
+  tcSilentFirst.requestAccessToken({prompt:''});
+}
+
+let _silentRefreshInterval = null;
+function startSilentRefresh(){
+  if(_silentRefreshInterval) clearInterval(_silentRefreshInterval);
+  _silentRefreshInterval = setInterval(function(){
+    if(typeof google==='undefined' || !tc) return;
+    try{
+      // Solicitar nuevo token silenciosamente sin prompt
+      const tcSilent = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        prompt: '',
+        callback: function(r){
+          if(r.error){ 
+            console.warn('Silent refresh failed:', r.error);
+            sdot('err','Reconecta Drive');
+            return; 
+          }
+          S.driveToken = r.access_token;
+          localStorage.setItem(TKEY, r.access_token);
+          localStorage.setItem(TEXP, (Date.now()+(r.expires_in||3600)*1000).toString());
+          console.log('Token renovado silenciosamente');
+        }
+      });
+      tcSilent.requestAccessToken({prompt:''});
+    }catch(e){ console.warn('Silent refresh error:', e); }
+  }, 50 * 60 * 1000); // cada 50 minutos
 }
 function markConnected(){
   const b=document.getElementById('btnDrive');
   b.classList.add('connected');
   b.innerHTML='✅ Drive conectado';
+  updateDriveHeaderBtn();
 }
 
 async function loadSyncFile(){
@@ -475,38 +549,25 @@ async function loadSyncFile(){
     if(!sr.files||!sr.files.length){setDS('err',`⚠ ${FILE} no encontrado`);return;}
     const data=await dGet(`https://www.googleapis.com/drive/v3/files/${sr.files[0].id}?alt=media`);
     if(!data||data.exportType!=='anaCS_sync'){setDS('err','⚠ Archivo inválido');return;}
-    S.grupos=data.grupos||{}; S.servs=data.servs||[]; S.clis=data.clis||[]; S.emps=data.emps||[]; S.cellNotes=data.cellNotes||{}; if(data.clavesSuplente) S.clavesSuplente=data.clavesSuplente; if(data.supervisorPin) S.supervisorPin=data.supervisorPin;
+    S.grupos=data.grupos||{}; S.servs=data.servs||[]; S.clis=data.clis||[]; S.emps=data.emps||[];
+    S.cellNotes=data.cellNotes||{};
+    if(data.clavesSuplente) S.clavesSuplente=data.clavesSuplente;
+    if(data.supervisorPin) S.supervisorPin=data.supervisorPin;
     const mod=new Date(sr.files[0].modifiedTime).toLocaleString('es-MX',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     setDS('ok',`✅ ${S.servs.length} servicios · ${mod}`);
-    // also try to load reports
-    try{
-      const rr=await dGet(`https://www.googleapis.com/drive/v3/files?q=name='${RFILE}'+and+'${S.folderId}'+in+parents+and+trashed=false&fields=files(id)`);
-      if(rr.files&&rr.files.length){
-        S.reportsFileId=rr.files[0].id;
-        const rdata=await dGet(`https://www.googleapis.com/drive/v3/files/${rr.files[0].id}?alt=media`);
-        // Mezclar reportes de Drive con reportes locales (modo suplente)
-        const localRpts = suplenteGetReports();
-        const merged = rdata||{};
-        Object.keys(localRpts).forEach(date=>{
-          Object.keys(localRpts[date]).forEach(group=>{
-            if(!merged[date]) merged[date]={};
-            if(!merged[date][group]) merged[date][group]=localRpts[date][group];
-            else {
-              // Mezclar servicios
-              localRpts[date][group].services.forEach(ls=>{
-                const idx=merged[date][group].services.findIndex(s=>String(s.id)===String(ls.id));
-                if(idx>=0) merged[date][group].services[idx]=ls;
-                else merged[date][group].services.push(ls);
-              });
-            }
-          });
-        });
-        S.reports=merged;
-      }
-    }catch(e){}
+    // Si ya hay grupo seleccionado (sesión restaurada), descargar horarios
+    try{ await loadHorariosFromDrive(); }catch(e){}
     buildEmpsList();
-    showEmpSection();
+    // Solo mostrar pantalla de selección si NO hay empleado ya seleccionado
+    if(!S.empId){
+      showEmpSection();
+    } else {
+      showEmpSelected(S.empName, S.group);
+    }
+    renderView();
+    try{checkNotesBadge();}catch(e2){}
   }catch(e){setDS('err','⚠ '+e.message);if(e.status===401){S.driveToken=null;localStorage.removeItem(TKEY);}}
+  try{checkNotesBadge();}catch(e3){}
 }
 
 async function dGet(url){
@@ -516,13 +577,32 @@ async function dGet(url){
 }
 
 async function saveHorariosToDrive(){
-  if(!S.driveToken||!S.folderId||!S.group) return;
+  if(!S.driveToken||!S.folderId||!S.selectedDate) return;
+  const exp=parseInt(localStorage.getItem(TEXP)||'0');
+  if(exp && Date.now() > exp){
+    S.driveToken=null;
+    sdot('err','Token expirado — reconecta Drive');
+    toast('⚠️ Token expirado. Reconecta Drive para subir horarios.');
+    return;
+  }
   try{
-    var fname=horariosFile(S.group), key=horariosKey(S.group);
+    var date=S.selectedDate;
+    var fname=horariosFile(date), key=horariosKey(date);
     var data=JSON.parse(localStorage.getItem(key)||'{}');
     if(!Object.keys(data).length) return;
+    // Merge con Drive para no sobreescribir datos de otros empleados
     var sr=await dGet("https://www.googleapis.com/drive/v3/files?q=name='"+fname+"'+and+'"+S.folderId+"'+in+parents+and+trashed=false&fields=files(id)");
-    var form=new FormData(), blob=new Blob([JSON.stringify(data)],{type:'application/json'});
+    var merged=Object.assign({},data);
+    if(sr.files&&sr.files.length){
+      try{
+        var driveData=await dGet('https://www.googleapis.com/drive/v3/files/'+sr.files[0].id+'?alt=media');
+        // Merge: para cada empId en Drive, conservar si no está en local
+        Object.keys(driveData||{}).forEach(function(eid){
+          merged[eid]=mergeEmpRecord(merged[eid], driveData[eid]);
+        });
+      }catch(e2){}
+    }
+    var form=new FormData(), blob=new Blob([JSON.stringify(merged)],{type:'application/json'});
     var url2,method;
     if(sr.files&&sr.files.length){
       form.append('metadata',new Blob([JSON.stringify({name:fname})],{type:'application/json'}));
@@ -537,7 +617,15 @@ async function saveHorariosToDrive(){
     }
     await fetch(url2,{method:method,headers:{Authorization:'Bearer '+S.driveToken},body:form});
     sdot('ok','Sync '+new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}));
-  }catch(e){console.warn('saveHorariosToDrive:',e.message);}
+  }catch(e){
+    console.warn('saveHorariosToDrive:',e.message);
+    if(e.status===401){
+      S.driveToken=null;
+      localStorage.removeItem(TKEY);
+      toast('⚠️ Token expirado. Reconecta Drive para subir horarios.');
+      sdot('err','Reconecta Drive');
+    }
+  }
 }
 
 async function saveReportsToDrive(){
@@ -620,6 +708,119 @@ async function saveSyncToDrive(){
     return false;
   }
 }
+async function loadHorariosFromDrive(){
+  if(!S.driveToken || !S.folderId) return;
+  try{
+    // Cargar archivos de las últimas 2 semanas + próximas 2 semanas
+    const dates=[];
+    const base=new Date(today()+'T12:00:00');
+    for(let i=-14;i<=14;i++){
+      const d=new Date(base); d.setDate(d.getDate()+i);
+      dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+    }
+    S.reports={};
+    await Promise.all(dates.map(async function(date){
+      var fname=horariosFile(date), key=horariosKey(date);
+      var local=JSON.parse(localStorage.getItem(key)||'{}');
+      try{
+        var sr=await dGet("https://www.googleapis.com/drive/v3/files?q=name='"+fname+"'+and+'"+S.folderId+"'+in+parents+and+trashed=false&fields=files(id)");
+        if(!sr.files||!sr.files.length){
+          // No en Drive — guardar local si hay datos
+          if(Object.keys(local).length){
+            if(!S.reports[date]) S.reports[date]={};
+            Object.keys(local).forEach(function(eid){ S.reports[date][eid]=local[eid]; });
+          }
+          return;
+        }
+        var drive=await dGet('https://www.googleapis.com/drive/v3/files/'+sr.files[0].id+'?alt=media');
+        // Merge: para cada empId, el más reciente gana
+        var merged=Object.assign({},drive||{});
+        Object.keys(local).forEach(function(eid){
+          merged[eid]=mergeEmpRecord(local[eid], merged[eid]);
+        });
+        localStorage.setItem(key,JSON.stringify(merged));
+        if(!S.reports[date]) S.reports[date]={};
+        Object.keys(merged).forEach(function(eid){ S.reports[date][eid]=merged[eid]; });
+      }catch(e2){
+        // Error descargando — usar local
+        if(Object.keys(local).length){
+          if(!S.reports[date]) S.reports[date]={};
+          Object.keys(local).forEach(function(eid){ S.reports[date][eid]=local[eid]; });
+        }
+      }
+    }));
+    toast('✅ Horarios sincronizados');
+  }catch(e){ console.warn('loadHorariosFromDrive:',e.message); }
+}
+
+
+function updateDriveHeaderBtn(){
+  const btn = document.getElementById('btnDriveHeader');
+  updateDriveWarningBanner();
+  if(!btn) return;
+  const exp = parseInt(localStorage.getItem(TEXP)||'0');
+  if(S.driveToken && exp && Date.now() < exp){
+    btn.style.background = '#22c55e'; // Verde — conectado
+    btn.textContent = '☁️ Drive ✓';
+    btn.title = 'Drive conectado — toca para reconectar';
+  } else if(S.driveToken && (!exp || Date.now() >= exp)){
+    btn.style.background = '#ef4444'; // Rojo — token expirado
+    btn.textContent = '☁️ Drive ⚠';
+    btn.title = 'Token expirado — toca para reconectar';
+  } else {
+    btn.style.background = '#ef4444'; // Rojo — desconectado
+    btn.textContent = '☁️ Drive';
+    btn.title = 'Toca para conectar Drive';
+  }
+}
+
+function updateDriveWarningBanner(){
+  // Advertencia grande y visible (no solo el botoncito) para cuando el líder
+  // olvida conectar Drive — muy fácil de pasar por alto de otra forma.
+  const el=document.getElementById('driveWarnBanner');
+  if(!el) return;
+  const exp=parseInt(localStorage.getItem(TEXP)||'0');
+  const connected = !!(S.driveToken && exp && Date.now()<exp);
+  el.classList.toggle('show', !connected);
+}
+
+function ensureDriveConnected(){
+  // Intenta reconectar a Drive SILENCIOSAMENTE (sin pedir clic ni mostrar popup)
+  // cada vez que se hace un registro. Solo funciona si el navegador ya autorizó
+  // la cuenta alguna vez; si no, resuelve false y dejamos la advertencia visible
+  // para que el líder reconecte manualmente con un toque.
+  return new Promise(function(resolve){
+    const exp=parseInt(localStorage.getItem(TEXP)||'0');
+    if(S.driveToken && exp && Date.now()<exp && S.folderId){ resolve(true); return; }
+    if(typeof google==='undefined' || !google.accounts || !google.accounts.oauth2){ resolve(false); return; }
+    try{
+      const tcAuto=google.accounts.oauth2.initTokenClient({
+        client_id:CLIENT_ID, scope:SCOPES, prompt:'', login_hint:DRIVE_ACCOUNT_HINT,
+        callback:async function(r){
+          if(r.error){ resolve(false); return; }
+          S.driveToken=r.access_token;
+          localStorage.setItem(TKEY,r.access_token);
+          localStorage.setItem(TEXP,(Date.now()+(r.expires_in||3600)*1000).toString());
+          markConnected();
+          if(!S.folderId){ try{ await loadSyncFile(); }catch(e){} }
+          resolve(!!S.driveToken && !!S.folderId);
+        }
+      });
+      tcAuto.requestAccessToken({prompt:''});
+    }catch(e){ resolve(false); }
+  });
+}
+
+function connectDriveFromHeader(){
+  // Si token válido — reconectar de todas formas para refrescar
+  S.driveToken = null;
+  localStorage.removeItem(TKEY);
+  const btn = document.getElementById('btnDriveHeader');
+  if(btn){ btn.style.background = '#f59e0b'; btn.textContent = '☁️ Conectando...'; }
+  connectDrive();
+}
+
+
 function setDS(t,m){
   const el=document.getElementById('driveStatus');
   el.textContent=m; el.className='ds'+(t==='ok'?' ok':t==='err'?' err':'');
@@ -650,6 +851,12 @@ function buildEmpsList(){
 
 function showEmpSection(){
   document.getElementById('empSection').style.display='block';
+  // Add listener to weekLabel if not already added
+  const wl = document.getElementById('weekLabel');
+  if (wl && !wl._hasEmpListener) {
+    wl._hasEmpListener = true;
+    wl.addEventListener('click', function(){ showEmpSection(); });
+  }
   // If we already have a saved employee, show selected state
   if(S.empId){
     showEmpSelected(S.empName, S.group);
@@ -721,13 +928,30 @@ function launch(save){
   document.getElementById('syncLbl').textContent=S.driveToken?`Drive · ${FILE}`:'Datos locales';
   buildStrip(); renderView();
   updateInfoScreen();
+  try{checkNotesBadge();}catch(e){}
 }
 
 /* ── WEEK STRIP ── */
+function navWeek(delta){
+  S.weekStart=addDays(S.weekStart, delta*7);
+  saveSess(); buildStrip();
+}
+
+function irAHoy(){
+  S.selectedDate=today();
+  S.weekStart=mondayOf(today());
+  saveSess(); buildStrip(); renderView();
+}
+
 function buildStrip(){
+  const wl = document.getElementById('weekLabel');
+  if (wl && !wl._hasEmpListener) {
+    wl._hasEmpListener = true;
+    wl.addEventListener('click', function(){ showEmpSection(); });
+  }
   const strip=document.getElementById('dayStrip'); strip.innerHTML='';
   const td=today();
-  for(let i=0;i<7;i++){
+  for(let i=0;i<14;i++){
     const d=addDays(S.weekStart,i), svcs=getSvcs(d);
     const rpts=getReportsForDay(d);
     const done=svcs.some(s=>rpts[s.id]?.status==='done');
@@ -753,42 +977,86 @@ function setView(v){
 }
 function renderView(){
   const d=new Date(S.selectedDate+'T12:00:00');
-  document.getElementById('weekLabel').textContent=S.selectedDate===today()?'Hoy':`${DAYS[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`;
+  const ws=new Date(S.weekStart+'T12:00:00'), we=new Date(ws); we.setDate(we.getDate()+13);
+  const monthLabel = ws.getMonth()===we.getMonth()
+    ? MON[ws.getMonth()]+' '+ws.getFullYear()
+    : MON[ws.getMonth()]+' – '+MON[we.getMonth()]+' '+we.getFullYear();
+  const firstName = (S.empName||'').split(' ')[0];
+  const grpLabel = S.group ? S.group.replace('Grupo ','G') : '';
+  const empGrpLabel = (grpLabel && firstName) ? `${grpLabel} · ${firstName}` : (grpLabel || firstName || monthLabel);
+  const wlt = document.getElementById('weekLabelText');
+  if (wlt) wlt.textContent = empGrpLabel + ' · ' + monthLabel;
   S.view==='day'?renderAgenda():renderWeek();
 }
 
 /* ── AGENDA (read-only) ── */
 function getReportsForDay(date){
-  // Read from S.reports which is structured as reports[date][group]
-  return (S.reports[date]&&S.reports[date][S.group]&&S.reports[date][S.group].services)
-    ? S.reports[date][S.group].services.reduce((acc,svc)=>{acc[svc.id]=svc;return acc;},{})
-    : {};
+  if(!S.reports||!S.reports[date]) return {};
+  // Combinar registros de todos los empleados del grupo (solo visualización)
+  // Priorizar los registros de la empleada actual para edición
+  var acc={};
+  // Primero cargar registros de OTROS empleados
+  Object.values(S.reports[date]).forEach(function(empData){
+    if(empData.empId===S.empId) return; // dejar los propios para después
+    if(empData&&empData.services) empData.services.forEach(function(svc){
+      if(!acc[svc.id]){
+        acc[svc.id]=Object.assign({},svc,{_readOnly:true});
+      } else {
+        if(svc.checkin && !acc[svc.id].checkin) acc[svc.id].checkin=svc.checkin;
+        if(svc.checkout && !acc[svc.id].checkout) acc[svc.id].checkout=svc.checkout;
+        if(svc.status==='done') acc[svc.id].status='done';
+        if(svc.clientName && !acc[svc.id].clientName) acc[svc.id].clientName=svc.clientName;
+      }
+    });
+  });
+  // Después cargar registros PROPIOS — sobreescriben para permitir edición
+  var ownData=S.reports[date][S.empId];
+  if(ownData&&ownData.services) ownData.services.forEach(function(svc){
+    if(!acc[svc.id]){
+      acc[svc.id]=svc;
+    } else {
+      // Combinar: los propios tienen prioridad, completar con datos de otros
+      var merged=Object.assign({},acc[svc.id],svc);
+      merged._readOnly=false;
+      acc[svc.id]=merged;
+    }
+  });
+  return acc;
 }
 
 function renderAgenda(){
   const el=document.getElementById('agendaEl'); el.innerHTML='';
   const svcs=getSvcs(S.selectedDate);
   const rpts=getReportsForDay(S.selectedDate);
-  const dayRpt=S.reports[S.selectedDate]&&S.reports[S.selectedDate][S.group];
+  // Combinar shopOut/shopBack de todos los empleados del grupo
+  var dayRpt=null;
+  if(S.reports&&S.reports[S.selectedDate]){
+    // Empezar con los datos de la empleada actual
+    dayRpt=Object.assign({},S.reports[S.selectedDate][S.empId]||Object.values(S.reports[S.selectedDate])[0]||{});
+    // Completar shopOut/shopBack de otros empleados si faltan
+    Object.values(S.reports[S.selectedDate]).forEach(function(empData){
+      if(!dayRpt.shopOut && empData.shopOut) dayRpt.shopOut=empData.shopOut;
+      if(!dayRpt.shopBack && empData.shopBack) dayRpt.shopBack=empData.shopBack;
+    });
+  }
 
   if(!svcs.length){
     el.innerHTML=`<div class="no-sv"><strong>Sin servicios</strong>No hay servicios para hoy.<br>¡Día libre! 🎉</div>`;
     return;
   }
 
-  el.innerHTML=`<div class="grp-lbl">👥 ${S.group}</div>`;
+  el.innerHTML="";
 
-  // Shop info card (read-only)
-  if(dayRpt&&(dayRpt.shopOut||dayRpt.shopBack)){
-    const shopDiv=document.createElement('div');
-    shopDiv.className='shop-info'+(dayRpt.shopOut&&dayRpt.shopBack?' active':'');
-    shopDiv.innerHTML=`
-      <div class="shop-row"><div class="shop-lbl">🚐 Salida del Shop</div><div class="${dayRpt.shopOut?'shop-time':'shop-none'}">${dayRpt.shopOut?fmt12(dayRpt.shopOut):'Pendiente'}</div></div>
-      <hr class="shop-divider">
-      <div class="shop-row"><div class="shop-lbl">🏠 Regreso al Shop</div><div class="${dayRpt.shopBack?'shop-time':'shop-none'}">${dayRpt.shopBack?fmt12(dayRpt.shopBack):'Pendiente'}</div></div>
-      ${dayRpt.shopOut&&dayRpt.shopBack?`<hr class="shop-divider"><div class="shop-row"><div style="font-size:12px;color:var(--muted)">Jornada total</div><div class="shop-time">${calcDur(dayRpt.shopOut,dayRpt.shopBack)}</div></div>`:''}
-    `;
-    el.appendChild(shopDiv);
+  // Banda delgada: Salida del Shop (arriba)
+  {
+    const soVal=(dayRpt&&dayRpt.shopOut)||'';
+    const bandOut=document.createElement('div');
+    bandOut.id='shopOutBand';
+    bandOut.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:6px 12px;margin-bottom:8px;background:var(--s2);border:1px solid '+(soVal?'#f59e0b':'var(--border)')+';border-radius:10px;cursor:pointer;';
+    bandOut.innerHTML='<div style="display:flex;align-items:center;gap:8px;"><span>🚐</span><span style="font-size:13px;font-weight:700;color:var(--muted);">Salida del Shop</span></div>'
+      +'<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:15px;font-weight:700;color:'+(soVal?'#f59e0b':'var(--muted)')+';">'+(soVal?fmt12(soVal):'— Toca para registrar')+'</span><span>✏️</span></div>';
+    bandOut.onclick=function(){openShopTimeEditor('shopOut', soVal);};
+    el.appendChild(bandOut);
   }
 
   const grid=document.createElement('div'); grid.className='ag-grid';
@@ -797,9 +1065,12 @@ function renderAgenda(){
 
   svcs.forEach(svc=>{
     const rpt=rpts[svc.id]||{status:'pending',checkin:null,checkout:null};
-    const st=rpt.status||'pending';
-    const sc=st==='done'?'std':st==='active'?'sta':'stp';
-    const sx=st==='done'?'Terminado':st==='active'?'En servicio':'Pendiente';
+    // Buscar si el servicio está cancelado en S.servs
+    const origSvc=(S.servs||[]).find(s=>String(s.id)===String(svc.id));
+    const isCancelled=!!(origSvc&&origSvc.cancelled);
+    const st=isCancelled?'cancelled':(rpt.status||'pending');
+    const sc=st==='done'?'std':st==='active'?'sta':st==='cancelled'?'stp':'stp';
+    const sx=st==='done'?'Terminado':st==='active'?'En servicio':st==='cancelled'?'❌ Cancelado':'Pendiente';
 
     const tl=document.createElement('div');
     tl.className='tslot';
@@ -809,6 +1080,13 @@ function renderAgenda(){
     const blk=document.createElement('div');
     blk.className=`sb ${st}`;
     blk.id=`blk_${svc.id}`;
+    if(isCancelled){
+      blk.style.opacity='0.6';
+      blk.style.textDecoration='line-through';
+      blk.style.textDecorationColor='#ef4444';
+      blk.style.textDecorationThickness='2px';
+      blk.style.border='1px solid #ef4444';
+    }
 
     const timeStr=bts(svc,rpt);
     const hasCheckin=!!(rpt.checkin);
@@ -818,11 +1096,12 @@ function renderAgenda(){
     window._sids=window._sids||{}; window._sids[sid]=svc.id;
 
     blk.innerHTML=`
-      <div class="sh" onclick="tog('${svc.id}')">
+      <div class="sh" onclick="tog('${String(svc.id).replace(/[^a-zA-Z0-9]/g,'_')}')">
         <div class="si">
           <div class="sn">${svc.clientName}</div>
           <div class="str">${timeStr}</div>
           <div class="sadr">${svc.address}</div>
+          ${svc.airbnbNote?`<div style="font-size:0.75rem;color:#e65100;margin-top:2px;font-weight:600;">📝 ${{checkout:'🧳 Checkout',checkin:'🔑 Checkin',same_day:'🔄 C+C mismo día',checkout_later:'📅 Checkin posterior',checkin_later:'📅 Checkout anterior'}[svc.airbnbNote]||svc.airbnbNote}</div>`:''}
         </div>
         <div class="sr">
           <div class="stb ${sc}">${sx}</div>
@@ -870,41 +1149,168 @@ function renderAgenda(){
   });
 
   grid.appendChild(tc); grid.appendChild(bc); el.appendChild(grid);
+
+  // Banda delgada: Regreso al Shop (abajo)
+  {
+    const sbVal=(dayRpt&&dayRpt.shopBack)||'';
+    const soVal2=(dayRpt&&dayRpt.shopOut)||'';
+    const bandBack=document.createElement('div');
+    bandBack.id='shopBackBand';
+    bandBack.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:6px 12px;margin-top:8px;background:var(--s2);border:1px solid '+(sbVal?'#22c55e':'var(--border)')+';border-radius:10px;cursor:pointer;';
+    bandBack.innerHTML='<div style="display:flex;align-items:center;gap:8px;"><span>🏠</span><span style="font-size:13px;font-weight:700;color:var(--muted);">Regreso al Shop</span></div>'
+      +'<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:15px;font-weight:700;color:'+(sbVal?'#22c55e':'var(--muted)')+';">'+(sbVal?fmt12(sbVal):'— Toca para registrar')+'</span>'+(soVal2&&sbVal?'<span style="font-size:11px;color:var(--muted);">'+calcDur(soVal2,sbVal)+'</span>':'')+'<span>✏️</span></div>';
+    bandBack.onclick=function(){openShopTimeEditor('shopBack', sbVal);};
+    el.appendChild(bandBack);
+  }
+
+  // ── NOTAS DEL SUPERVISOR AL FINAL DEL DÍA ──
+  const dayNotes = (S.cellNotes || {})[S.selectedDate + '__' + S.group] || [];
+  if (dayNotes.length > 0) {
+    const notesDiv = document.createElement('div');
+    notesDiv.style.cssText = 'margin:16px 0 8px;border-radius:10px;overflow:hidden;';
+    notesDiv.innerHTML = `
+      <div style="background:#f39c12;color:white;padding:8px 14px;font-size:0.82rem;font-weight:700;">
+        📋 Notas del Supervisor (${dayNotes.length})
+      </div>
+      ${dayNotes.map(n => `
+        <div style="background:#fff8e1;border-left:3px solid #f39c12;padding:10px 14px;font-size:0.88rem;color:#333;border-bottom:1px solid #ffeaa7;">
+          ${n}
+        </div>
+      `).join('')}
+    `;
+    el.appendChild(notesDiv);
+  }
 }
 
 function tog(id){document.getElementById(`blk_${id}`)?.classList.toggle('open');}
 
-function horariosKey(g){ return 'brazos_horarios_'+g.toLowerCase().replace(/\s+/g,'_'); }
-function horariosFile(g){ return 'brazos_horarios_'+g.toLowerCase().replace(/\s+/g,'_')+'.json'; }
+function horariosKey(date){ return 'brazos_horarios_'+date; }
+function horariosFile(date){ return 'brazos_horarios_'+date+'.json'; }
+
+function mergeEmpRecord(a,b){
+  // Fusiona el registro de UN empleado para UN día entre dos fuentes (local/Drive).
+  // Nunca reemplaza el array de "services" completo — siempre une por id de servicio,
+  // así un savedAt "perdedor" por una fracción de segundo no puede borrar servicios reales
+  // (esto fue la causa de la pérdida de Lynn Maxwell / Stacey Irvine en junio 2026).
+  if(!a) return b;
+  if(!b) return a;
+  var at=new Date(a.savedAt||0).getTime();
+  var bt=new Date(b.savedAt||0).getTime();
+  var base=(at>=bt)?a:b, other=(at>=bt)?b:a;
+  var svcMap={};
+  (other.services||[]).forEach(function(s){ if(s&&s.id!=null) svcMap[String(s.id)]=s; });
+  (base.services||[]).forEach(function(s){ if(s&&s.id!=null) svcMap[String(s.id)]=s; }); // base pisa en empates de id
+  return Object.assign({}, other, base, {services:Object.values(svcMap)});
+}
+
 
 function suplenteGetReports(){
-  try{ return JSON.parse(localStorage.getItem(horariosKey(S.group||''))||'{}'); }catch(e){ return {}; }
+  try{ return JSON.parse(localStorage.getItem(horariosKey(S.selectedDate||today()))||'{}'); }catch(e){ return {}; }
 }
 function suplenteUpdTime(id, field, val){
-  var date=S.selectedDate, group=S.group;
-  if(!date||!group){ toast('⚠ Sin fecha/grupo'); return; }
-  var key=horariosKey(group);
+  var date=S.selectedDate, empId=S.empId, group=S.group;
+  if(!date||!empId){ toast('⚠ Sin fecha o empleado'); return; }
+  var key=horariosKey(date);
   var all=JSON.parse(localStorage.getItem(key)||'{}');
-  if(!all[date]) all[date]={group:group,date:date,services:[],savedAt:''};
-  var svc=all[date].services.find(function(s){return String(s.id)===String(id);});
+  if(!all[empId]) all[empId]={empId:empId,empName:S.empName||'',group:group,services:[],savedAt:''};
+  var svc=all[empId].services.find(function(s){return String(s.id)===String(id);});
   if(!svc){
+    // Si el servicio pertenece a otra empleada del grupo, no duplicar
+    var isOtherEmp=false;
+    Object.keys(all).forEach(function(eid){
+      if(eid!==empId && all[eid].services && all[eid].services.find(function(s){return String(s.id)===String(id);})){
+        isOtherEmp=true;
+      }
+    });
+    if(isOtherEmp){ toast('⚠ Servicio registrado por otra empleada'); return; }
     var orig=(S.servs||[]).find(function(s){return String(s.id)===String(id);});
     var cli=orig?(S.clis||[]).find(function(c){return String(c.id)===String(orig.cliId);})||{}:{};
     svc={id:String(id),clientName:cli.name||'',address:[cli.address,cli.city].filter(Boolean).join(', '),checkin:'',checkout:'',status:'pending',note:''};
-    all[date].services.push(svc);
+    all[empId].services.push(svc);
   }
   svc[field]=val;
   svc.status=(svc.checkin&&svc.checkout)?'done':(svc.checkin?'active':'pending');
-  all[date].savedAt=new Date().toISOString();
+  all[empId].savedAt=new Date().toISOString();
   localStorage.setItem(key,JSON.stringify(all));
   if(!S.reports) S.reports={};
   if(!S.reports[date]) S.reports[date]={};
-  S.reports[date][group]=all[date];
+  S.reports[date][empId]=all[empId];
   toast('✅ '+(field==='checkin'?'Llegada':'Salida')+' guardada');
-  setTimeout(function(){try{saveHorariosToDrive();}catch(e){}},300);
+  setTimeout(function(){
+    ensureDriveConnected().then(function(ok){
+      updateDriveHeaderBtn();
+      if(ok){ try{saveHorariosToDrive();}catch(e){} }
+      else { toast('⚠️ Guardado local — sin conexión a Drive'); }
+    });
+  },300);
 }
 function suplenteUpdNote(id, val){
   suplenteUpdTime(id,'note',val);
+}
+
+function openShopTimeEditor(field, currentVal){
+  var old=document.getElementById('shopTimeModal'); if(old) old.remove();
+  var label=field==='shopOut'?'🚐 Salida del Shop':'🏠 Regreso al Shop';
+  var color=field==='shopOut'?'#f59e0b':'#22c55e';
+  var now=new Date();
+  var nowStr=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  var modal=document.createElement('div');
+  modal.id='shopTimeModal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  var inner=document.createElement('div');
+  inner.style.cssText='background:var(--bg);border-radius:16px;padding:24px;width:280px;';
+  var title=document.createElement('div');
+  title.style.cssText='font-size:17px;font-weight:700;color:var(--text);margin-bottom:16px;text-align:center;';
+  title.textContent=label;
+  var inp=document.createElement('input');
+  inp.type='time'; inp.id='shopTimeInput'; inp.value=currentVal||nowStr;
+  inp.style.cssText='width:100%;background:transparent;border:none;border-bottom:2px solid '+color+';color:var(--text);font-size:28px;font-weight:700;text-align:center;padding:8px 0;outline:none;margin-bottom:16px;';
+  var btns=document.createElement('div');
+  btns.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px;';
+  var btnCancel=document.createElement('button');
+  btnCancel.textContent='Cancelar';
+  btnCancel.style.cssText='padding:12px;background:var(--s2);color:var(--text);border:1px solid var(--border);border-radius:10px;font-weight:700;cursor:pointer;';
+  btnCancel.onclick=function(){ modal.remove(); };
+  var btnSave=document.createElement('button');
+  btnSave.textContent='💾 Guardar';
+  btnSave.style.cssText='padding:12px;background:'+color+';color:white;border:none;border-radius:10px;font-weight:700;cursor:pointer;';
+  var _field=field;
+  btnSave.onclick=function(){
+    var v=document.getElementById('shopTimeInput').value;
+    if(!v){ var n=new Date(); v=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0'); }
+    saveShopTime(_field,null,v);
+    modal.remove();
+  };
+  btns.appendChild(btnCancel); btns.appendChild(btnSave);
+  inner.appendChild(title); inner.appendChild(inp); inner.appendChild(btns);
+  modal.appendChild(inner);
+  document.body.appendChild(modal);
+  modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
+}
+
+function saveShopTime(field, inputId, directVal){
+  var date=S.selectedDate, empId=S.empId, group=S.group;
+  if(!date||!empId){ toast('⚠ Sin fecha o empleado'); return; }
+  var val=directVal||(inputId?(document.getElementById(inputId)||{}).value:'');
+  if(!val){ var n=new Date(); val=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0'); }
+  var key=horariosKey(date);
+  var all=JSON.parse(localStorage.getItem(key)||'{}');
+  if(!all[empId]) all[empId]={empId:empId,empName:S.empName||'',group:group,services:[],savedAt:''};
+  all[empId][field]=val;
+  all[empId].savedAt=new Date().toISOString();
+  localStorage.setItem(key,JSON.stringify(all));
+  if(!S.reports) S.reports={};
+  if(!S.reports[date]) S.reports[date]={};
+  S.reports[date][empId]=all[empId];
+  toast('✅ '+(field==='shopOut'?'Salida del Shop':'Regreso al Shop')+' guardado: '+val);
+  setTimeout(function(){
+    ensureDriveConnected().then(function(ok){
+      updateDriveHeaderBtn();
+      if(ok){ try{saveHorariosToDrive();}catch(e){} }
+      else { toast('⚠️ Guardado local — sin conexión a Drive'); }
+    });
+  },300);
+  renderView();
 }
 
 /* ── WEEK VIEW ── */
@@ -934,7 +1340,7 @@ function renderWeek(){
 function getSvcs(date){
   const members=(S.grupos[S.group]||[]).map(String);
   return S.servs
-    .filter(s=>!s.cancelled && s.date===date && (s.empId===S.group||members.includes(String(s.empId))))
+    .filter(s=>s.date===date && (s.empId===S.group||members.includes(String(s.empId))))
     .sort((a,b)=>{
       const ta=a.timeStart||'',tb=b.timeStart||'';
       if(ta&&tb) return ta.localeCompare(tb);
@@ -943,9 +1349,15 @@ function getSvcs(date){
     })
     .map(s=>{
       const c=S.clis.find(x=>String(x.id)===String(s.cliId))||{};
-      const showProp=(c.type==='airbnb'||c.type==='unico');
-      const clientName=(showProp&&c.propId)?c.name+' / '+c.propId:c.name||`Cliente ${s.cliId}`;
-      return{id:String(s.id),clientName,address:[c.address,c.city].filter(Boolean).join(', '),phone:c.tel||c.phone||'',scheduledStart:s.timeStart||'',scheduledEnd:s.timeEnd||'',priority:s.priority||''};
+      const showProp=(c.type==='airbnb'||c.type==='unico'||c.type==='construccion');
+      const clientName=(showProp&&(s.propId||c.propId))?c.name+' / '+(s.propId||c.propId):c.name||`Cliente ${s.cliId}`;
+      // Para construccion/airbnb/unico usar propId como dirección si existe
+      let address = [c.address,c.city].filter(Boolean).join(', ');
+      if(showProp){
+        const propAddr = s.propId||c.propId;
+        if(propAddr) address = propAddr;
+      }
+      return{id:String(s.id),clientName,address,phone:c.tel||c.phone||'',scheduledStart:s.timeStart||'',scheduledEnd:s.timeEnd||'',priority:s.priority||'',airbnbNote:s.airbnbNote||''};
     });
 }
 
@@ -1027,24 +1439,28 @@ async function refreshData(){
         }
       }
       // Recargar horarios del grupo
-      if(S.group){ try{ await loadHorariosFromDrive(); }catch(e){} }
+      try{ await loadHorariosFromDrive(); }catch(e){}
       const mod=new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
       sdot('ok','Actualizado '+mod);
       document.getElementById('syncLbl').textContent='Actualizado '+mod;
       saveSess(); buildStrip(); renderView(); updateInfoScreen(); try{checkNotesBadge();}catch(e2){} try{checkBtnSuplente();}catch(e3){} try{checkBtnSupervisor();}catch(e4){}
       toast('✅ Datos actualizados');
     } else {
-      // localStorage fallback
-      if(S.group){
-        try{
-          const local=JSON.parse(localStorage.getItem(horariosKey(S.group))||'{}');
-          S.reports={};
-          Object.keys(local).forEach(function(date){
-            if(!S.reports[date]) S.reports[date]={};
-            S.reports[date][S.group]=local[date];
-          });
-        }catch(ex){}
-      }
+      // localStorage fallback — leer archivos por fecha
+      try{
+        S.reports={};
+        const base=new Date(today()+'T12:00:00');
+        for(var i=-14;i<=14;i++){
+          const d=new Date(base); d.setDate(d.getDate()+i);
+          const dateStr=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+          const key=horariosKey(dateStr);
+          const local=JSON.parse(localStorage.getItem(key)||'{}');
+          if(Object.keys(local).length){
+            S.reports[dateStr]={};
+            Object.keys(local).forEach(function(eid){ S.reports[dateStr][eid]=local[eid]; });
+          }
+        }
+      }catch(ex){}
       sdot('ok','Datos locales');
       document.getElementById('syncLbl').textContent='Datos locales actualizados';
       saveSess(); buildStrip(); renderView(); updateInfoScreen(); try{checkNotesBadge();}catch(e2){} try{checkBtnSuplente();}catch(e3){} try{checkBtnSupervisor();}catch(e4){}
