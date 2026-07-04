@@ -3809,6 +3809,7 @@ class Scheduler {
                     // Avanzar al siguiente mes
                     curr.setMonth(curr.getMonth() + 1);
                     curr.setDate(1); // Primer día del mes
+                    const targetMonth = curr.getMonth(); // ✅ FIX: guardar el mes objetivo ANTES de aplicar el offset de semana (bug: sin esto, el mes de referencia se perdía cuando la fecha calculada se desbordaba al mes siguiente, saltándose meses enteros — ej. cuando el "5° viernes" no existe)
                     
                     // Encontrar el primer día de esa semana del mes
                     let firstOccurrence = 1;
@@ -3819,8 +3820,9 @@ class Scheduler {
                     // Ir a la semana correcta (1ra, 2da, 3ra, 4ta)
                     curr.setDate(firstOccurrence + (weekOfMonth - 1) * 7);
                     
-                    // Si nos pasamos del mes, usar la última ocurrencia
-                    if(curr.getMonth() !== new Date(curr.getFullYear(), curr.getMonth() + 1, 0).getMonth()) {
+                    // Si nos pasamos del mes, usar la última ocurrencia dentro del mes objetivo real
+                    if(curr.getMonth() !== targetMonth) { // ✅ FIX: comparar contra el mes objetivo guardado, no contra sí mismo
+                        curr.setMonth(targetMonth); // ✅ FIX: regresar al mes objetivo antes de recalcular, o si no la corrección cae en el mes equivocado
                         curr.setDate(firstOccurrence + (weekOfMonth - 2) * 7);
                     }
                     
@@ -3833,7 +3835,7 @@ class Scheduler {
             else break;
             if(curr > limit) break;
             if(type==='diario' && (curr.getDay()===0 || curr.getDay()===6)) continue;
-            this.servs.push({...base, id: Date.now() + (i*100), date: curr.toLocaleDateString('en-CA'), serieId: base.serieId});
+            this.servs.push({...base, id: Date.now() + Math.random(), date: curr.toLocaleDateString('en-CA'), serieId: base.serieId});
             i++;
         }
     }
