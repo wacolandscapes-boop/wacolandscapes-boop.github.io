@@ -4677,10 +4677,139 @@ class Scheduler {
         });
 
         // Ordenar: urgentes primero, luego alfabético
+        // ── RED DE SEGURIDAD FINAL ── corre para TODOS los clientes sin importar tipo,
+        // después de que ya corrieron las reglas específicas de arriba. Cubre dos huecos
+        // reales que encontramos (caso Owens, William):
+        //
+        // (A) Servicios de hace más de 7 días que NUNCA llegaron a tener factura generada
+        //     ni quedaron cubiertos por ninguna regla de arriba — para que nada se quede
+        //     "perdido" en silencio si alguna regla específica no lo detectó a tiempo.
+        // (B) Facturas que SÍ se generaron pero se quedaron con estatus "pendiente" (nunca
+        //     se enviaron) — el sistema anterior las daba por resueltas solo por existir,
+        //     sin importar si de verdad se enviaron. Esto es lo que le pasó a Owens, William:
+        //     su factura del 25 de junio se generó pero nunca se envió.
+        (() => {
+            const safetyCutoff = new Date(today);
+            safetyCutoff.setDate(today.getDate() - 7);
+            const safetyCutoffStr = safetyCutoff.toISOString().split('T')[0];
+            const safetyBacklogStart = new Date(today);
+            safetyBacklogStart.setDate(today.getDate() - 120);
+            const safetyBacklogStartStr = safetyBacklogStart.toISOString().split('T')[0];
+
+            // (A) Backlog de servicios nunca facturados
+            this.clis.forEach(propCli => {
+                if (propCli.type === 'unico') return; // único ya se factura el mismo día
+                const oldServs = this.servs.filter(s =>
+                    String(s.cliId) === String(propCli.id) && !s.cancelled &&
+                    s.date >= safetyBacklogStartStr && s.date <= safetyCutoffStr
+                );
+                if (oldServs.length === 0) return;
+
+                const isHandled = (svcDate, svcId) => {
+                    const inGenerated = (this.generatedInvoices || []).some(g =>
+                        g.clientName === propCli.name && g.status !== 'cancelada' &&
+                        g.startDate <= svcDate && g.endDate >= svcDate);
+                    if (inGenerated) return true;
+                    return this.pendingInvoices.some(p =>
+                        p.clientName === propCli.name &&
+                        ((p.serviceIds && p.serviceIds.includes(svcId)) ||
+                         (p.startDate <= svcDate && p.endDate >= svcDate &&
+                          (!p.clientIds || p.clientIds.some(id => String(id) === String(propCli.id)))))
+                    );
+                };
+
+                const unhandled = oldServs.filter(s => !isHandled(s.date, s.id));
+                if (unhandled.length === 0) return;
+
+                const key = `${propCli.name}-${propCli.id}-backlog-redseguridad`;
+                if (this.pendingInvoices.some(p => p.periodKey === key)) return;
+
+                const dates = unhandled.map(s => s.date).sort();
+                const propLabel = (propCli.propId && propCli.propId !== propCli.name) ? propCli.propId : propCli.name;
+                const total = unhandled.reduce((sum) => sum + parseFloat(propCli.price || 0), 0);
+
+                this.pendingInvoices.push({
+                    id: Date.now() + Math.random(),
+                    periodKey: key,
+                    clientName: propCli.name, clientEmail: propCli.email || '',
+                    clientIds: [propCli.id],
+                    cliId: propCli.id,
+                    propLabel,
+                    serviceIds: unhandled.map(s => s.id),
+                    serviceDates: dates,
+                    type: propCli.type,
+                    serviceType: propCli.serviceType || '',
+                    billingPeriod: propCli.billingPeriod,
+                    startDate: dates[0], endDate: dates[dates.length - 1],
+                    serviceCount: unhandled.length, total,
+                    urgency: 'overdue',
+                    reason: `⚠️ ${propLabel} — ${unhandled.length} servicio(s) de hace más de una semana SIN factura generada`,
+                    createdAt: today.toISOString()
+                });
+            });
+
+            // (B) Facturas generadas pero nunca enviadas (status "pendiente") — con cuidado
+            // de no confundir esto con el bug viejo de regeneración al reiniciar la app, que
+            // dejaba duplicados fantasma con estatus "pendiente" aunque la factura real YA
+            // se había enviado. Si existe otra factura del mismo cliente, ya enviada/pagada,
+            // que se cruza con las mismas fechas, esto es un duplicado fantasma — no hay que
+            // enviarlo, solo limpiarlo.
+            (this.generatedInvoices || []).forEach(g => {
+                if (g.status !== 'pendiente') return;
+                const key = `genUnsent-${g.id}`;
+                if (this.pendingInvoices.some(p => p.periodKey === key)) return;
+
+                const hasOverlappingSent = (this.generatedInvoices || []).some(o =>
+                    o !== g && o.clientName === g.clientName &&
+                    ['enviada','pagada','parcial'].includes(o.status) &&
+                    !(o.endDate < g.startDate || o.startDate > g.endDate)
+                );
+
+                if (hasOverlappingSent) {
+                    // Duplicado fantasma (bug viejo de regeneración) — ya está cobrada por otro lado
+                    this.pendingInvoices.push({
+                        id: Date.now() + Math.random(),
+                        periodKey: key,
+                        clientName: g.clientName, clientEmail: g.clientEmail || '',
+                        clientIds: g.clientIds || [],
+                        type: g.type || 'mensual',
+                        serviceType: g.serviceType || '',
+                        startDate: g.startDate, endDate: g.endDate,
+                        serviceCount: g.serviceCount || 1,
+                        total: g.total || 0,
+                        urgency: 'normal',
+                        isDuplicateGhost: true,
+                        genInvoiceId: g.id,
+                        reason: `🗑️ Factura #${g.invoiceNumber} es un duplicado fantasma (bug viejo) — ya existe otra factura enviada/pagada para ese periodo. Solo hay que borrar esta.`,
+                        createdAt: today.toISOString()
+                    });
+                    return;
+                }
+
+                // Genuina: de verdad se generó y nunca se envió
+                this.pendingInvoices.push({
+                    id: Date.now() + Math.random(),
+                    periodKey: key,
+                    clientName: g.clientName, clientEmail: g.clientEmail || '',
+                    clientIds: g.clientIds || [],
+                    type: g.type || 'mensual',
+                    serviceType: g.serviceType || '',
+                    startDate: g.startDate, endDate: g.endDate,
+                    serviceCount: g.serviceCount || 1,
+                    total: g.total || 0,
+                    urgency: 'overdue',
+                    isGeneratedUnsent: true,
+                    genInvoiceId: g.id,
+                    reason: `📤 Factura #${g.invoiceNumber} generada el ${g.generatedDate} — nunca se envió`,
+                    createdAt: today.toISOString()
+                });
+            });
+        })();
+
         this.pendingInvoices.sort((a, b) => {
-            const urgencyOrder = { overdue: 0, high: 1, normal: 2 };
-            const ua = urgencyOrder[a.urgency] ?? 2;
-            const ub = urgencyOrder[b.urgency] ?? 2;
+            const urgencyOrder = { overdue: 0, high: 1, thisweek: 2, normal: 3 };
+            const ua = urgencyOrder[a.urgency] ?? 3;
+            const ub = urgencyOrder[b.urgency] ?? 3;
             if (ua !== ub) return ua - ub;
             return a.clientName.localeCompare(b.clientName);
         });
@@ -4767,10 +4896,10 @@ class Scheduler {
                         ${pending.reason}
                     </div>
                     <div style="display: flex; gap: 6px; margin-top: 8px;">
-                        <button onclick="app.openInvoiceFromPending(${index})" class="btn" style="flex:1; background: #27ae60; color: white; padding: 8px; font-size:0.8rem; white-space: nowrap; font-weight: bold;">
-                            💼 Facturar
+                        <button onclick="app.openInvoiceFromPending(${index})" class="btn" style="flex:1; background: ${pending.isDuplicateGhost ? '#7f8c8d' : pending.isGeneratedUnsent ? '#8e44ad' : '#27ae60'}; color: white; padding: 8px; font-size:0.8rem; white-space: nowrap; font-weight: bold;">
+                            ${pending.isDuplicateGhost ? '🗑️ Revisar Duplicado' : pending.isGeneratedUnsent ? '📤 Ir a Enviar' : '💼 Facturar'}
                         </button>
-                        <button onclick="app.deletePendingInvoice(${index})" class="btn" style="background: #e74c3c; color: white; padding: 8px 10px; font-size:0.8rem;">
+                        <button onclick="app.deletePendingInvoice(${index})" class="btn" title="${pending.isGeneratedUnsent || pending.isDuplicateGhost ? 'Solo quita este aviso — no borra la factura' : 'Cancelar'}" style="background: #e74c3c; color: white; padding: 8px 10px; font-size:0.8rem;">
                             ❌
                         </button>
                     </div>
@@ -4830,6 +4959,18 @@ class Scheduler {
     openInvoiceFromPending(index) {
         const pending = this.pendingInvoices[index];
         if (!pending) return;
+
+        // Ya está generada (enviada de verdad, o duplicado fantasma a limpiar) — no tiene
+        // caso volver a crearla. Llevar directo a "Enviadas" filtrado a Pendientes.
+        if (pending.isGeneratedUnsent || pending.isDuplicateGhost) {
+            this.closePendingInvoices();
+            this.openGeneratedInvoices();
+            setTimeout(() => {
+                const statusSel = document.getElementById('genInvStatus');
+                if (statusSel) { statusSel.value = 'pendiente'; this.refreshGeneratedInvoices(); }
+            }, 150);
+            return;
+        }
         
         // Guardar índice y datos del pending
         this.currentPendingIndex = index;
