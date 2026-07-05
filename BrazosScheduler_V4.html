@@ -4457,10 +4457,21 @@ class Scheduler {
             // El precio siempre queda editable porque varía por trabajo — por eso esto se
             // abre en la pestaña "Factura Manual" pre-llenada, en vez de generarse solo.
             if (cliType === 'construccion') {
-                const alreadyInvoiced = (svcDate) => (this.generatedInvoices || []).some(g =>
-                    g.clientName === clientName && g.status !== 'cancelada' &&
-                    g.startDate <= svcDate && g.endDate >= svcDate
-                );
+                // Revisa si una fecha de una PROPIEDAD ESPECÍFICA ya fue facturada.
+                // Prioriza el match por cliId (propiedad exacta) cuando la factura ya lo
+                // guarda; solo si es una factura vieja sin ese dato (de antes de esta
+                // función) cae al match por nombre de cliente completo — que puede
+                // bloquear fechas por error si el cliente tiene varias propiedades con
+                // facturas de otras propiedades en fechas parecidas.
+                const alreadyInvoiced = (svcDate, propId) => (this.generatedInvoices || []).some(g => {
+                    if (g.status === 'cancelada') return false;
+                    if (g.clientName !== clientName) return false;
+                    if (!(g.startDate <= svcDate && g.endDate >= svcDate)) return false;
+                    if (g.clientIds && g.clientIds.length > 0) {
+                        return g.clientIds.some(id => String(id) === String(propId));
+                    }
+                    return true; // factura vieja sin clientIds — no podemos distinguir la propiedad, se asume que sí aplica
+                });
 
                 clients.forEach(propCli => {
                     const propBilling = propCli.billingPeriod || 'weekly';
@@ -4495,7 +4506,7 @@ class Scheduler {
                         String(s.cliId) === String(propCli.id) && !s.cancelled &&
                         s.date >= backlogStartStr && s.date <= periodEndStr
                     );
-                    const uninvoiced = propServs.filter(s => !alreadyInvoiced(s.date));
+                    const uninvoiced = propServs.filter(s => !alreadyInvoiced(s.date, propCli.id));
                     if (uninvoiced.length === 0) return;
 
                     // Refrescar: si ya había un pendiente de esta propiedad, lo reemplazamos con datos actualizados
@@ -4999,7 +5010,7 @@ class Scheduler {
                     listEl.innerHTML = '';
                     const defaultPrice = propCli ? (propCli.price || 0) : 0;
                     (pending.serviceDates || [pending.startDate]).forEach(date => {
-                        this.addManualInvoiceItem(date, `Limpieza — ${pending.propLabel || pending.clientName}`, defaultPrice);
+                        this.addManualInvoiceItem(date, 'Limpieza', defaultPrice);
                     });
                 }
                 document.getElementById('btnBackToPending').style.display = 'block';
@@ -11034,21 +11045,28 @@ Motivo de cancelación (opcional):`);
         if (!this.generatedInvoices) this.generatedInvoices = [];
         const invoiceNumber = parseInt(pdfData.invoiceNumber);
         const clientName = pdfData.client?.name || '';
+        // Usar el cliente/propiedad EXACTO que se usó para generar el PDF, no re-buscar
+        // solo por nombre (eso tomaba el primer registro que encontrara, que en clientes
+        // multipropiedad como JGM podía ser una propiedad distinta a la que se facturó).
+        const cli = pdfData.client || (this.clis ? this.clis.find(c => c.name === clientName) : null);
         const alreadyExists = this.generatedInvoices.find(i => i.invoiceNumber === invoiceNumber);
         if (alreadyExists) {
             if (status === 'enviada') { alreadyExists.status = 'enviada'; alreadyExists.sentAt = new Date().toISOString().split('T')[0]; }
+            if (!alreadyExists.clientIds || alreadyExists.clientIds.length === 0) {
+                alreadyExists.clientIds = cli ? [cli.id] : [];
+            }
             if ((!alreadyExists.items || alreadyExists.items.length === 0) && pdfData._services) {
                 alreadyExists.items = this.buildInvoiceItems(pdfData._services, pdfData.client);
             }
             this.save();
             return;
         }
-        const cli = this.clis ? this.clis.find(c => c.name === clientName) : null;
         this.generatedInvoices.push({
             id: Date.now() + Math.random(),
             invoiceNumber,
             generatedDate: new Date().toISOString().split('T')[0],
             clientName,
+            clientIds: cli ? [cli.id] : [],
             clientEmail: cli?.email || '',
             type: cli?.type || 'mensual',
             startDate: pdfData.startDate || '',
@@ -11061,11 +11079,15 @@ Motivo de cancelación (opcional):`);
             paidAt: null, paidAmount: null, notes: '',
             invoiceConfig: pdfData.invoiceConfig || null
         });
-        // Eliminar de pendientes
+        // Eliminar de pendientes — SOLO la propiedad exacta que se acaba de facturar,
+        // nunca todas las pendientes de ese nombre (un cliente de construcción puede tener
+        // varias propiedades con pendientes distintas al mismo tiempo).
         if (this.pendingInvoices) {
-            this.pendingInvoices = this.pendingInvoices.filter(p =>
-                !(p.clientName === clientName)
-            );
+            this.pendingInvoices = this.pendingInvoices.filter(p => {
+                if (p.clientName !== clientName) return true;
+                if (p.cliId && cli) return String(p.cliId) !== String(cli.id);
+                return false;
+            });
         }
         localStorage.setItem('lastInvoiceNumber', invoiceNumber.toString());
         this.save();
