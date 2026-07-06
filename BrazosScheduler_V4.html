@@ -4367,23 +4367,39 @@ class Scheduler {
 
     // Ir a Enviadas ya filtrado al cliente que se estaba revisando en Pendientes —
     // mantiene el contexto de la investigación en vez de aterrizar en la lista completa.
+    // Si se llama sin argumento (desde la barra superior), conserva el último cliente en foco.
     verClienteEnEnviadas(clientName) {
+        this._invLastClient = clientName || this._invLastClient || '';
         this.openGeneratedInvoices();
         setTimeout(() => {
             const searchInput = document.getElementById('genInvSearch');
-            if (searchInput) searchInput.value = clientName;
+            if (searchInput) searchInput.value = this._invLastClient || '';
             this.refreshGeneratedInvoices();
         }, 150);
     }
 
     // Ir a Pendientes ya filtrado/buscado al cliente que se estaba revisando en Enviadas.
     verClienteEnPendientes(clientName) {
+        this._invLastClient = clientName || this._invLastClient || '';
         this.openPendingInvoices();
         setTimeout(() => {
             const searchInput = document.getElementById('pendingSearch');
-            if (searchInput) searchInput.value = clientName;
+            if (searchInput) searchInput.value = this._invLastClient || '';
             this.renderPendingInvoices();
         }, 150);
+    }
+
+    // Ir a "Generar Factura" con el cliente en foco ya seleccionado, si hay uno.
+    verClienteEnGenerar(clientName) {
+        this._invLastClient = clientName || this._invLastClient || '';
+        this.openInvoice();
+        setTimeout(() => {
+            if (this._invLastClient) {
+                const cli = this.clis.find(c => c.name === this._invLastClient);
+                const sel = document.getElementById('invoiceClient');
+                if (cli && sel) sel.value = cli.id;
+            }
+        }, 200);
     }
     
     detectPendingInvoices() {
@@ -5030,45 +5046,85 @@ class Scheduler {
         };
 
         // Layout: URGENTES (dividido en Airbnb / Construcción / Mensuales / Otros) junto a
-        // POR ENVIAR AL FIN DE MES — tal como lo pediste, para ver de un vistazo qué urgente
-        // pertenece a cada categoría en vez de una sola lista mezclada.
+        // POR ENVIAR AL FIN DE MES — cada sección es retráctil (▼/▶) y se puede expandir
+        // a pantalla completa (⛶) para verla sola sin las demás estorbando.
         const _now = new Date();
         const lastDayLabel = new Date(_now.getFullYear(), _now.getMonth()+1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
         const htmlOf = (list) => list.map(p => buildCard(p, this.pendingInvoices.indexOf(p))).join('') ||
             '<div style="text-align:center; padding:20px 8px; color:#aaa; font-size:0.78rem;">Ninguna</div>';
 
-        const subCol = (title, icon, list, desc) => `
-            <div>
-                <div title="${desc}" style="cursor:help; background:#fde8e8; color:#c0392b; padding:6px 10px; border-radius:6px; font-weight:700; font-size:0.78rem; margin-bottom:8px; text-align:center;">
-                    ${icon} ${title} <span style="font-weight:400; opacity:0.7;">ℹ️</span> <span style="background:#c0392b; color:white; border-radius:20px; padding:0px 7px; margin-left:4px;">${list.length}</span>
-                </div>
-                ${htmlOf(list)}
+        this._pendingCollapsed = this._pendingCollapsed || {};
+
+        const sections = [
+            { key:'airbnb', title:'Airbnb', icon:'🏖️', list:urgAirbnb, color:'#fde8e8', textColor:'#c0392b',
+              desc:'Clientes tipo Airbnb. Se arma cada lunes/martes con los servicios de la SEMANA ANTERIOR (lunes a domingo pasado).' },
+            { key:'construccion', title:'Construcción', icon:'🏗️', list:urgConstruccion, color:'#fde8e8', textColor:'#c0392b',
+              desc:'Una tarjeta por PROPIEDAD (no por cliente) de clientes tipo Construcción, ej. JGM o Sorrells. Cada propiedad usa el periodo (semanal o mensual) que le configures.' },
+            { key:'mensuales', title:'Mensuales', icon:'📆', list:urgMensuales, color:'#fde8e8', textColor:'#c0392b',
+              desc:'Clientes tipo Mensual con algún servicio en la SEMANA ACTUAL (lunes a domingo de esta semana), sin importar si es su única visita del mes o no.' },
+        ];
+        if (urgOtros.length > 0) sections.push({ key:'otros', title:'Otros', icon:'📦', list:urgOtros, color:'#fde8e8', textColor:'#c0392b',
+              desc:'Cualquier otro tipo de cliente (semanal, quincenal, diario, único) que también necesite factura.' });
+        sections.push({ key:'finmes', title:`Por Enviar al Fin de Mes (${lastDayLabel})`, icon:'📋', list:porEnviarFinMes, color:'#fff3cd', textColor:'#856404',
+              desc:'Clientes recurrentes que se facturan una vez consolidados al final del mes, en vez de urgente.' });
+
+        const sectionHeader = (s, isFullscreen) => `
+            <div style="cursor:pointer; background:${s.color}; color:${s.textColor}; padding:8px 10px; border-radius:6px; font-weight:700; font-size:0.8rem; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                <span onclick="app.togglePendingSection('${s.key}')" title="${(s.desc||'').replace(/"/g,'&quot;')}" style="cursor:help; flex:1;">
+                    ${s.icon} ${s.title} <span style="opacity:0.6;">ℹ️</span> <span style="background:${s.textColor}; color:white; border-radius:20px; padding:0px 7px; margin-left:4px;">${s.list.length}</span>
+                </span>
+                <span style="display:flex; gap:4px; align-items:center;">
+                    <button onclick="event.stopPropagation(); app.${isFullscreen ? 'collapsePendingExpand' : `expandPendingSection('${s.key}')`}()" title="${isFullscreen ? 'Ver todas las categorías' : 'Pantalla completa'}" style="background:rgba(255,255,255,0.6); border:none; border-radius:4px; padding:2px 7px; cursor:pointer; font-size:0.85rem;">${isFullscreen ? '🗗' : '⛶'}</button>
+                    ${!isFullscreen ? `<span onclick="app.togglePendingSection('${s.key}')" style="cursor:pointer; padding:0 4px;">${this._pendingCollapsed[s.key] ? '▶' : '▼'}</span>` : ''}
+                </span>
             </div>`;
 
-        const urgentesSubCols = [
-            subCol('Airbnb', '🏖️', urgAirbnb, 'Clientes tipo Airbnb. Se arma cada lunes/martes con los servicios de la SEMANA ANTERIOR (lunes a domingo pasado).'),
-            subCol('Construcción', '🏗️', urgConstruccion, 'Una tarjeta por PROPIEDAD (no por cliente) de clientes tipo Construcción, ej. JGM o Sorrells. Cada propiedad usa el periodo (semanal o mensual) que le configures.'),
-            subCol('Mensuales', '📆', urgMensuales, 'Clientes tipo Mensual con algún servicio en la SEMANA ACTUAL (lunes a domingo de esta semana), sin importar si es su única visita del mes o no.'),
-        ];
-        if (urgOtros.length > 0) urgentesSubCols.push(subCol('Otros', '📦', urgOtros, 'Cualquier otro tipo de cliente (semanal, quincenal, diario, único) que también necesite factura.'));
-        const numUrgCols = urgentesSubCols.length;
+        // Vista expandida: solo UNA sección, a pantalla completa
+        if (this._pendingExpanded) {
+            const s = sections.find(x => x.key === this._pendingExpanded);
+            if (s) {
+                container.innerHTML = `
+                    <div style="height:100%; display:flex; flex-direction:column;">
+                        ${sectionHeader(s, true)}
+                        <div style="flex:1; overflow-y:auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:10px; align-content:start;">
+                            ${htmlOf(s.list)}
+                        </div>
+                    </div>`;
+                return;
+            }
+            this._pendingExpanded = null; // sección inválida, regresar a vista normal
+        }
 
+        // Vista normal: todas las secciones lado a lado, cada una retráctil
+        const numCols = sections.length;
         container.innerHTML = `
-            <div style="display:grid; grid-template-columns:repeat(${numUrgCols}, 1fr) 1.3fr; gap:14px; align-items:start;">
-                <div style="grid-column: span ${numUrgCols}; background:#e74c3c; color:white; padding:8px 14px; border-radius:8px; font-weight:700; font-size:0.9rem; text-align:center;">
-                    ⚡ URGENTES — Enviar Hoy
-                    <span style="background:white; color:#e74c3c; border-radius:20px; padding:1px 8px; margin-left:8px; font-size:0.8rem;">${urgentes.length}</span>
-                </div>
-                <div style="background:#f39c12; color:white; padding:8px 14px; border-radius:8px; font-weight:700; font-size:0.9rem; text-align:center;">
-                    📋 Por Enviar al Fin de Mes (${lastDayLabel})
-                    <span style="background:white; color:#f39c12; border-radius:20px; padding:1px 8px; margin-left:8px; font-size:0.8rem;">${porEnviarFinMes.length}</span>
-                </div>
-                ${urgentesSubCols.join('')}
-                <div>
-                    ${htmlOf(porEnviarFinMes)}
-                </div>
+            <div style="display:grid; grid-template-columns:repeat(${numCols}, 1fr); gap:14px; align-items:start; height:100%;">
+                ${sections.map(s => `
+                    <div style="display:flex; flex-direction:column; min-height:0;">
+                        ${sectionHeader(s, false)}
+                        <div style="overflow-y:auto; flex:1;">
+                            ${this._pendingCollapsed[s.key] ? '' : htmlOf(s.list)}
+                        </div>
+                    </div>
+                `).join('')}
             </div>
         `;
+    }
+
+    togglePendingSection(key) {
+        this._pendingCollapsed = this._pendingCollapsed || {};
+        this._pendingCollapsed[key] = !this._pendingCollapsed[key];
+        this.renderPendingInvoices();
+    }
+
+    expandPendingSection(key) {
+        this._pendingExpanded = key;
+        this.renderPendingInvoices();
+    }
+
+    collapsePendingExpand() {
+        this._pendingExpanded = null;
+        this.renderPendingInvoices();
     }
     
     previewPendingInvoice(index) {
@@ -5081,6 +5137,7 @@ class Scheduler {
     openInvoiceFromPending(index) {
         const pending = this.pendingInvoices[index];
         if (!pending) return;
+        this._invLastClient = pending.clientName || this._invLastClient || '';
 
         // Ya está generada (enviada de verdad, o duplicado fantasma a limpiar) — no tiene
         // caso volver a crearla. Llevar directo a "Enviadas" filtrado a Pendientes.
@@ -6062,9 +6119,26 @@ class Scheduler {
         let inv = this.generatedInvoices.find(i => String(i.id) === String(idOrNum));
         if (!inv) inv = this.generatedInvoices.find(i => String(i.invoiceNumber) === String(idOrNum) && i.clientName === clientName);
         if (!inv) return;
+
+        const wasPaidLike = inv.status === 'pagada' || inv.status === 'parcial';
+        const goingToUnpaid = newStatus === 'pendiente' || newStatus === 'enviada';
+
         inv.status = newStatus;
         if (newStatus === 'enviada' && !inv.sentAt) inv.sentAt = new Date().toLocaleDateString('en-CA');
         if (newStatus === 'pagada') inv.paidAt = new Date().toLocaleDateString('en-CA');
+
+        // Si se está quitando un estatus de pago (ej. quedó "Pagada" por error y se
+        // regresa a "Enviada"/"Pendiente" desde este menú), limpiar también el monto,
+        // fecha, método y referencia del pago — si no, esa info se queda pegada en la
+        // tabla aunque el estatus ya diga otra cosa.
+        if (wasPaidLike && goingToUnpaid) {
+            inv.paidAmount = null;
+            inv.paidAt = null;
+            inv.paymentMethod = null;
+            inv.paymentRef = null;
+            inv.payments = [];
+        }
+
         this.save();
         this.refreshGeneratedInvoices();
     }
@@ -15227,6 +15301,12 @@ document.addEventListener('click', function(e) {
             <div style="display: flex; justify-content: space-between; align-items: center; padding-right: 45px;">
                 <h2 style="margin: 0; font-size: 1.3rem;">💼 Facturación</h2>
                 <div style="display: flex; gap: 8px;">
+                    <button onclick="app.verClienteEnPendientes()" title="Ir a Pendientes" class="btn" style="background: rgba(255,255,255,0.9); color:#f39c12; padding: 8px 12px; font-size: 0.9rem; font-weight:bold;">
+                        📋 Pendientes
+                    </button>
+                    <button onclick="app.verClienteEnEnviadas()" title="Ir a Enviadas" class="btn" style="background: rgba(255,255,255,0.9); color:#16a085; padding: 8px 12px; font-size: 0.9rem; font-weight:bold;">
+                        📑 Enviadas
+                    </button>
                     <button id="btnBackToPending" onclick="app.backToPending()" class="btn" style="display: none; background: #f39c12; color: white; padding: 8px 15px; font-size: 0.9rem;">
                         ⬅️ Volver a Pendientes
                     </button>
@@ -15692,6 +15772,9 @@ document.addEventListener('click', function(e) {
             <span style="display:flex; align-items:center; gap:8px;">
                 <button class="inv-nav-back" data-active-color="#16a085" onclick="app.navBackInvoiceModal()" title="Atrás" style="background:white; color:#16a085; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:1.1rem; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.35);">◀ Atrás</button>
                 <button class="inv-nav-fwd" data-active-color="#16a085" onclick="app.navForwardInvoiceModal()" title="Adelante" style="background:white; color:#16a085; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:1.1rem; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.35);">Adelante ▶</button>
+                <span style="width:1px; height:22px; background:rgba(255,255,255,0.4); margin:0 2px;"></span>
+                <button onclick="app.verClienteEnPendientes()" title="Ir a Pendientes" style="background:rgba(255,255,255,0.9); color:#f39c12; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">📋 Pendientes</button>
+                <button onclick="app.verClienteEnGenerar()" title="Ir a Generar Factura" style="background:rgba(255,255,255,0.9); color:#e67e22; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">🧾 Generar</button>
                 📑 Historial de Facturas Enviadas
             </span>
             <span id="genInvBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.9rem;">0 facturas</span>
@@ -15813,6 +15896,9 @@ document.addEventListener('click', function(e) {
             <span style="display:flex; align-items:center; gap:8px;">
                 <button class="inv-nav-back" data-active-color="#f39c12" onclick="app.navBackInvoiceModal()" title="Atrás" style="background:white; color:#f39c12; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:1.1rem; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.35);">◀ Atrás</button>
                 <button class="inv-nav-fwd" data-active-color="#f39c12" onclick="app.navForwardInvoiceModal()" title="Adelante" style="background:white; color:#f39c12; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:1.1rem; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.35);">Adelante ▶</button>
+                <span style="width:1px; height:22px; background:rgba(255,255,255,0.4); margin:0 2px;"></span>
+                <button onclick="app.verClienteEnEnviadas()" title="Ir a Enviadas" style="background:rgba(255,255,255,0.9); color:#16a085; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">📑 Enviadas</button>
+                <button onclick="app.verClienteEnGenerar()" title="Ir a Generar Factura" style="background:rgba(255,255,255,0.9); color:#e67e22; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">🧾 Generar</button>
                 📋 Facturas Pendientes de Generar
             </span>
             <div style="display:flex; gap:8px;">
@@ -15826,7 +15912,7 @@ document.addEventListener('click', function(e) {
                 placeholder="🔍 Buscar por nombre o fecha..."
                 style="width:100%; padding:8px 12px; border:1px solid #ced4da; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
         </div>
-        <div id="pendingInvoicesList" style="flex:1; min-height:0; overflow-y: auto;">
+        <div id="pendingInvoicesList" style="flex:1; min-height:0; overflow:hidden;">
             <!-- Lista de facturas pendientes se carga dinámicamente -->
         </div>
 
