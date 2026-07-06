@@ -4263,6 +4263,10 @@ class Scheduler {
     // ==================== MÓDULO DE FACTURAS PENDIENTES ====================
     
     openPendingInvoices() {
+        this._navToInvoiceModal('pending');
+    }
+
+    _openPendingInvoicesRaw() {
         this.detectPendingInvoices();
         this.renderPendingInvoices();
         document.getElementById('pendingInvoicesModal').style.display = 'block';
@@ -4281,6 +4285,70 @@ class Scheduler {
     
     closePendingInvoices() {
         document.getElementById('pendingInvoicesModal').style.display = 'none';
+    }
+
+    // ── Navegación tipo navegador (atrás/adelante) entre los modales de facturación ──
+    // Permite ir de Pendientes a Enviadas (o viceversa) y volver sin cerrar todo cada vez.
+    _navToInvoiceModal(target) {
+        this._invNavStack = this._invNavStack || [];
+        this._invNavForward = this._invNavForward || [];
+        const current = this._invNavCurrent;
+        if (current && current !== target) {
+            this._invNavStack.push(current);
+            this._invNavForward = []; // una navegación nueva invalida el historial "adelante"
+        }
+        if (current) this._closeInvoiceModalByName(current);
+        this._invNavCurrent = target;
+        this._openInvoiceModalRawByName(target);
+        this._updateInvNavBar();
+    }
+
+    _openInvoiceModalRawByName(name) {
+        if (name === 'pending') this._openPendingInvoicesRaw();
+        else if (name === 'generated') this._openGeneratedInvoicesRaw();
+    }
+
+    _closeInvoiceModalByName(name) {
+        if (name === 'pending') this.closePendingInvoices();
+        else if (name === 'generated') this.closeGeneratedInvoices();
+    }
+
+    navBackInvoiceModal() {
+        if (!this._invNavStack || this._invNavStack.length === 0) return;
+        const prev = this._invNavStack.pop();
+        this._invNavForward = this._invNavForward || [];
+        if (this._invNavCurrent) this._invNavForward.push(this._invNavCurrent);
+        this._closeInvoiceModalByName(this._invNavCurrent);
+        this._invNavCurrent = prev;
+        this._openInvoiceModalRawByName(prev);
+        this._updateInvNavBar();
+    }
+
+    navForwardInvoiceModal() {
+        if (!this._invNavForward || this._invNavForward.length === 0) return;
+        const next = this._invNavForward.pop();
+        this._invNavStack = this._invNavStack || [];
+        if (this._invNavCurrent) this._invNavStack.push(this._invNavCurrent);
+        this._closeInvoiceModalByName(this._invNavCurrent);
+        this._invNavCurrent = next;
+        this._openInvoiceModalRawByName(next);
+        this._updateInvNavBar();
+    }
+
+    _updateInvNavBar() {
+        const hasBack = this._invNavStack && this._invNavStack.length > 0;
+        const hasFwd = this._invNavForward && this._invNavForward.length > 0;
+        document.querySelectorAll('.inv-nav-back').forEach(b => { b.disabled = !hasBack; b.style.opacity = hasBack ? '1' : '0.35'; });
+        document.querySelectorAll('.inv-nav-fwd').forEach(b => { b.disabled = !hasFwd; b.style.opacity = hasFwd ? '1' : '0.35'; });
+    }
+
+    // Salir por completo del flujo de facturación (botón "Cerrar" real) — limpia el
+    // historial de navegación para que la próxima vez que se abra sea un inicio limpio.
+    exitInvoiceNav(name) {
+        this._invNavStack = [];
+        this._invNavForward = [];
+        this._invNavCurrent = null;
+        this._closeInvoiceModalByName(name);
     }
     
     detectPendingInvoices() {
@@ -5253,6 +5321,10 @@ class Scheduler {
     }
     
     openGeneratedInvoices() {
+        this._navToInvoiceModal('generated');
+    }
+
+    _openGeneratedInvoicesRaw() {
         // Establecer fechas por defecto (último año)
         const today = new Date();
         const yearAgo = new Date(today);
@@ -10824,6 +10896,35 @@ Motivo de cancelación (opcional):`);
         this.displayPDFPreview(pdfData, client, startDate, endDate);
     }    
 
+    verFacturaEnCalendario(clientName, startDate, endDate) {
+        // Cerrar el preview del PDF
+        const preview = document.getElementById('pdfPreviewModal');
+        if (preview) preview.remove();
+
+        // Cerrar cualquier modal de facturación abierto (Pendientes / Enviadas / Generar)
+        // y resetear el historial de navegación, para dejar ver el calendario de fondo.
+        this.closePendingInvoices();
+        this.closeGeneratedInvoices();
+        try { this.closeInvoice(); } catch(e) {}
+        this._invNavStack = [];
+        this._invNavForward = [];
+        this._invNavCurrent = null;
+
+        // Filtrar el calendario a este cliente (reconoce automáticamente todas sus
+        // propiedades si es de construcción/airbnb con multipropiedad).
+        this._selectCalendarCli(clientName, clientName, '');
+
+        // Si el periodo de la factura es de una semana o menos, mostrar vista SEMANAL
+        // (para ver el detalle sin el resto del mes estorbando); si es más largo
+        // (quincenal, mensual, etc.), mostrar vista MENSUAL como antes.
+        const start = new Date(startDate + 'T00:00:00');
+        const end = new Date(endDate + 'T00:00:00');
+        const daysDiff = Math.round((end - start) / (1000*60*60*24));
+        this.view = (daysDiff <= 7) ? 'week' : 'month';
+        this.curDate = start;
+        this.render();
+    }
+
    displayPDFPreview(pdfData, client, startDate, endDate, invoiceConfigOverride) {
         // Crear URL del PDF
         const pdfUrl = URL.createObjectURL(pdfData.blob);
@@ -10860,6 +10961,9 @@ Motivo de cancelación (opcional):`);
                     </div>
                     <button onclick="app.printPDF('${pdfUrl}')" class="btn" style="background: #1A4FCC; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         🖨️ Imprimir
+                    </button>
+                    <button onclick="app.verFacturaEnCalendario('${(client.name||'').replace(/'/g,"\\'")}', '${startDate}', '${endDate}')" class="btn" style="background: #16a085; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                        📅 Ver en Calendario
                     </button>
                     <button onclick="app.savePDF(window.currentPDFData.invoiceNumber, window.currentPDFData.client.id, window.currentPDFData.startDate)" class="btn" style="background: #27ae60; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         💾 Guardar + Descargar
@@ -15502,7 +15606,11 @@ document.addEventListener('click', function(e) {
 <div id="generatedInvoicesModal" class="modal">
     <div class="modal-content" style="width: 95%; max-width: none;">
         <h2 style="background: #16a085; color: white; padding: 15px 20px; margin: -20px -20px 20px -20px; border-radius: 8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;">
-            📑 Historial de Facturas Enviadas
+            <span style="display:flex; align-items:center; gap:8px;">
+                <button class="inv-nav-back" onclick="app.navBackInvoiceModal()" title="Atrás" style="background:rgba(255,255,255,0.25); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:1rem;">◀</button>
+                <button class="inv-nav-fwd" onclick="app.navForwardInvoiceModal()" title="Adelante" style="background:rgba(255,255,255,0.25); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:1rem;">▶</button>
+                📑 Historial de Facturas Enviadas
+            </span>
             <span id="genInvBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.9rem;">0 facturas</span>
         </h2>
         
@@ -15609,7 +15717,7 @@ document.addEventListener('click', function(e) {
             </div>
         </div>
         
-        <button onclick="app.closeGeneratedInvoices()" class="btn" style="width: 100%; margin-top: 20px; background: #2c3e50; color: white; padding: 12px;">
+        <button onclick="app.exitInvoiceNav('generated')" class="btn" style="width: 100%; margin-top: 20px; background: #2c3e50; color: white; padding: 12px;">
             Cerrar
         </button>
     </div>
@@ -15619,7 +15727,11 @@ document.addEventListener('click', function(e) {
 <div id="pendingInvoicesModal" class="modal">
     <div class="modal-content" style="width: 95%; max-width: none;">
         <h2 style="background: #f39c12; color: white; padding: 15px 20px; margin: -20px -20px 20px -20px; border-radius: 8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;">
-            <span>📋 Facturas Pendientes de Generar</span>
+            <span style="display:flex; align-items:center; gap:8px;">
+                <button class="inv-nav-back" onclick="app.navBackInvoiceModal()" title="Atrás" style="background:rgba(255,255,255,0.25); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:1rem;">◀</button>
+                <button class="inv-nav-fwd" onclick="app.navForwardInvoiceModal()" title="Adelante" style="background:rgba(255,255,255,0.25); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:1rem;">▶</button>
+                📋 Facturas Pendientes de Generar
+            </span>
             <div style="display:flex; gap:8px;">
                 <span id="pendingTotalBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.85rem;">0 total</span>
                 <span id="pendingSentBadge" style="background:#27ae60; padding:4px 12px; border-radius:20px; font-size:0.85rem;">0 enviadas</span>
@@ -15645,7 +15757,7 @@ document.addEventListener('click', function(e) {
             <button onclick="app.generateAllPendingInvoices()" class="btn" style="flex: 1; background: #27ae60; color: white; padding: 15px; font-size: 1.1rem; font-weight: bold; display:none;">
                 📄 Generar TODAS las Facturas
             </button>
-            <button onclick="app.closePendingInvoices()" class="btn" style="background: #95a5a6; color: white; padding: 15px;">
+            <button onclick="app.exitInvoiceNav('pending')" class="btn" style="background: #95a5a6; color: white; padding: 15px;">
                 Cerrar
             </button>
         </div>
