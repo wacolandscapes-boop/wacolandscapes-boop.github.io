@@ -1691,6 +1691,9 @@ class Scheduler {
         };
         this.generatedInvoices = JSON.parse(localStorage.getItem('v35_generatedInvoices')) || [];
         this.pendingInvoices = JSON.parse(localStorage.getItem('v35_pendingInvoices')) || [];
+        // Pendientes que el usuario descartó a propósito (botón ❌) — para que NO se
+        // vuelvan a recrear la próxima vez que se recalculen las pendientes.
+        this.dismissedPendingKeys = JSON.parse(localStorage.getItem('v35_dismissedPending')) || [];
         // Drive sync
         if (!localStorage.getItem('anaCS_deviceId')) {
             localStorage.setItem('anaCS_deviceId', 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2,5));
@@ -2012,6 +2015,7 @@ class Scheduler {
         localStorage.setItem('v35_gastosCategories', JSON.stringify(this.gastosCategories || {}));
         localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices || []));
         localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices || []));
+        localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys || []));
         localStorage.setItem('v35_estimates', JSON.stringify(this.estimates || []));
         localStorage.setItem('v35_serviceCatalog', JSON.stringify(this.serviceCatalog || []));
         localStorage.setItem('anaCS_lastSavedAt', new Date().toISOString());
@@ -4338,8 +4342,18 @@ class Scheduler {
     _updateInvNavBar() {
         const hasBack = this._invNavStack && this._invNavStack.length > 0;
         const hasFwd = this._invNavForward && this._invNavForward.length > 0;
-        document.querySelectorAll('.inv-nav-back').forEach(b => { b.disabled = !hasBack; b.style.opacity = hasBack ? '1' : '0.35'; });
-        document.querySelectorAll('.inv-nav-fwd').forEach(b => { b.disabled = !hasFwd; b.style.opacity = hasFwd ? '1' : '0.35'; });
+        document.querySelectorAll('.inv-nav-back').forEach(b => {
+            b.disabled = !hasBack;
+            b.style.background = hasBack ? 'white' : '#e0e0e0';
+            b.style.color = hasBack ? b.dataset.activeColor || b.style.color : '#999';
+            b.style.cursor = hasBack ? 'pointer' : 'not-allowed';
+        });
+        document.querySelectorAll('.inv-nav-fwd').forEach(b => {
+            b.disabled = !hasFwd;
+            b.style.background = hasFwd ? 'white' : '#e0e0e0';
+            b.style.color = hasFwd ? b.dataset.activeColor || b.style.color : '#999';
+            b.style.cursor = hasFwd ? 'pointer' : 'not-allowed';
+        });
     }
 
     // Salir por completo del flujo de facturación (botón "Cerrar" real) — limpia el
@@ -4885,6 +4899,12 @@ class Scheduler {
             });
         })();
 
+        // Quitar cualquier pendiente que el usuario ya haya descartado a propósito
+        // (botón ❌) — sin esto, se volvía a crear en cada recálculo.
+        if (this.dismissedPendingKeys && this.dismissedPendingKeys.length > 0) {
+            this.pendingInvoices = this.pendingInvoices.filter(p => !this.dismissedPendingKeys.includes(p.periodKey));
+        }
+
         this.pendingInvoices.sort((a, b) => {
             const urgencyOrder = { overdue: 0, high: 1, thisweek: 2, normal: 3 };
             const ua = urgencyOrder[a.urgency] ?? 3;
@@ -5150,13 +5170,24 @@ class Scheduler {
         const pending = this.pendingInvoices[index];
         if (!pending) return;
         
-        if (!confirm(`¿Cancelar factura pendiente de ${pending.clientName}?`)) {
+        const msg = pending.isGeneratedUnsent || pending.isDuplicateGhost
+            ? `¿Quitar este aviso de ${pending.clientName}? (esto NO borra ni cancela la factura real, solo el recordatorio)`
+            : `¿Cancelar factura pendiente de ${pending.clientName}?`;
+        if (!confirm(msg)) {
             return;
         }
         
+        // Recordar que se descartó, para que detectPendingInvoices() no la vuelva a crear
+        // la próxima vez que se recalculen las pendientes.
+        this.dismissedPendingKeys = this.dismissedPendingKeys || [];
+        if (pending.periodKey && !this.dismissedPendingKeys.includes(pending.periodKey)) {
+            this.dismissedPendingKeys.push(pending.periodKey);
+        }
+
         this.pendingInvoices.splice(index, 1);
         this.updatePendingBadge();
         this.renderPendingInvoices();
+        this.save();
     }
     
     generateAllPendingInvoices() {
@@ -13993,6 +14024,7 @@ Motivo de cancelación (opcional):`);
                 gastosCategories: this.gastosCategories || {},
                 generatedInvoices: this.generatedInvoices || [],
                 pendingInvoices: this.pendingInvoices || [],
+                dismissedPendingKeys: this.dismissedPendingKeys || [],
                 nominaTotales: this.nominaTotales || [],
                 companyConfig: localStorage.getItem('companyConfig'),
                 companyLogo: localStorage.getItem('companyLogo'),
@@ -14171,6 +14203,7 @@ Motivo de cancelación (opcional):`);
                 if (data.gastosCategories) { this.gastosCategories = data.gastosCategories; localStorage.setItem('v35_gastosCategories', JSON.stringify(this.gastosCategories)); }
                 if (data.generatedInvoices){ this.generatedInvoices = data.generatedInvoices; localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices)); }
                 if (data.pendingInvoices)  { this.pendingInvoices = data.pendingInvoices; localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices)); }
+                if (data.dismissedPendingKeys) { this.dismissedPendingKeys = data.dismissedPendingKeys; localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys)); }
                 if (data.nominaTotales)    { this.nominaTotales = data.nominaTotales; localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales)); }
                 if (data.companyConfig)    localStorage.setItem('companyConfig', data.companyConfig);
                 if (data.companyLogo)      localStorage.setItem('companyLogo', data.companyLogo);
@@ -14194,11 +14227,13 @@ Motivo de cancelación (opcional):`);
                 emps: this.emps, clis: this.clis, servs: this.servs,
                 gastos: this.gastos || [], generatedInvoices: this.generatedInvoices || [],
                 pendingInvoices: this.pendingInvoices || [],
+                dismissedPendingKeys: this.dismissedPendingKeys || [],
             };
             const driveSide = {
                 emps: data.emps || [], clis: data.clis || [], servs: data.servs || [],
                 gastos: data.gastos || [], generatedInvoices: data.generatedInvoices || [],
                 pendingInvoices: data.pendingInvoices || [],
+                dismissedPendingKeys: data.dismissedPendingKeys || [],
             };
             const winner = localWins ? localSide : driveSide;
             const loser  = localWins ? driveSide : localSide;
@@ -14226,6 +14261,12 @@ Motivo de cancelación (opcional):`);
             this.generatedInvoices = mergedInvoices;
 
             this.pendingInvoices     = this.mergeArraysById(winner.pendingInvoices, loser.pendingInvoices);
+
+            // Descartes de pendientes: unión de ambos lados (un descarte en cualquier
+            // dispositivo debe respetarse siempre) — y se filtran del resultado fusionado
+            // para que una pendiente ya descartada no reaparezca por venir del otro lado.
+            this.dismissedPendingKeys = [...new Set([...(winner.dismissedPendingKeys||[]), ...(loser.dismissedPendingKeys||[])])];
+            this.pendingInvoices = this.pendingInvoices.filter(p => !this.dismissedPendingKeys.includes(p.periodKey));
 
             this.grupos = this.mergeGrupos(
                 localWins ? this.grupos : (data.grupos || {}),
@@ -14256,6 +14297,7 @@ Motivo de cancelación (opcional):`);
             localStorage.setItem('v35_gastosCategories', JSON.stringify(this.gastosCategories));
             localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices));
             localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices));
+            localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys));
             localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales));
 
             this.refreshSels();
@@ -15607,8 +15649,8 @@ document.addEventListener('click', function(e) {
     <div class="modal-content" style="width: 95%; max-width: none;">
         <h2 style="background: #16a085; color: white; padding: 15px 20px; margin: -20px -20px 20px -20px; border-radius: 8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;">
             <span style="display:flex; align-items:center; gap:8px;">
-                <button class="inv-nav-back" onclick="app.navBackInvoiceModal()" title="Atrás" style="background:rgba(255,255,255,0.25); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:1rem;">◀</button>
-                <button class="inv-nav-fwd" onclick="app.navForwardInvoiceModal()" title="Adelante" style="background:rgba(255,255,255,0.25); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:1rem;">▶</button>
+                <button class="inv-nav-back" data-active-color="#16a085" onclick="app.navBackInvoiceModal()" title="Atrás" style="background:white; color:#16a085; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:1.1rem; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.35);">◀ Atrás</button>
+                <button class="inv-nav-fwd" data-active-color="#16a085" onclick="app.navForwardInvoiceModal()" title="Adelante" style="background:white; color:#16a085; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:1.1rem; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.35);">Adelante ▶</button>
                 📑 Historial de Facturas Enviadas
             </span>
             <span id="genInvBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.9rem;">0 facturas</span>
@@ -15728,8 +15770,8 @@ document.addEventListener('click', function(e) {
     <div class="modal-content" style="width: 95%; max-width: none;">
         <h2 style="background: #f39c12; color: white; padding: 15px 20px; margin: -20px -20px 20px -20px; border-radius: 8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;">
             <span style="display:flex; align-items:center; gap:8px;">
-                <button class="inv-nav-back" onclick="app.navBackInvoiceModal()" title="Atrás" style="background:rgba(255,255,255,0.25); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:1rem;">◀</button>
-                <button class="inv-nav-fwd" onclick="app.navForwardInvoiceModal()" title="Adelante" style="background:rgba(255,255,255,0.25); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:1rem;">▶</button>
+                <button class="inv-nav-back" data-active-color="#f39c12" onclick="app.navBackInvoiceModal()" title="Atrás" style="background:white; color:#f39c12; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:1.1rem; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.35);">◀ Atrás</button>
+                <button class="inv-nav-fwd" data-active-color="#f39c12" onclick="app.navForwardInvoiceModal()" title="Adelante" style="background:white; color:#f39c12; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:1.1rem; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.35);">Adelante ▶</button>
                 📋 Facturas Pendientes de Generar
             </span>
             <div style="display:flex; gap:8px;">
