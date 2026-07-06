@@ -5937,9 +5937,26 @@ class Scheduler {
         if (!inv || !inv.payments) return;
         inv.payments.splice(index, 1);
         const totalPaid = inv.payments.reduce((s,p) => s + parseFloat(p.amount||0), 0);
-        if (totalPaid < (inv.total||0)) inv.status = totalPaid > 0 ? 'parcial' : 'enviada';
+
+        if (inv.payments.length > 0) {
+            // Recalcular el resumen a partir del pago más reciente que quede
+            const last = inv.payments[inv.payments.length - 1];
+            inv.paidAmount = totalPaid.toFixed(2);
+            inv.paidAt = last.date;
+            inv.paymentMethod = last.method;
+            inv.paymentRef = last.ref;
+        } else {
+            // No queda ningún pago — limpiar TODO el resumen (antes se quedaba pegada
+            // la info del cheque/método aunque ya no hubiera ningún pago registrado)
+            inv.paidAmount = null;
+            inv.paidAt = null;
+            inv.paymentMethod = null;
+            inv.paymentRef = null;
+        }
+        inv.status = (totalPaid > 0 && totalPaid >= (inv.total||0)) ? 'pagada' : (totalPaid > 0 ? 'parcial' : 'enviada');
         this.save();
         this.openCobroDetalle(invId);
+        this.refreshGeneratedInvoices();
         this.refreshGeneratedInvoices();
     }
 
