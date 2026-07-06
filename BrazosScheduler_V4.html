@@ -5367,7 +5367,14 @@ class Scheduler {
                 <div style="text-align:right;margin-top:12px;font-weight:700;">Total: $${(inv.total||0).toFixed(2)}</div>
                 ${(() => {
                     const hist = (inv.sentHistory || []).slice().reverse(); // más reciente primero
-                    if (hist.length === 0) return '';
+                    if (hist.length === 0) {
+                        // Factura de antes de que existiera este registro — no hay historial
+                        // detallado, pero sí mostramos el último dato conocido si existe.
+                        if (!inv.sentAt) return '<div style="margin-top:14px;font-size:12px;color:#64748b;">📬 Sin registro de envío todavía.</div>';
+                        const [y,m,d] = inv.sentAt.split('-');
+                        const fechaFallback = (y&&m&&d) ? `${m}/${d}/${y}` : inv.sentAt;
+                        return `<div style="margin-top:14px;font-size:12px;color:#94a3b8;">📬 Última vez enviada: <b style="color:#e2e8f0;">${fechaFallback}</b> <span style="opacity:0.7;">(factura de antes de activar el historial detallado — no se sabe cuántas veces se reenvió)</span></div>`;
+                    }
                     const methodLabels = { email:'📧 Email', 'reenviado (PDF)':'🖨️ PDF/Impreso', 'guardar como enviada':'✔️ Marcado manual', 'manual (cambio de estatus)':'✔️ Cambio de estatus' };
                     const rowsHist = hist.map(h => {
                         const d = new Date(h.date);
@@ -6030,7 +6037,6 @@ class Scheduler {
         this.save();
         this.openCobroDetalle(invId);
         this.refreshGeneratedInvoices();
-        this.refreshGeneratedInvoices();
     }
 
     onCobroStatusChange() {
@@ -6084,8 +6090,21 @@ class Scheduler {
                 inv.status = 'parcial';
             }
         } else {
-            // Just update status/sentAt without adding payment
-            inv.status = document.getElementById('cobroDetalleStatus').value;
+            // Sin monto nuevo — solo se actualiza el estatus. Si se está bajando de un
+            // estatus de pago (Pagada/Parcial) a uno sin pago (Enviada/Pendiente), hay
+            // que limpiar también el resumen del pago — si no, el monto/cheque viejo se
+            // queda pegado aunque el estatus ya diga otra cosa.
+            const newStatus = document.getElementById('cobroDetalleStatus').value;
+            const wasPaidLike = inv.status === 'pagada' || inv.status === 'parcial';
+            const goingToUnpaid = newStatus === 'pendiente' || newStatus === 'enviada';
+            inv.status = newStatus;
+            if (wasPaidLike && goingToUnpaid) {
+                inv.paidAmount = null;
+                inv.paidAt = null;
+                inv.paymentMethod = null;
+                inv.paymentRef = null;
+                inv.payments = [];
+            }
         }
 
         inv.sentAt = document.getElementById('cobroDetalleSentAt').value || inv.sentAt || null;
