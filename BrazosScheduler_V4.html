@@ -4364,6 +4364,27 @@ class Scheduler {
         this._invNavCurrent = null;
         this._closeInvoiceModalByName(name);
     }
+
+    // Ir a Enviadas ya filtrado al cliente que se estaba revisando en Pendientes —
+    // mantiene el contexto de la investigación en vez de aterrizar en la lista completa.
+    verClienteEnEnviadas(clientName) {
+        this.openGeneratedInvoices();
+        setTimeout(() => {
+            const searchInput = document.getElementById('genInvSearch');
+            if (searchInput) searchInput.value = clientName;
+            this.refreshGeneratedInvoices();
+        }, 150);
+    }
+
+    // Ir a Pendientes ya filtrado/buscado al cliente que se estaba revisando en Enviadas.
+    verClienteEnPendientes(clientName) {
+        this.openPendingInvoices();
+        setTimeout(() => {
+            const searchInput = document.getElementById('pendingSearch');
+            if (searchInput) searchInput.value = clientName;
+            this.renderPendingInvoices();
+        }, 150);
+    }
     
     detectPendingInvoices() {
         const today = new Date();
@@ -4982,23 +5003,25 @@ class Scheduler {
             const cardBorder = isOverdue ? '#c0392b' : (isUrgent || isThisWeek) ? '#e74c3c' : '#f39c12';
             const cardBg = isOverdue ? '#fde8e8' : (isUrgent || isThisWeek) ? '#fff5f5' : 'white';
             return `
-                <div style="background: ${cardBg}; border: 2px solid ${cardBorder}; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
-                    <h3 style="margin: 0 0 8px 0; color: #2c3e50; display:flex; align-items:center; gap:6px; font-size:0.95rem; flex-wrap:wrap;">
-                        ${serviceTypeIcon} ${pending.clientName}
-                        ${isOverdue ? '<span style="background:#c0392b; color:white; font-size:0.65rem; padding:2px 7px; border-radius:20px; font-weight:700;">⚠️ ATRASADA</span>' : isUrgent ? '<span style="background:#e74c3c; color:white; font-size:0.65rem; padding:2px 7px; border-radius:20px; font-weight:700;">⚡ HOY</span>' : ''}
-                    </h3>
-                    <div style="color: #666; font-size: 0.8rem; line-height:1.6;">
-                        <div><strong>Período:</strong> ${startFormatted} - ${endFormatted}</div>
-                        <div><strong>Servicios:</strong> ${pending.serviceCount} &nbsp; <strong>Total:</strong> <span style="color: #27ae60; font-weight: bold;">$${pending.total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span></div>
+                <div style="background: ${cardBg}; border: 2px solid ${cardBorder}; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                        <h3 style="margin: 0; color: #2c3e50; font-size:0.88rem; display:flex; align-items:center; gap:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">
+                            <span>${serviceTypeIcon}</span><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${pending.clientName}</span>
+                        </h3>
+                        ${isOverdue ? '<span style="flex-shrink:0; background:#c0392b; color:white; font-size:0.62rem; padding:2px 6px; border-radius:20px; font-weight:700; white-space:nowrap;">⚠️ ATRASADA</span>' : isUrgent ? '<span style="flex-shrink:0; background:#e74c3c; color:white; font-size:0.62rem; padding:2px 6px; border-radius:20px; font-weight:700; white-space:nowrap;">⚡ HOY</span>' : ''}
                     </div>
-                    <div style="margin-top: 8px; padding: 6px 10px; background: ${(isUrgent||isThisWeek) ? '#fde8e8' : '#fff3cd'}; border-left: 3px solid ${(isUrgent||isThisWeek) ? '#e74c3c' : '#f39c12'}; border-radius: 4px; font-size: 0.78rem; color: ${(isUrgent||isThisWeek) ? '#c0392b' : '#856404'};">
-                        ${pending.reason}
+                    <div title="${(pending.reason||'').replace(/"/g,'&quot;')}" style="cursor:help; color:${(isUrgent||isThisWeek)?'#c0392b':'#666'}; font-size: 0.74rem; margin-top:3px; display:flex; justify-content:space-between; gap:6px; overflow:hidden;">
+                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${startFormatted}–${endFormatted} · ${pending.serviceCount} serv.</span>
+                        <span style="color: #27ae60; font-weight:bold; flex-shrink:0;">$${pending.total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
                     </div>
-                    <div style="display: flex; gap: 6px; margin-top: 8px;">
-                        <button onclick="app.openInvoiceFromPending(${index})" class="btn" style="flex:1; background: ${pending.isDuplicateGhost ? '#7f8c8d' : pending.isGeneratedUnsent ? '#8e44ad' : '#27ae60'}; color: white; padding: 8px; font-size:0.8rem; white-space: nowrap; font-weight: bold;">
-                            ${pending.isDuplicateGhost ? '🗑️ Revisar Duplicado' : pending.isGeneratedUnsent ? '📤 Ir a Enviar' : '💼 Facturar'}
+                    <div style="display: flex; gap: 5px; margin-top: 6px;">
+                        <button onclick="app.openInvoiceFromPending(${index})" class="btn" style="flex:1; background: ${pending.isDuplicateGhost ? '#7f8c8d' : pending.isGeneratedUnsent ? '#8e44ad' : '#27ae60'}; color: white; padding: 6px; font-size:0.74rem; white-space: nowrap; font-weight: bold; overflow:hidden; text-overflow:ellipsis;">
+                            ${pending.isDuplicateGhost ? '🗑️ Duplicado' : pending.isGeneratedUnsent ? '📤 Enviar' : '💼 Facturar'}
                         </button>
-                        <button onclick="app.deletePendingInvoice(${index})" class="btn" title="${pending.isGeneratedUnsent || pending.isDuplicateGhost ? 'Solo quita este aviso — no borra la factura' : 'Cancelar'}" style="background: #e74c3c; color: white; padding: 8px 10px; font-size:0.8rem;">
+                        <button onclick="app.verClienteEnEnviadas('${(pending.clientName||'').replace(/'/g,"\\'")}')" title="Ver historial de Enviadas de este cliente" class="btn" style="background: #16a085; color: white; padding: 6px 8px; font-size:0.74rem;">
+                            📑
+                        </button>
+                        <button onclick="app.deletePendingInvoice(${index})" class="btn" title="${pending.isGeneratedUnsent || pending.isDuplicateGhost ? 'Solo quita este aviso — no borra la factura' : 'Cancelar'}" style="background: #e74c3c; color: white; padding: 6px 8px; font-size:0.74rem;">
                             ❌
                         </button>
                     </div>
@@ -5014,20 +5037,20 @@ class Scheduler {
         const htmlOf = (list) => list.map(p => buildCard(p, this.pendingInvoices.indexOf(p))).join('') ||
             '<div style="text-align:center; padding:20px 8px; color:#aaa; font-size:0.78rem;">Ninguna</div>';
 
-        const subCol = (title, icon, list) => `
+        const subCol = (title, icon, list, desc) => `
             <div>
-                <div style="background:#fde8e8; color:#c0392b; padding:6px 10px; border-radius:6px; font-weight:700; font-size:0.78rem; margin-bottom:8px; text-align:center;">
-                    ${icon} ${title} <span style="background:#c0392b; color:white; border-radius:20px; padding:0px 7px; margin-left:4px;">${list.length}</span>
+                <div title="${desc}" style="cursor:help; background:#fde8e8; color:#c0392b; padding:6px 10px; border-radius:6px; font-weight:700; font-size:0.78rem; margin-bottom:8px; text-align:center;">
+                    ${icon} ${title} <span style="font-weight:400; opacity:0.7;">ℹ️</span> <span style="background:#c0392b; color:white; border-radius:20px; padding:0px 7px; margin-left:4px;">${list.length}</span>
                 </div>
                 ${htmlOf(list)}
             </div>`;
 
         const urgentesSubCols = [
-            subCol('Airbnb', '🏖️', urgAirbnb),
-            subCol('Construcción', '🏗️', urgConstruccion),
-            subCol('Mensuales', '📆', urgMensuales),
+            subCol('Airbnb', '🏖️', urgAirbnb, 'Clientes tipo Airbnb. Se arma cada lunes/martes con los servicios de la SEMANA ANTERIOR (lunes a domingo pasado).'),
+            subCol('Construcción', '🏗️', urgConstruccion, 'Una tarjeta por PROPIEDAD (no por cliente) de clientes tipo Construcción, ej. JGM o Sorrells. Cada propiedad usa el periodo (semanal o mensual) que le configures.'),
+            subCol('Mensuales', '📆', urgMensuales, 'Clientes tipo Mensual con algún servicio en la SEMANA ACTUAL (lunes a domingo de esta semana), sin importar si es su única visita del mes o no.'),
         ];
-        if (urgOtros.length > 0) urgentesSubCols.push(subCol('Otros', '📦', urgOtros));
+        if (urgOtros.length > 0) urgentesSubCols.push(subCol('Otros', '📦', urgOtros, 'Cualquier otro tipo de cliente (semanal, quincenal, diario, único) que también necesite factura.'));
         const numUrgCols = urgentesSubCols.length;
 
         container.innerHTML = `
@@ -5525,6 +5548,7 @@ class Scheduler {
                             ${(() => { const _cli = (app.clis||[]).find(c => c.name === inv.clientName); return (_cli && _cli.autoCharge && _cli.stripeCustomerId && inv.status !== 'pagada') ? `<button onclick="app.cobrarTarjetaGuardada('${inv.id}')" class="btn" style="background: #00a650; color: white; padding: 5px 8px; font-size: 0.75rem;">⚡ Auto</button>` : ''; })()}
                             <button onclick="app.viewInvoiceItems('${inv.id}')" class="btn" style="background: #8e44ad; color: white; padding: 5px 8px; font-size: 0.75rem;">🔍 Detalle</button>
                             <button onclick="app.openInvoiceForEdit('${inv.id}')" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
+                            <button onclick="app.verClienteEnPendientes('${(inv.clientName||'').replace(/'/g,"\\'")}')" class="btn" style="background: #f39c12; color: white; padding: 5px 8px; font-size: 0.75rem;">📋 Ver en Pendientes</button>
                             <button onclick="app.editInvoiceNumber('${inv.id}', ${inv.invoiceNumber})" class="btn" style="background: #6c757d; color: white; padding: 5px 8px; font-size: 0.75rem;"># Nº</button>
                             <button onclick="app.cancelInvoice('${inv.id}')" class="btn" style="background: #c0392b; color: white; padding: 5px 8px; font-size: 0.75rem;">🗑️ Cancelar</button>
                             ${inv.status === 'pagada' ? `
@@ -15767,8 +15791,8 @@ document.addEventListener('click', function(e) {
 
 <!-- Modal Facturas Pendientes -->
 <div id="pendingInvoicesModal" class="modal">
-    <div class="modal-content" style="width: 95%; max-width: none;">
-        <h2 style="background: #f39c12; color: white; padding: 15px 20px; margin: -20px -20px 20px -20px; border-radius: 8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;">
+    <div class="modal-content" style="width: 98%; max-width: none; margin: 1vh auto; max-height: 98vh; display: flex; flex-direction: column; padding: 16px 20px;">
+        <h2 style="background: #f39c12; color: white; padding: 12px 18px; margin: -16px -20px 0 -20px; border-radius: 8px 8px 0 0; display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
             <span style="display:flex; align-items:center; gap:8px;">
                 <button class="inv-nav-back" data-active-color="#f39c12" onclick="app.navBackInvoiceModal()" title="Atrás" style="background:white; color:#f39c12; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:1.1rem; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.35);">◀ Atrás</button>
                 <button class="inv-nav-fwd" data-active-color="#f39c12" onclick="app.navForwardInvoiceModal()" title="Adelante" style="background:white; color:#f39c12; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:1.1rem; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.35);">Adelante ▶</button>
@@ -15780,26 +15804,23 @@ document.addEventListener('click', function(e) {
             </div>
         </h2>
         
-        <div style="padding: 10px 0 15px 0;">
+        <div style="padding: 8px 0 10px 0; flex-shrink:0;">
             <input type="text" id="pendingSearch" oninput="app.renderPendingInvoices()"
                 placeholder="🔍 Buscar por nombre o fecha..."
                 style="width:100%; padding:8px 12px; border:1px solid #ced4da; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
         </div>
-        <div id="pendingInvoicesList" style="max-height: 600px; overflow-y: auto;">
+        <div id="pendingInvoicesList" style="flex:1; min-height:0; overflow-y: auto;">
             <!-- Lista de facturas pendientes se carga dinámicamente -->
         </div>
-        
-        <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-top: 20px; border-left: 4px solid #f39c12;">
-            <p style="margin: 0; color: #856404;">
-                <strong>💡 ¿Cómo funciona?</strong> El sistema detecta automáticamente qué clientes necesitan factura según su tipo de recurrencia. Revisa cada borrador antes de generar el PDF.
+
+        <div style="display: flex; gap: 10px; align-items:center; margin-top: 10px; flex-shrink:0;">
+            <p style="margin: 0; color: #856404; font-size:0.78rem; flex:1;">
+                💡 Se detecta automático según recurrencia de cada cliente — revisa antes de generar. <span title="🏖️ Airbnb: clientes tipo Airbnb, se arma cada lunes con la semana anterior.&#10;🏗️ Construcción: una tarjeta por PROPIEDAD (no por cliente), semanal o mensual según lo que configures en cada propiedad.&#10;📆 Mensuales: clientes de tipo mensual con servicio en la semana actual.&#10;📦 Otros: cualquier otro tipo (semanal, quincenal, diario, único) que necesite factura." style="cursor:help; text-decoration:underline dotted; font-weight:600;">¿Qué significan las categorías?</span>
             </p>
-        </div>
-        
-        <div style="display: flex; gap: 10px; margin-top: 20px;">
-            <button onclick="app.generateAllPendingInvoices()" class="btn" style="flex: 1; background: #27ae60; color: white; padding: 15px; font-size: 1.1rem; font-weight: bold; display:none;">
-                📄 Generar TODAS las Facturas
+            <button onclick="app.generateAllPendingInvoices()" class="btn" style="background: #27ae60; color: white; padding: 10px 18px; font-size: 0.9rem; font-weight: bold; display:none; white-space:nowrap;">
+                📄 Generar TODAS
             </button>
-            <button onclick="app.exitInvoiceNav('pending')" class="btn" style="background: #95a5a6; color: white; padding: 15px;">
+            <button onclick="app.exitInvoiceNav('pending')" class="btn" style="background: #95a5a6; color: white; padding: 10px 18px; white-space:nowrap;">
                 Cerrar
             </button>
         </div>
