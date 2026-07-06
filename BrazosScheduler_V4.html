@@ -5365,6 +5365,22 @@ class Scheduler {
                     <tbody>${rows}</tbody>
                 </table>
                 <div style="text-align:right;margin-top:12px;font-weight:700;">Total: $${(inv.total||0).toFixed(2)}</div>
+                ${(() => {
+                    const hist = (inv.sentHistory || []).slice().reverse(); // más reciente primero
+                    if (hist.length === 0) return '';
+                    const methodLabels = { email:'📧 Email', 'reenviado (PDF)':'🖨️ PDF/Impreso', 'guardar como enviada':'✔️ Marcado manual', 'manual (cambio de estatus)':'✔️ Cambio de estatus' };
+                    const rowsHist = hist.map(h => {
+                        const d = new Date(h.date);
+                        const fecha = d.toLocaleDateString('es-MX', {day:'2-digit', month:'short', year:'numeric'});
+                        const hora = d.toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
+                        return `<tr><td style="padding:4px 8px;color:#cbd5e1;">${fecha} · ${hora}</td><td style="padding:4px 8px;color:#94a3b8;">${methodLabels[h.method] || h.method}</td></tr>`;
+                    }).join('');
+                    return `
+                    <div style="margin-top:16px;">
+                        <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:6px;">📬 Historial de envíos (${hist.length}) — última: ${new Date(hist[0].date).toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'})}</div>
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;background:#0f172a;border-radius:8px;overflow:hidden;">${rowsHist}</table>
+                    </div>`;
+                })()}
                 <button onclick="document.getElementById('_invItemsOverlay').remove()" style="margin-top:16px;width:100%;background:#334155;border:none;color:#fff;padding:10px;border-radius:8px;cursor:pointer;font-weight:600;">Cerrar</button>
             </div>`;
         document.body.appendChild(overlay);
@@ -6113,6 +6129,15 @@ class Scheduler {
         alert(`✅ Factura renumerada a #${num.toString().padStart(4,'0')}`);
     }
 
+    // Registra cada vez que una factura se envía o reenvía (por email o impresión/manual),
+    // para poder ver cuándo fue la última vez sin importar cuántas veces se haya reenviado.
+    _addSentHistory(inv, method) {
+        if (!inv) return;
+        inv.sentHistory = inv.sentHistory || [];
+        inv.sentHistory.push({ date: new Date().toISOString(), method: method || 'manual' });
+        if (inv.sentHistory.length > 30) inv.sentHistory = inv.sentHistory.slice(-30); // no crecer sin límite
+    }
+
     changeInvoiceStatus(idOrNum, clientName, newStatus) {
         if (!this.generatedInvoices) return;
         // Buscar por id primero, luego por invoiceNumber + clientName
@@ -6125,6 +6150,7 @@ class Scheduler {
 
         inv.status = newStatus;
         if (newStatus === 'enviada' && !inv.sentAt) inv.sentAt = new Date().toLocaleDateString('en-CA');
+        if (newStatus === 'enviada') this._addSentHistory(inv, 'manual (cambio de estatus)');
         if (newStatus === 'pagada') inv.paidAt = new Date().toLocaleDateString('en-CA');
 
         // Si se está quitando un estatus de pago (ej. quedó "Pagada" por error y se
@@ -11189,6 +11215,7 @@ Motivo de cancelación (opcional):`);
             // Update existing record
             existing.status = 'enviada';
             existing.sentAt = existing.sentAt || today;
+            this._addSentHistory(existing, 'guardar como enviada');
             existing.invoiceConfig = pdfData.invoiceConfig || existing.invoiceConfig;
             existing.serviceCount = pdfData.serviceCount || existing.serviceCount;
             existing.total = pdfData.total || existing.total;
@@ -11301,7 +11328,7 @@ Motivo de cancelación (opcional):`);
         const cli = pdfData.client || (this.clis ? this.clis.find(c => c.name === clientName) : null);
         const alreadyExists = this.generatedInvoices.find(i => i.invoiceNumber === invoiceNumber);
         if (alreadyExists) {
-            if (status === 'enviada') { alreadyExists.status = 'enviada'; alreadyExists.sentAt = new Date().toISOString().split('T')[0]; }
+            if (status === 'enviada') { alreadyExists.status = 'enviada'; alreadyExists.sentAt = new Date().toISOString().split('T')[0]; this._addSentHistory(alreadyExists, 'reenviado (PDF)'); }
             if (!alreadyExists.clientIds || alreadyExists.clientIds.length === 0) {
                 alreadyExists.clientIds = cli ? [cli.id] : [];
             }
@@ -11419,6 +11446,7 @@ Motivo de cancelación (opcional):`);
                     type: client.type || 'mensual',
                     status: 'enviada',
                     sentAt: new Date().toLocaleDateString('en-CA'),
+                    sentHistory: [{ date: new Date().toISOString(), method: 'email' }],
                     invoiceConfig: window.currentPDFData?.invoiceConfig || null
                 });
             }
@@ -14359,12 +14387,18 @@ Motivo de cancelación (opcional):`);
             this.gastos              = this.mergeArraysById(winner.gastos, loser.gastos);
 
             // Para facturas: merge especial — el status de pago SIEMPRE viene de Drive
-            // (porque el Worker de Stripe actualiza Drive directamente sin pasar por local)
+            // ÚNICAMENTE cuando es un pago real de Stripe (el Worker actualiza Drive
+            // directo sin pasar por local, así que Drive manda ahí). Para pagos
+            // registrados A MANO (cheque, efectivo, etc.) esto NO debe forzarse — si no,
+            // una corrección local (ej. borrar un cheque que se marcó por error) se
+            // revierte solo en el siguiente sync porque Drive todavía tenía el dato viejo.
             const mergedInvoices = this.mergeArraysById(winner.generatedInvoices, loser.generatedInvoices);
             const driveInvoices = data.generatedInvoices || [];
             mergedInvoices.forEach(inv => {
                 const driveVersion = driveInvoices.find(d => String(d.id) === String(inv.id));
-                if (driveVersion && (driveVersion.status === 'pagada' || driveVersion.status === 'parcial')) {
+                const driveIsStripePayment = driveVersion && (driveVersion.status === 'pagada' || driveVersion.status === 'parcial') &&
+                    driveVersion.paymentMethod && driveVersion.paymentMethod.includes('Stripe');
+                if (driveIsStripePayment) {
                     inv.status = driveVersion.status;
                     inv.paidAt = driveVersion.paidAt;
                     inv.paidAmount = driveVersion.paidAmount;
