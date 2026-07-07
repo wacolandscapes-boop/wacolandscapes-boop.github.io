@@ -11501,11 +11501,13 @@ Motivo de cancelación (opcional):`);
         }
         const pdfData = window.currentPDFData;
 
-        // ── VALIDACIÓN DE DUPLICADOS ──
+        // ── VALIDACIÓN DE DUPLICADOS ── (excluye la propia factura si se está
+        // reimprimiendo/reguardando la misma — si no, se detecta a sí misma como "duplicada")
         const existing = (this.generatedInvoices || []).find(h =>
             h.clientName === clientName &&
             h.startDate === startDate &&
-            h.status !== 'cancelada'
+            h.status !== 'cancelada' &&
+            String(h.invoiceNumber) !== String(invoiceNumber)
         );
         if (existing) {
             const existingNum = String(existing.invoiceNumber).padStart(4,'0');
