@@ -1140,7 +1140,8 @@
                 <button class="btn" onclick="app.showSec('secSupervisor')" style="background:#6c3483; color:white">🔐 Supervisor</button>
             </div>
             <div id="secEmp">
-                <div style="margin-bottom:15px; display:flex; justify-content:flex-end; gap:8px;">
+                <div style="margin-bottom:15px; display:flex; justify-content:flex-end; gap:8px; align-items:flex-start;">
+                    <button onclick="app.addNewEmp()" class="btn" style="background:#e67e22; color:white;">+ Nuevo Empleado</button>
                     <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
                         <button onclick="app.importEmployeesFromNomina()" class="btn" style="background:#27ae60; color:white;">📥 Importar desde Nómina</button>
                         <span id="lastNominaImport" style="font-size:0.72rem; color:#888;"></span>
@@ -1219,6 +1220,13 @@
                             <option value="15" selected>Net 15 (15 días)</option>
                             <option value="30">Net 30 (30 días)</option>
                         </select>
+                        <div style="grid-column:span 2; background:#fff3cd; border:1px solid #f39c12; border-radius:6px; padding:8px; margin-top:6px;">
+                            <label style="display:flex; align-items:center; gap:6px; font-size:0.82rem; font-weight:700; color:#856404; cursor:pointer;">
+                                <input type="checkbox" id="cliExcludeInvoicing" style="width:auto;">
+                                🚫 No facturar por Brazos (se factura por fuera / otro dueño)
+                            </label>
+                            <div style="font-size:0.72rem; color:#856404; margin-top:2px;">El cliente/propiedad sigue programándose normal en el calendario, pero nunca aparece en Pendientes, Urgentes ni se le genera factura desde aquí.</div>
+                        </div>
                         <div style="grid-column:span 2; display:flex; align-items:center; gap:8px; margin-top:4px;">
                             <label style="font-size:0.8rem; color:#555; white-space:nowrap;">🏛️ Tax Rate:</label>
                             <input type="number" id="cliTaxRate" step="0.01" min="0" max="10" placeholder="8.25" 
@@ -4404,7 +4412,7 @@ class Scheduler {
     
     detectPendingInvoices() {
         const today = new Date();
-        const todayStr = today.toISOString().split('T')[0];
+        const todayStr = today.toLocaleDateString('en-CA');
         const currentDay = today.getDate();
         const currentMonth = today.getMonth(); // 0-based
         const currentYear = today.getFullYear();
@@ -4436,7 +4444,12 @@ class Scheduler {
         });
 
         Object.keys(clientGroups).forEach(clientName => {
-            const clients = clientGroups[clientName];
+            const clientsAll = clientGroups[clientName];
+            // Clientes/propiedades marcados "No facturar por Brazos" (ej. Hospitaller
+            // atendido por Victor) se excluyen aquí — siguen programándose normal en el
+            // calendario, pero nunca generan pendiente/urgente/factura desde el Scheduler.
+            const clients = clientsAll.filter(c => !c.excludeInvoicing);
+            if (clients.length === 0) return;
             const cli = clients[0];
             const cliType = cli.type || 'mensual';
             const billingPeriod = cli.billingPeriod || 'monthly';
@@ -4450,8 +4463,8 @@ class Scheduler {
                     if (currentDay < 15) return; // Mostrar a partir del día 15
                     const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
                     const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-                    const periodStart = new Date(prevYear, prevMonth, 1).toISOString().split('T')[0];
-                    const periodEnd = new Date(prevYear, prevMonth + 1, 0).toISOString().split('T')[0];
+                    const periodStart = new Date(prevYear, prevMonth, 1).toLocaleDateString('en-CA');
+                    const periodEnd = new Date(prevYear, prevMonth + 1, 0).toLocaleDateString('en-CA');
                     const monthKey = `${clientName}-airbnb-monthly-${prevYear}-${prevMonth}`;
                     if (this.pendingInvoices.some(p => p.periodKey === monthKey)) return;
                     if ((this.generatedInvoices || []).some(g => g.clientName === clientName &&
@@ -4487,8 +4500,8 @@ class Scheduler {
                 lastMonday.setDate(thisMonday.getDate() - 7);
                 const lastSunday = new Date(thisMonday);
                 lastSunday.setDate(thisMonday.getDate() - 1);
-                const weekStart = lastMonday.toISOString().split('T')[0];
-                const weekEnd = lastSunday.toISOString().split('T')[0];
+                const weekStart = lastMonday.toLocaleDateString('en-CA');
+                const weekEnd = lastSunday.toLocaleDateString('en-CA');
                 const weekKey = `${clientName}-airbnb-${weekStart}`;
                 if (this.pendingInvoices.some(p => p.periodKey === weekKey)) return;
                 if ((this.generatedInvoices || []).some(g => g.clientName === clientName &&
@@ -4522,7 +4535,7 @@ class Scheduler {
                 // Buscar servicios de hoy o esta semana sin factura
                 const weekAhead = new Date(today);
                 weekAhead.setDate(today.getDate() + 6);
-                const weekAheadStr = weekAhead.toISOString().split('T')[0];
+                const weekAheadStr = weekAhead.toLocaleDateString('en-CA');
 
                 const upcomingServs = this.servs.filter(s =>
                     clients.some(c => c.id == s.cliId) &&
@@ -4532,13 +4545,20 @@ class Scheduler {
 
                 upcomingServs.forEach(s => {
                     const svcKey = `${clientName}-unico-${s.date}-${s.id}`;
-                    if (this.pendingInvoices.some(p => p.periodKey === svcKey)) return;
                     if ((this.generatedInvoices || []).some(g =>
                         g.clientName === clientName && g.startDate === s.date)) return;
 
                     const c = this.clis.find(c => c.id == s.cliId);
                     const total = parseFloat(c?.price || 0);
                     const isToday = s.date === todayStr;
+                    const urgency = isToday ? 'high' : 'normal';
+                    const reason = isToday ? '📧 Servicio hoy — Enviar factura' : `📅 Servicio el ${s.date} — Preparar factura`;
+
+                    // Si ya existía (de un cálculo anterior), actualizar su urgencia en vez de
+                    // dejarla congelada con lo que era cuando se creó — así, cuando el día
+                    // programado por fin llega, sí se marca urgente en vez de quedarse "normal".
+                    const existing = this.pendingInvoices.find(p => p.periodKey === svcKey);
+                    if (existing) { existing.urgency = urgency; existing.reason = reason; return; }
 
                     this.pendingInvoices.push({
                         id: Date.now() + Math.random(),
@@ -4552,8 +4572,8 @@ class Scheduler {
                         endDate: s.date,
                         serviceCount: 1,
                         total,
-                        urgency: isToday ? 'high' : 'normal',
-                        reason: isToday ? '📧 Servicio hoy — Enviar factura' : `📅 Servicio el ${s.date} — Preparar factura`,
+                        urgency,
+                        reason,
                         createdAt: today.toISOString()
                     });
                 });
@@ -4618,8 +4638,8 @@ class Scheduler {
                         periodLabel = 'Semana';
                     }
 
-                    const periodEndStr = periodEnd.toISOString().split('T')[0];
-                    const backlogStartStr = backlogStart.toISOString().split('T')[0];
+                    const periodEndStr = periodEnd.toLocaleDateString('en-CA');
+                    const backlogStartStr = backlogStart.toLocaleDateString('en-CA');
 
                     const propServs = this.servs.filter(s =>
                         String(s.cliId) === String(propCli.id) && !s.cancelled &&
@@ -4662,8 +4682,8 @@ class Scheduler {
             // Semanal/Quincenal/Mensual con múltiples visitas → día 15
 
             // Verificar si es mensual con 1 sola visita este mes
-            const thisMonthStart = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
-            const thisMonthEnd = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
+            const thisMonthStart = new Date(currentYear, currentMonth, 1).toLocaleDateString('en-CA');
+            const thisMonthEnd = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('en-CA');
             const thisMonthServs = this.servs.filter(s =>
                 clients.some(c => c.id == s.cliId) && !s.cancelled &&
                 s.date >= thisMonthStart && s.date <= thisMonthEnd
@@ -4678,20 +4698,31 @@ class Scheduler {
                 twoWeeksAgo.setDate(weekStart.getDate() - 7);
                 const weekEnd = new Date(weekStart);
                 weekEnd.setDate(weekStart.getDate() + 6);
-                const weekStartStr = twoWeeksAgo.toISOString().split('T')[0];
-                const weekEndStr = weekEnd.toISOString().split('T')[0];
+                const weekStartStr = twoWeeksAgo.toLocaleDateString('en-CA');
+                const weekEndStr = weekEnd.toLocaleDateString('en-CA');
 
                 const weekServs = thisMonthServs.filter(s => s.date >= weekStartStr && s.date <= weekEndStr);
                 if (weekServs.length === 0) return;
 
                 weekServs.forEach(svc => {
                     const svcKey = `${clientName}-perservice-${svc.date}-${svc.id}`;
-                    if (this.pendingInvoices.some(p => p.periodKey === svcKey)) return;
                     if ((this.generatedInvoices || []).some(g =>
                         g.clientName === clientName && g.startDate === svc.date)) return;
                     const total = parseFloat(cli.price || 0);
                     const isToday = svc.date === todayStr;
                     const isPast = svc.date < todayStr;
+                    const urgency = isToday ? 'high' : (isPast ? 'overdue' : 'normal');
+                    const reason = isToday ? '📧 Servicio hoy — Enviar factura' :
+                            isPast ? `⚠️ Servicio del ${svc.date} — Pendiente de enviar` :
+                            `📅 Servicio el ${svc.date} — Preparar factura`;
+
+                    // Actualizar en vez de dejar congelada la urgencia de cuando se creó
+                    // (esto fue lo que le pasó a Milo's Restaurant: se creó como "normal"
+                    // unos días antes, y cuando por fin llegó el día del servicio, nunca se
+                    // volvió a marcar como urgente).
+                    const existing = this.pendingInvoices.find(p => p.periodKey === svcKey);
+                    if (existing) { existing.urgency = urgency; existing.reason = reason; return; }
+
                     this.pendingInvoices.push({
                         id: Date.now() + Math.random(),
                         periodKey: svcKey,
@@ -4704,10 +4735,8 @@ class Scheduler {
                         endDate: svc.date,
                         serviceCount: 1,
                         total,
-                        urgency: isToday ? 'high' : (isPast ? 'overdue' : 'normal'),
-                        reason: isToday ? '📧 Servicio hoy — Enviar factura' : 
-                                isPast ? `⚠️ Servicio del ${svc.date} — Pendiente de enviar` :
-                                `📅 Servicio el ${svc.date} — Preparar factura`,
+                        urgency,
+                        reason,
                         createdAt: today.toISOString()
                     });
                 });
@@ -4722,18 +4751,28 @@ class Scheduler {
                 curWeekStart.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // lunes de esta semana
                 const curWeekEnd = new Date(curWeekStart);
                 curWeekEnd.setDate(curWeekStart.getDate() + 6); // domingo de esta semana
-                const curWeekStartStr = curWeekStart.toISOString().split('T')[0];
-                const curWeekEndStr = curWeekEnd.toISOString().split('T')[0];
+                const curWeekStartStr = curWeekStart.toLocaleDateString('en-CA');
+                const curWeekEndStr = curWeekEnd.toLocaleDateString('en-CA');
 
                 const weekServs = thisMonthServs.filter(s => s.date >= curWeekStartStr && s.date <= curWeekEndStr);
                 weekServs.forEach(svc => {
                     const svcKey = `${clientName}-mensualsemana-${svc.date}-${svc.id}`;
-                    if (this.pendingInvoices.some(p => p.periodKey === svcKey)) return;
                     if ((this.generatedInvoices || []).some(g =>
                         g.clientName === clientName && g.startDate === svc.date)) return;
                     const total = parseFloat(cli.price || 0);
                     const isToday = svc.date === todayStr;
                     const isPastThisWeek = svc.date < todayStr;
+                    // "high" si ya tocaba enviarla (hoy o días pasados de esta semana);
+                    // "thisweek" si es un servicio de esta semana que todavía no llega —
+                    // igual se muestra en Urgentes/Mensuales para que se vea toda la semana junta.
+                    const urgency = (isToday || isPastThisWeek) ? 'high' : 'thisweek';
+                    const reason = isToday ? '📧 Servicio hoy — Enviar factura' :
+                            isPastThisWeek ? `⚠️ Servicio del ${svc.date} (esta semana) — Enviar factura` :
+                            `📅 Servicio programado el ${svc.date} (esta semana)`;
+
+                    const existing = this.pendingInvoices.find(p => p.periodKey === svcKey);
+                    if (existing) { existing.urgency = urgency; existing.reason = reason; return; }
+
                     this.pendingInvoices.push({
                         id: Date.now() + Math.random(),
                         periodKey: svcKey,
@@ -4742,13 +4781,8 @@ class Scheduler {
                         type: cliType, billingPeriod,
                         startDate: svc.date, endDate: svc.date,
                         serviceCount: 1, total,
-                        // "high" si ya tocaba enviarla (hoy o días pasados de esta semana);
-                        // "thisweek" si es un servicio de esta semana que todavía no llega —
-                        // igual se muestra en Urgentes/Mensuales para que se vea toda la semana junta.
-                        urgency: (isToday || isPastThisWeek) ? 'high' : 'thisweek',
-                        reason: isToday ? '📧 Servicio hoy — Enviar factura' :
-                                isPastThisWeek ? `⚠️ Servicio del ${svc.date} (esta semana) — Enviar factura` :
-                                `📅 Servicio programado el ${svc.date} (esta semana)`,
+                        urgency,
+                        reason,
                         createdAt: today.toISOString()
                     });
                 });
@@ -4758,8 +4792,8 @@ class Scheduler {
         // Recurrentes → mostrar a partir del día 15 con servicios del mes actual
         if (currentDay < 15) return;
 
-        const periodStart = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
-        const periodEnd = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
+        const periodStart = new Date(currentYear, currentMonth, 1).toLocaleDateString('en-CA');
+        const periodEnd = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('en-CA');
         const periodKey = `${clientName}-${currentYear}-${String(currentMonth+1).padStart(2,'0')}-recurrente`;
 
         if (this.pendingInvoices.some(p => p.periodKey === periodKey)) return;
@@ -4821,14 +4855,15 @@ class Scheduler {
         (() => {
             const safetyCutoff = new Date(today);
             safetyCutoff.setDate(today.getDate() - 7);
-            const safetyCutoffStr = safetyCutoff.toISOString().split('T')[0];
+            const safetyCutoffStr = safetyCutoff.toLocaleDateString('en-CA');
             const safetyBacklogStart = new Date(today);
             safetyBacklogStart.setDate(today.getDate() - 120);
-            const safetyBacklogStartStr = safetyBacklogStart.toISOString().split('T')[0];
+            const safetyBacklogStartStr = safetyBacklogStart.toLocaleDateString('en-CA');
 
             // (A) Backlog de servicios nunca facturados
             this.clis.forEach(propCli => {
                 if (propCli.type === 'unico') return; // único ya se factura el mismo día
+                if (propCli.excludeInvoicing) return; // "No facturar por Brazos"
                 const oldServs = this.servs.filter(s =>
                     String(s.cliId) === String(propCli.id) && !s.cancelled &&
                     s.date >= safetyBacklogStartStr && s.date <= safetyCutoffStr
@@ -5084,9 +5119,9 @@ class Scheduler {
             const s = sections.find(x => x.key === this._pendingExpanded);
             if (s) {
                 container.innerHTML = `
-                    <div style="height:100%; display:flex; flex-direction:column;">
+                    <div>
                         ${sectionHeader(s, true)}
-                        <div style="flex:1; overflow-y:auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:10px; align-content:start;">
+                        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:10px;">
                             ${htmlOf(s.list)}
                         </div>
                     </div>`;
@@ -5095,16 +5130,16 @@ class Scheduler {
             this._pendingExpanded = null; // sección inválida, regresar a vista normal
         }
 
-        // Vista normal: todas las secciones lado a lado, cada una retráctil
+        // Vista normal: todas las secciones lado a lado, cada una retráctil.
+        // Todo el bloque comparte el scroll del contenedor exterior (más confiable que
+        // darle scroll individual a cada columna).
         const numCols = sections.length;
         container.innerHTML = `
-            <div style="display:grid; grid-template-columns:repeat(${numCols}, 1fr); gap:14px; align-items:start; height:100%;">
+            <div style="display:grid; grid-template-columns:repeat(${numCols}, 1fr); gap:14px; align-items:start;">
                 ${sections.map(s => `
-                    <div style="display:flex; flex-direction:column; min-height:0;">
+                    <div>
                         ${sectionHeader(s, false)}
-                        <div style="overflow-y:auto; flex:1;">
-                            ${this._pendingCollapsed[s.key] ? '' : htmlOf(s.list)}
-                        </div>
+                        ${this._pendingCollapsed[s.key] ? '' : htmlOf(s.list)}
                     </div>
                 `).join('')}
             </div>
@@ -8405,6 +8440,7 @@ Motivo de cancelación (opcional):`);
                 const autoCharge = document.getElementById('cliAutoCharge') ? document.getElementById('cliAutoCharge').checked : (this.clis[idx].autoCharge || false);
                 const stripeCustomerId = document.getElementById('cliStripeCustomerId') ? document.getElementById('cliStripeCustomerId').value.trim() : (this.clis[idx].stripeCustomerId || '');
                 const taxRate = document.getElementById('cliTaxRate') ? parseFloat(document.getElementById('cliTaxRate').value) || 8.25 : (this.clis[idx].taxRate || 8.25);
+                const excludeInvoicing = document.getElementById('cliExcludeInvoicing') ? document.getElementById('cliExcludeInvoicing').checked : (this.clis[idx].excludeInvoicing || false);
 
                 if(isMulti) {
                     // Para multi-propiedad: actualizar datos base y agregar/quitar propiedades
@@ -8423,6 +8459,7 @@ Motivo de cancelación (opcional):`);
                         c.invoicingType = invoicingType; // billingPeriod ya NO se fuerza aquí — cada propiedad tiene el suyo
                         c.autoCharge = autoCharge;
                         c.taxRate = taxRate;
+                        c.excludeInvoicing = excludeInvoicing;
                         if (stripeCustomerId) c.stripeCustomerId = stripeCustomerId;
                     };
 
@@ -8484,7 +8521,8 @@ Motivo de cancelación (opcional):`);
                     this.clis[idx] = {
                         id: this.clis[idx].id,
                         name, propId, price, tel, email, address, city, zip,
-                        type, serviceType, billingPeriod, invoicingType
+                        type, serviceType, billingPeriod, invoicingType,
+                        excludeInvoicing
                     };
                 }
                 if (oldType !== type) {
@@ -8570,6 +8608,7 @@ Motivo de cancelación (opcional):`);
             const autoCharge = document.getElementById('cliAutoCharge') ? document.getElementById('cliAutoCharge').checked : false;
             const stripeCustomerId = document.getElementById('cliStripeCustomerId') ? document.getElementById('cliStripeCustomerId').value.trim() : '';
             const taxRate = document.getElementById('cliTaxRate') ? parseFloat(document.getElementById('cliTaxRate').value) || 8.25 : 8.25;
+            const excludeInvoicingNew = document.getElementById('cliExcludeInvoicing') ? document.getElementById('cliExcludeInvoicing').checked : false;
             const newCli = {
                 id: Date.now(),
                 name: name,
@@ -8587,6 +8626,7 @@ Motivo de cancelación (opcional):`);
                 autoCharge: autoCharge,
                 stripeCustomerId: stripeCustomerId,
                 taxRate: taxRate,
+                excludeInvoicing: excludeInvoicingNew,
             };
             this.clis.push(newCli);
         }
@@ -8626,6 +8666,9 @@ Motivo de cancelación (opcional):`);
                 document.getElementById('cliInvoicingType').value = cli.invoicingType || 'monthly';
                 if (document.getElementById('cliPaymentTerms'))
                     document.getElementById('cliPaymentTerms').value = cli.paymentTerms !== undefined ? String(cli.paymentTerms) : '15';
+            }
+            if (document.getElementById('cliExcludeInvoicing')) {
+                document.getElementById('cliExcludeInvoicing').checked = cli.excludeInvoicing || false;
             }
             if (document.getElementById('cliAutoCharge')) {
                 document.getElementById('cliAutoCharge').checked = cli.autoCharge || false;
@@ -8744,6 +8787,27 @@ Motivo de cancelación (opcional):`);
         this.save(); this.renderCat(); this.refreshSels(); this.render();
     }
 
+
+    addNewEmp() {
+        const name = prompt('Nombre del nuevo empleado:');
+        if (!name || !name.trim()) return;
+        const nameTrim = name.trim();
+        const exists = this.emps.find(e => e.name.trim().toLowerCase() === nameTrim.toLowerCase());
+        if (exists) { alert('Ya existe un empleado con ese nombre.'); return; }
+
+        const rateStr = prompt(`Pago por hora de ${nameTrim} (déjalo vacío si todavía no lo sabes):`, '0');
+        const rate = parseFloat(rateStr);
+
+        this.emps.push({
+            id: `emp_${Date.now()}_${Math.random().toString(36).substr(2,4)}`,
+            name: nameTrim,
+            rate: isNaN(rate) ? 0 : rate
+        });
+        this.save();
+        this.renderCat();
+        this.refreshSels();
+        alert(`✅ ${nameTrim} agregado. Ya puedes asignarlo a un grupo nuevo.\n\nNota: esto NO se sube a la app de Nómina — si también lleva nómina, agrégalo allá por separado.`);
+    }
 
     editEmp(id) {
         const emp = this.emps.find(e => e.id == id);
@@ -15946,7 +16010,7 @@ document.addEventListener('click', function(e) {
 
 <!-- Modal Facturas Pendientes -->
 <div id="pendingInvoicesModal" class="modal">
-    <div class="modal-content" style="width: 98%; max-width: none; margin: 1vh auto; max-height: 98vh; display: flex; flex-direction: column; padding: 16px 20px;">
+    <div class="modal-content" style="width: 98%; max-width: none; margin: 1vh auto; max-height: 98vh; overflow-y: auto; display: flex; flex-direction: column; padding: 16px 20px;">
         <h2 style="background: #f39c12; color: white; padding: 12px 18px; margin: -16px -20px 0 -20px; border-radius: 8px 8px 0 0; display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
             <span style="display:flex; align-items:center; gap:8px;">
                 <button class="inv-nav-back" data-active-color="#f39c12" onclick="app.navBackInvoiceModal()" title="Atrás" style="background:white; color:#f39c12; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:1.1rem; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.35);">◀ Atrás</button>
@@ -15967,7 +16031,7 @@ document.addEventListener('click', function(e) {
                 placeholder="🔍 Buscar por nombre o fecha..."
                 style="width:100%; padding:8px 12px; border:1px solid #ced4da; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
         </div>
-        <div id="pendingInvoicesList" style="flex:1; min-height:0; overflow:hidden;">
+        <div id="pendingInvoicesList" style="max-height: calc(98vh - 180px); overflow-y: auto;">
             <!-- Lista de facturas pendientes se carga dinámicamente -->
         </div>
 
