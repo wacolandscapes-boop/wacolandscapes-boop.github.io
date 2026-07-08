@@ -4947,13 +4947,13 @@ class Scheduler {
                 const key = `genUnsent-${g.id}`;
                 if (this.pendingInvoices.some(p => p.periodKey === key)) return;
 
-                const hasOverlappingSent = (this.generatedInvoices || []).some(o =>
+                const overlappingSent = (this.generatedInvoices || []).find(o =>
                     o !== g && o.clientName === g.clientName &&
                     ['enviada','pagada','parcial'].includes(o.status) &&
                     !(o.endDate < g.startDate || o.startDate > g.endDate)
                 );
 
-                if (hasOverlappingSent) {
+                if (overlappingSent) {
                     // Duplicado fantasma (bug viejo de regeneración) — ya está cobrada por otro lado
                     this.pendingInvoices.push({
                         id: Date.now() + Math.random(),
@@ -4968,7 +4968,10 @@ class Scheduler {
                         urgency: 'normal',
                         isDuplicateGhost: true,
                         genInvoiceId: g.id,
-                        reason: `🗑️ Factura #${g.invoiceNumber} es un duplicado fantasma (bug viejo) — ya existe otra factura enviada/pagada para ese periodo. Solo hay que borrar esta.`,
+                        invoiceNumber: g.invoiceNumber,
+                        duplicateOfInvoiceNumber: overlappingSent.invoiceNumber,
+                        duplicateOfStatus: overlappingSent.status,
+                        reason: `🗑️ Factura #${g.invoiceNumber} es un duplicado fantasma (bug viejo) — ya existe la factura #${overlappingSent.invoiceNumber} (${overlappingSent.status}) para ese periodo. Solo hay que borrar esta.`,
                         createdAt: today.toISOString()
                     });
                     return;
@@ -4988,6 +4991,7 @@ class Scheduler {
                     urgency: 'overdue',
                     isGeneratedUnsent: true,
                     genInvoiceId: g.id,
+                    invoiceNumber: g.invoiceNumber,
                     reason: `📤 Factura #${g.invoiceNumber} generada el ${g.generatedDate} — nunca se envió`,
                     createdAt: today.toISOString()
                 });
@@ -5094,6 +5098,14 @@ class Scheduler {
                         <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${pending.serviceCount === 1 ? `📅 ${startFormatted}` : `${startFormatted}–${endFormatted} · ${pending.serviceCount} serv.`}</span>
                         <span style="color: #27ae60; font-weight:bold; flex-shrink:0;">$${pending.total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
                     </div>
+                    ${pending.isDuplicateGhost ? `
+                    <div style="margin-top:4px; font-size:0.72rem; color:#555; background:#f1f2f6; border-radius:4px; padding:4px 6px;">
+                        🗑️ <b>Factura #${pending.invoiceNumber}</b> se cruza con <b>#${pending.duplicateOfInvoiceNumber}</b> (${pending.duplicateOfStatus}) — mismo cliente y periodo. Revisa ambas en 📑 Enviadas antes de borrar.
+                    </div>` : ''}
+                    ${pending.isGeneratedUnsent ? `
+                    <div style="margin-top:4px; font-size:0.72rem; color:#555; background:#f1f2f6; border-radius:4px; padding:4px 6px;">
+                        📤 <b>Factura #${pending.invoiceNumber}</b> ya generada, nunca enviada.
+                    </div>` : ''}
                     <div style="display: flex; gap: 5px; margin-top: 6px;">
                         <button onclick="app.openInvoiceFromPending(${index})" class="btn" style="flex:1; background: ${pending.isDuplicateGhost ? '#7f8c8d' : pending.isGeneratedUnsent ? '#8e44ad' : '#27ae60'}; color: white; padding: 6px; font-size:0.74rem; white-space: nowrap; font-weight: bold; overflow:hidden; text-overflow:ellipsis;">
                             ${pending.isDuplicateGhost ? '🗑️ Duplicado' : pending.isGeneratedUnsent ? '📤 Enviar' : '💼 Facturar'}
