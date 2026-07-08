@@ -5406,8 +5406,11 @@ class Scheduler {
     buildInvoiceItems(services, client) {
         return (services || []).map(s => {
             let desc = s.name || 'Cleaning Service';
-            if (client && (client.type === 'airbnb' || client.type === 'unico' || client.type === 'construccion') && s.propId) {
-                desc = s.propId + ' - ' + desc;
+            // El propId de la propiedad vive en el registro del CLIENTE (client.propId),
+            // no en el servicio individual (s.propId nunca existe ahí) — por eso la
+            // dirección nunca se agregaba a la descripción, sin importar el tipo de cliente.
+            if (client && (client.type === 'airbnb' || client.type === 'unico' || client.type === 'construccion') && client.propId && client.propId !== client.name) {
+                desc = client.propId + ' - ' + desc;
             }
             return {
                 fecha: s.date || '',
@@ -6290,14 +6293,24 @@ class Scheduler {
 
         setTimeout(() => {
             // Detectar si es una factura manual (tiene items pero no servicios del calendario)
-            const isManual = invoice.items && invoice.items.length > 0 &&
-                !this.servs.some(s => s.cliId && this.clis.find(c => c.name === invoice.clientName && String(c.id) === String(s.cliId)) &&
-                    s.date >= invoice.startDate && s.date <= invoice.endDate);
+            // Usar clientIds (la propiedad exacta) cuando exista, no solo el nombre —
+            // en clientes multipropiedad como JGM, "el nombre" solo no identifica cuál.
+            const invClientIds = (invoice.clientIds && invoice.clientIds.length > 0)
+                ? invoice.clientIds.map(String)
+                : this.clis.filter(c => c.name === invoice.clientName).map(c => String(c.id));
+            // Construcción siempre abre en Manual (precio editable) — el precio varía por
+            // trabajo, igual que cuando se generan desde Pendientes. No depender de si
+            // técnicamente hay un servicio de calendario detrás.
+            const isManual = invoice.type === 'construccion' || (invoice.items && invoice.items.length > 0 &&
+                !this.servs.some(s => invClientIds.includes(String(s.cliId)) &&
+                    s.date >= invoice.startDate && s.date <= invoice.endDate));
 
             if (isManual) {
                 // Abrir tab Manual y cargar los datos
                 this.switchInvoiceTab('manual');
-                const cli = this.clis.find(c => c.name === invoice.clientName);
+                const cli = (invoice.clientIds && invoice.clientIds.length > 0)
+                    ? this.clis.find(c => String(c.id) === String(invoice.clientIds[0]))
+                    : this.clis.find(c => c.name === invoice.clientName);
                 if (cli) {
                     const label = cli.name + (cli.propId && cli.propId !== cli.name ? ' — ' + cli.propId : '');
                     document.getElementById('manualInvClient').value = cli.id;
@@ -6320,7 +6333,13 @@ class Scheduler {
                 // Factura normal — abrir tab Generar
                 const clientSel = document.getElementById('invoiceClient');
                 if (clientSel) {
-                    const client = this.clis.find(c => c.name === invoice.clientName);
+                    // Usar el clientIds guardado en la factura (la propiedad EXACTA) cuando
+                    // exista — buscar solo por nombre tomaba la primera propiedad que
+                    // encontrara, que en clientes multipropiedad como JGM podía ser
+                    // una distinta a la que realmente se facturó.
+                    const client = (invoice.clientIds && invoice.clientIds.length > 0)
+                        ? this.clis.find(c => String(c.id) === String(invoice.clientIds[0]))
+                        : this.clis.find(c => c.name === invoice.clientName);
                     if (client) {
                         clientSel.value = client.id;
                         this.onInvoiceClientChange && this.onInvoiceClientChange();
