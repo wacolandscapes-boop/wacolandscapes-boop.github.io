@@ -5222,13 +5222,15 @@ class Scheduler {
             this.openGeneratedInvoices();
             setTimeout(() => {
                 const statusSel = document.getElementById('genInvStatus');
+                const numBox = document.getElementById('genInvNumSearch');
                 const searchBox = document.getElementById('genInvSearch');
-                // Buscar directo por el # de factura si lo tenemos (más preciso que el
-                // nombre) y limpiar cualquier filtro viejo que se hubiera quedado puesto —
+                // Usar el campo DEDICADO de número de factura (más preciso que el buscador
+                // general) y limpiar cualquier filtro viejo que se hubiera quedado puesto —
                 // si no, una búsqueda anterior (ej. "Milo's") podía esconder esta factura.
-                if (searchBox) searchBox.value = pending.genInvoiceId ?
-                    (this.generatedInvoices.find(g => String(g.id) === String(pending.genInvoiceId))?.invoiceNumber || pending.clientName) :
-                    pending.clientName;
+                const num = pending.invoiceNumber || (pending.genInvoiceId ?
+                    this.generatedInvoices.find(g => String(g.id) === String(pending.genInvoiceId))?.invoiceNumber : null);
+                if (num && numBox) { numBox.value = num; if (searchBox) searchBox.value = ''; }
+                else if (searchBox) { searchBox.value = pending.clientName; if (numBox) numBox.value = ''; }
                 if (statusSel) statusSel.value = 'pendiente';
                 this.refreshGeneratedInvoices();
             }, 150);
@@ -5489,10 +5491,9 @@ class Scheduler {
             this.generatedInvoices = [];
         }
         
-        // Obtener siguiente número de factura
-        const lastInvoiceNumber = parseInt(localStorage.getItem('lastInvoiceNumber') || '0');
+        // Obtener siguiente número de factura (cruza contador local con lo ya sincronizado)
         const config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
-        let nextInvoiceNumber = lastInvoiceNumber + 1;
+        let nextInvoiceNumber = this.getNextInvoiceNumber();
         const startNumber = config.invoiceStartNumber || 1;
         if (nextInvoiceNumber < startNumber) nextInvoiceNumber = startNumber;
         
@@ -5615,6 +5616,7 @@ class Scheduler {
         const statusFilter = document.getElementById('genInvStatus')?.value || 'all';
         const periodFilter = document.getElementById('genInvPeriod')?.value || 'all';
         const searchTerm = (document.getElementById('genInvSearch')?.value || '').toLowerCase().trim();
+        const numSearchTerm = (document.getElementById('genInvNumSearch')?.value || '').trim();
         
         if (!this.generatedInvoices) {
             this.generatedInvoices = [];
@@ -5625,6 +5627,7 @@ class Scheduler {
             if (end && inv.generatedDate > end) return false;
             if (clientFilter !== 'all' && inv.clientName !== clientFilter) return false;
             if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
+            if (numSearchTerm && !String(inv.invoiceNumber).includes(numSearchTerm)) return false;
             if (periodFilter !== 'all') {
                 const invStart = inv.startDate || '';
                 const invEnd = inv.endDate || '';
@@ -11452,17 +11455,42 @@ Motivo de cancelación (opcional):`);
         printWindow.onload = function() { printWindow.print(); };
     }
 
+    // Calcula el siguiente número de factura cruzando el contador local (localStorage,
+    // por dispositivo) CON el número más alto que ya exista en los datos sincronizados
+    // (generatedInvoices). Esto evita el bug de colisión: si el contador local de este
+    // dispositivo está desactualizado (porque otro dispositivo generó facturas mientras
+    // este no sincronizaba), igual toma el número correcto en vez de repetir uno ya usado.
+    getNextInvoiceNumber() {
+        const localCounter = parseInt(localStorage.getItem('lastInvoiceNumber') || '0');
+        const maxInData = (this.generatedInvoices || []).reduce((max, inv) => {
+            const n = parseInt(inv.invoiceNumber) || 0;
+            return n > max ? n : max;
+        }, 0);
+        const next = Math.max(localCounter, maxInData) + 1;
+        localStorage.setItem('lastInvoiceNumber', next.toString());
+        return next;
+    }
+
     _registerInvoiceFromPDF(status) {
         const pdfData = window.currentPDFData;
         if (!pdfData || !pdfData.invoiceNumber) return;
         if (!this.generatedInvoices) this.generatedInvoices = [];
-        const invoiceNumber = parseInt(pdfData.invoiceNumber);
+        let invoiceNumber = parseInt(pdfData.invoiceNumber);
         const clientName = pdfData.client?.name || '';
         // Usar el cliente/propiedad EXACTO que se usó para generar el PDF, no re-buscar
         // solo por nombre (eso tomaba el primer registro que encontrara, que en clientes
         // multipropiedad como JGM podía ser una propiedad distinta a la que se facturó).
         const cli = pdfData.client || (this.clis ? this.clis.find(c => c.name === clientName) : null);
-        const alreadyExists = this.generatedInvoices.find(i => i.invoiceNumber === invoiceNumber);
+        let alreadyExists = this.generatedInvoices.find(i => i.invoiceNumber === invoiceNumber);
+        // Colisión real: el número ya existe pero es de OTRO cliente (dos dispositivos
+        // generaron con el mismo número sin haber sincronizado antes). Nunca sobrescribir
+        // la factura del otro cliente — se salta al siguiente número libre.
+        if (alreadyExists && alreadyExists.clientName !== clientName) {
+            invoiceNumber = this.getNextInvoiceNumber();
+            pdfData.invoiceNumber = invoiceNumber;
+            alreadyExists = null;
+            console.warn(`⚠️ Colisión de número de factura detectada — reasignado a #${invoiceNumber}`);
+        }
         if (alreadyExists) {
             if (status === 'enviada') { alreadyExists.status = 'enviada'; alreadyExists.sentAt = new Date().toISOString().split('T')[0]; this._addSentHistory(alreadyExists, 'reenviado (PDF)'); }
             if (!alreadyExists.clientIds || alreadyExists.clientIds.length === 0) {
@@ -11843,7 +11871,7 @@ Motivo de cancelación (opcional):`);
         // Calcular próximo número (SIN guardarlo)
         const editingNum = document.getElementById('editingInvoiceNumber')?.value;
         const isEditingExisting = !!editingNum;
-        let invoiceNumber = editingNum ? parseInt(editingNum) : (this._editingInvoiceNumber || (parseInt(localStorage.getItem('lastInvoiceNumber') || '0') + 1));
+        let invoiceNumber = editingNum ? parseInt(editingNum) : (this._editingInvoiceNumber || this.getNextInvoiceNumber());
         // NOTA: el campo editingInvoiceNumber ya NO se borra aquí — se borra al cerrar el modal
         // (closeInvoice). Borrarlo aquí causaba que la 2da Vista Previa de una factura en edición
         // generara un número NUEVO en vez de reutilizar el original.
@@ -12382,7 +12410,7 @@ Motivo de cancelación (opcional):`);
         
         // Calcular próximo número (SIN guardarlo aún - se guarda al final)
         const editingNum2 = document.getElementById('editingInvoiceNumber')?.value;
-        let invoiceNumber = editingNum2 ? parseInt(editingNum2) : (this._editingInvoiceNumber || (parseInt(localStorage.getItem('lastInvoiceNumber') || '0') + 1));
+        let invoiceNumber = editingNum2 ? parseInt(editingNum2) : (this._editingInvoiceNumber || this.getNextInvoiceNumber());
         // NOTA: editingInvoiceNumber ya no se borra aquí — se borra al cerrar el modal (closeInvoice)
         const startNumber = config.invoiceStartNumber || 1;
         if (invoiceNumber < startNumber) invoiceNumber = startNumber;
@@ -16001,13 +16029,19 @@ document.addEventListener('click', function(e) {
                 </div>
             </div>
             <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+                <div style="width:150px; position:relative;">
+                    <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#999;">#</span>
+                    <input type="text" id="genInvNumSearch" oninput="app.refreshGeneratedInvoices()"
+                        placeholder="Núm. factura"
+                        style="width:100%; padding:8px 12px 8px 26px; border:2px solid #f39c12; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
+                </div>
                 <div style="flex:1; position:relative;">
                     <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#999;">🔍</span>
                     <input type="text" id="genInvSearch" onkeyup="app.refreshGeneratedInvoices()" 
-                        placeholder="Buscar por # factura, nombre, estado..."
+                        placeholder="Buscar por nombre, estado..."
                         style="width:100%; padding:8px 12px 8px 34px; border:2px solid #1a56a0; border-radius:6px; font-size:0.9rem;">
                 </div>
-                <button onclick="document.getElementById('genInvSearch').value=''; app.refreshGeneratedInvoices();" 
+                <button onclick="document.getElementById('genInvSearch').value=''; document.getElementById('genInvNumSearch').value=''; app.refreshGeneratedInvoices();" 
                     class="btn" style="padding:8px 12px; background:#e74c3c; color:white; font-size:0.85rem;">
                     ✕ Limpiar
                 </button>
