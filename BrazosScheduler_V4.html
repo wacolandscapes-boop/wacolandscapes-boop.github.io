@@ -1702,6 +1702,10 @@ class Scheduler {
         // Pendientes que el usuario descartó a propósito (botón ❌) — para que NO se
         // vuelvan a recrear la próxima vez que se recalculen las pendientes.
         this.dismissedPendingKeys = JSON.parse(localStorage.getItem('v35_dismissedPending')) || [];
+        // Descartes por SERVICIO real (no por la clave de cada regla) — para que borrar
+        // una pendiente no reaparezca por otra regla (ej. la red de seguridad) usando una
+        // clave distinta para el mismo servicio.
+        this.dismissedServiceIds = JSON.parse(localStorage.getItem('v35_dismissedServiceIds')) || [];
         // Drive sync
         if (!localStorage.getItem('anaCS_deviceId')) {
             localStorage.setItem('anaCS_deviceId', 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2,5));
@@ -2024,6 +2028,7 @@ class Scheduler {
         localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices || []));
         localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices || []));
         localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys || []));
+        localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds || []));
         localStorage.setItem('v35_estimates', JSON.stringify(this.estimates || []));
         localStorage.setItem('v35_serviceCatalog', JSON.stringify(this.serviceCatalog || []));
         localStorage.setItem('anaCS_lastSavedAt', new Date().toISOString());
@@ -4364,6 +4369,21 @@ class Scheduler {
         });
     }
 
+    // Minimizar Pendientes sin cerrarlo — deja un botón flotante para volver
+    // exactamente como lo dejaste (búsqueda, secciones colapsadas, scroll).
+    // Útil para ir a confirmar algo en el Calendario y regresar sin perder nada.
+    minimizePendingInvoices() {
+        document.getElementById('pendingInvoicesModal').style.display = 'none';
+        const btn = document.getElementById('pendingMinimizedBtn');
+        if (btn) btn.style.display = 'flex';
+    }
+
+    restorePendingInvoices() {
+        document.getElementById('pendingInvoicesModal').style.display = 'block';
+        const btn = document.getElementById('pendingMinimizedBtn');
+        if (btn) btn.style.display = 'none';
+    }
+
     // Salir por completo del flujo de facturación (botón "Cerrar" real) — limpia el
     // historial de navegación para que la próxima vez que se abra sea un inicio limpio.
     exitInvoiceNav(name) {
@@ -4566,6 +4586,7 @@ class Scheduler {
                         clientName,
                         clientEmail: cli.email || '',
                         clientIds: [s.cliId],
+                        serviceIds: [s.id],
                         type: cliType,
                         billingPeriod,
                         startDate: s.date,
@@ -4729,6 +4750,7 @@ class Scheduler {
                         clientName,
                         clientEmail: cli.email || '',
                         clientIds: clients.map(c => c.id),
+                        serviceIds: [svc.id],
                         type: cliType,
                         billingPeriod,
                         startDate: svc.date,
@@ -4778,6 +4800,7 @@ class Scheduler {
                         periodKey: svcKey,
                         clientName, clientEmail: cli.email || '',
                         clientIds: clients.map(c => c.id),
+                        serviceIds: [svc.id],
                         type: cliType, billingPeriod,
                         startDate: svc.date, endDate: svc.date,
                         serviceCount: 1, total,
@@ -4972,9 +4995,15 @@ class Scheduler {
         })();
 
         // Quitar cualquier pendiente que el usuario ya haya descartado a propósito
-        // (botón ❌) — sin esto, se volvía a crear en cada recálculo.
+        // (botón ❌) — por clave Y por servicio real, así ninguna regla (incluida la red
+        // de seguridad) puede resucitar un servicio ya descartado con una clave distinta.
         if (this.dismissedPendingKeys && this.dismissedPendingKeys.length > 0) {
             this.pendingInvoices = this.pendingInvoices.filter(p => !this.dismissedPendingKeys.includes(p.periodKey));
+        }
+        if (this.dismissedServiceIds && this.dismissedServiceIds.length > 0) {
+            this.pendingInvoices = this.pendingInvoices.filter(p =>
+                !(p.serviceIds && p.serviceIds.some(sid => this.dismissedServiceIds.includes(sid)))
+            );
         }
 
         this.pendingInvoices.sort((a, b) => {
@@ -5062,7 +5091,7 @@ class Scheduler {
                         ${isOverdue ? '<span style="flex-shrink:0; background:#c0392b; color:white; font-size:0.62rem; padding:2px 6px; border-radius:20px; font-weight:700; white-space:nowrap;">⚠️ ATRASADA</span>' : isUrgent ? '<span style="flex-shrink:0; background:#e74c3c; color:white; font-size:0.62rem; padding:2px 6px; border-radius:20px; font-weight:700; white-space:nowrap;">⚡ HOY</span>' : ''}
                     </div>
                     <div title="${(pending.reason||'').replace(/"/g,'&quot;')}" style="cursor:help; color:${(isUrgent||isThisWeek)?'#c0392b':'#666'}; font-size: 0.74rem; margin-top:3px; display:flex; justify-content:space-between; gap:6px; overflow:hidden;">
-                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${startFormatted}–${endFormatted} · ${pending.serviceCount} serv.</span>
+                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${pending.serviceCount === 1 ? `📅 ${startFormatted}` : `${startFormatted}–${endFormatted} · ${pending.serviceCount} serv.`}</span>
                         <span style="color: #27ae60; font-weight:bold; flex-shrink:0;">$${pending.total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
                     </div>
                     <div style="display: flex; gap: 5px; margin-top: 6px;">
@@ -5181,7 +5210,15 @@ class Scheduler {
             this.openGeneratedInvoices();
             setTimeout(() => {
                 const statusSel = document.getElementById('genInvStatus');
-                if (statusSel) { statusSel.value = 'pendiente'; this.refreshGeneratedInvoices(); }
+                const searchBox = document.getElementById('genInvSearch');
+                // Buscar directo por el # de factura si lo tenemos (más preciso que el
+                // nombre) y limpiar cualquier filtro viejo que se hubiera quedado puesto —
+                // si no, una búsqueda anterior (ej. "Milo's") podía esconder esta factura.
+                if (searchBox) searchBox.value = pending.genInvoiceId ?
+                    (this.generatedInvoices.find(g => String(g.id) === String(pending.genInvoiceId))?.invoiceNumber || pending.clientName) :
+                    pending.clientName;
+                if (statusSel) statusSel.value = 'pendiente';
+                this.refreshGeneratedInvoices();
             }, 150);
             return;
         }
@@ -5298,6 +5335,12 @@ class Scheduler {
         if (pending.periodKey && !this.dismissedPendingKeys.includes(pending.periodKey)) {
             this.dismissedPendingKeys.push(pending.periodKey);
         }
+        // También por SERVICIO real — así, aunque OTRA regla (ej. la red de seguridad)
+        // detecte el mismo servicio con una clave distinta, no lo vuelve a mostrar.
+        this.dismissedServiceIds = this.dismissedServiceIds || [];
+        (pending.serviceIds || []).forEach(sid => {
+            if (!this.dismissedServiceIds.includes(sid)) this.dismissedServiceIds.push(sid);
+        });
 
         this.pendingInvoices.splice(index, 1);
         this.updatePendingBadge();
@@ -14253,6 +14296,7 @@ Motivo de cancelación (opcional):`);
                 generatedInvoices: this.generatedInvoices || [],
                 pendingInvoices: this.pendingInvoices || [],
                 dismissedPendingKeys: this.dismissedPendingKeys || [],
+                dismissedServiceIds: this.dismissedServiceIds || [],
                 nominaTotales: this.nominaTotales || [],
                 companyConfig: localStorage.getItem('companyConfig'),
                 companyLogo: localStorage.getItem('companyLogo'),
@@ -14432,6 +14476,7 @@ Motivo de cancelación (opcional):`);
                 if (data.generatedInvoices){ this.generatedInvoices = data.generatedInvoices; localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices)); }
                 if (data.pendingInvoices)  { this.pendingInvoices = data.pendingInvoices; localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices)); }
                 if (data.dismissedPendingKeys) { this.dismissedPendingKeys = data.dismissedPendingKeys; localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys)); }
+                if (data.dismissedServiceIds) { this.dismissedServiceIds = data.dismissedServiceIds; localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds)); }
                 if (data.nominaTotales)    { this.nominaTotales = data.nominaTotales; localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales)); }
                 if (data.companyConfig)    localStorage.setItem('companyConfig', data.companyConfig);
                 if (data.companyLogo)      localStorage.setItem('companyLogo', data.companyLogo);
@@ -14456,12 +14501,14 @@ Motivo de cancelación (opcional):`);
                 gastos: this.gastos || [], generatedInvoices: this.generatedInvoices || [],
                 pendingInvoices: this.pendingInvoices || [],
                 dismissedPendingKeys: this.dismissedPendingKeys || [],
+                dismissedServiceIds: this.dismissedServiceIds || [],
             };
             const driveSide = {
                 emps: data.emps || [], clis: data.clis || [], servs: data.servs || [],
                 gastos: data.gastos || [], generatedInvoices: data.generatedInvoices || [],
                 pendingInvoices: data.pendingInvoices || [],
                 dismissedPendingKeys: data.dismissedPendingKeys || [],
+                dismissedServiceIds: data.dismissedServiceIds || [],
             };
             const winner = localWins ? localSide : driveSide;
             const loser  = localWins ? driveSide : localSide;
@@ -14500,7 +14547,11 @@ Motivo de cancelación (opcional):`);
             // dispositivo debe respetarse siempre) — y se filtran del resultado fusionado
             // para que una pendiente ya descartada no reaparezca por venir del otro lado.
             this.dismissedPendingKeys = [...new Set([...(winner.dismissedPendingKeys||[]), ...(loser.dismissedPendingKeys||[])])];
+            this.dismissedServiceIds = [...new Set([...(winner.dismissedServiceIds||[]), ...(loser.dismissedServiceIds||[])])];
             this.pendingInvoices = this.pendingInvoices.filter(p => !this.dismissedPendingKeys.includes(p.periodKey));
+            this.pendingInvoices = this.pendingInvoices.filter(p =>
+                !(p.serviceIds && p.serviceIds.some(sid => this.dismissedServiceIds.includes(sid)))
+            );
 
             this.grupos = this.mergeGrupos(
                 localWins ? this.grupos : (data.grupos || {}),
@@ -14532,6 +14583,7 @@ Motivo de cancelación (opcional):`);
             localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices));
             localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices));
             localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys));
+            localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds));
             localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales));
 
             this.refreshSels();
@@ -16020,9 +16072,10 @@ document.addEventListener('click', function(e) {
                 <button onclick="app.verClienteEnGenerar()" title="Ir a Generar Factura" style="background:rgba(255,255,255,0.9); color:#e67e22; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">🧾 Generar</button>
                 📋 Facturas Pendientes de Generar
             </span>
-            <div style="display:flex; gap:8px;">
+            <div style="display:flex; gap:8px; align-items:center;">
                 <span id="pendingTotalBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.85rem;">0 total</span>
                 <span id="pendingSentBadge" style="background:#27ae60; padding:4px 12px; border-radius:20px; font-size:0.85rem;">0 enviadas</span>
+                <button onclick="app.minimizePendingInvoices()" title="Minimizar (sin cerrar) para ir a confirmar algo en el Calendario" style="background:rgba(255,255,255,0.9); color:#f39c12; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:1rem; font-weight:bold;">➖</button>
             </div>
         </h2>
         
@@ -16048,6 +16101,12 @@ document.addEventListener('click', function(e) {
         </div>
     </div>
 </div>
+
+<!-- Botón flotante para restaurar Pendientes cuando está minimizado — se queda visible
+     aunque el modal esté oculto, sin perder el estado (búsqueda, secciones colapsadas). -->
+<button id="pendingMinimizedBtn" onclick="app.restorePendingInvoices()" style="display:none; position:fixed; bottom:20px; right:20px; z-index:1001; background:#f39c12; color:white; border:none; border-radius:30px; padding:12px 20px; font-size:0.95rem; font-weight:bold; box-shadow:0 4px 12px rgba(0,0,0,0.4); cursor:pointer;">
+    📋 Pendientes (minimizado) — clic para volver
+</button>
 
 <!-- Modal Gastos -->
 <div id="gastosModal" class="modal">
