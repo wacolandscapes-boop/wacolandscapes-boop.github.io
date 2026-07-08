@@ -5625,8 +5625,6 @@ class Scheduler {
             if (end && inv.generatedDate > end) return false;
             if (clientFilter !== 'all' && inv.clientName !== clientFilter) return false;
             if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
-            // "Todos" oculta pendientes y canceladas — solo facturas realmente enviadas
-            if (statusFilter === 'all' && (inv.status === 'cancelada' || inv.status === 'pendiente')) return false;
             if (periodFilter !== 'all') {
                 const invStart = inv.startDate || '';
                 const invEnd = inv.endDate || '';
@@ -5692,7 +5690,7 @@ class Scheduler {
                 <td>${inv.clientName}${isCancelled ? `<br><small style="color:#c0392b;font-style:italic;text-decoration:none">${inv.cancelledReason||'Cancelada'}</small>` : ''}</td>
                 <td style="font-size: 0.85rem;">${periodFormatted}</td>
                 <td><span style="background:${isCancelled?'#95a5a6':'var(--color-'+inv.type+')'}; color:white; padding:3px 8px; border-radius:4px; font-size:0.7rem">${isCancelled?'CANCELADA':inv.type.toUpperCase()}</span></td>
-                <td style="text-align: center;">${inv.serviceCount}</td>
+                <td style="text-align: center;">${(inv.items && inv.items.length > 0) ? inv.items.length : (inv.serviceCount || '—')}</td>
                 <td style="text-align: right;">
                     <b>$${(inv.paidAmount ? parseFloat(inv.paidAmount) : inv.total).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</b>
                     ${inv.paidAmount && parseFloat(inv.paidAmount) !== inv.total ? `<div style="font-size:0.68rem;color:#888;margin-top:1px;">Facturado: $${inv.total.toFixed(2)}</div>` : ''}
@@ -10646,7 +10644,7 @@ Motivo de cancelación (opcional):`);
             : generatedNotSent.map(inv => `
                 <div style="background:white; border:1px solid #cce3f8; border-radius:6px; padding:8px; margin-bottom:6px;">
                     <div style="font-weight:bold; font-size:0.82rem; color:#2c3e50;">${inv.clientName}</div>
-                    <div style="font-size:0.75rem; color:#666;">#${inv.invoiceNumber} · $${parseFloat(inv.total||0).toFixed(2)} · ${inv.serviceCount || 1} serv.</div>
+                    <div style="font-size:0.75rem; color:#666;">#${inv.invoiceNumber} · $${parseFloat(inv.total||0).toFixed(2)} · ${(inv.items && inv.items.length > 0) ? inv.items.length : (inv.serviceCount || 1)} serv.</div>
                     <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
                         <button onclick="app.sendPendingInvoiceByGmail('${inv.id}')" style="background:#ea4335; color:white; border:none; border-radius:4px; padding:3px 8px; font-size:0.72rem; cursor:pointer;">📧 Enviar</button>
                         ${inv.status !== 'pagada' ? `<button id="btnCobrarTarjeta_dash_${inv.id}" onclick="app.cobrarConTarjeta('${inv.id}')" style="background:#635bff; color:white; border:none; border-radius:4px; padding:3px 8px; font-size:0.72rem; cursor:pointer;">💳 Cobrar</button>` : ''}
@@ -10668,7 +10666,7 @@ Motivo de cancelación (opcional):`);
                         <div style="font-weight:bold; font-size:0.82rem; color:#2c3e50;">${inv.clientName}</div>
                         <span style="font-size:0.7rem; color:${statusColor}; font-weight:bold;">${statusLabel}</span>
                     </div>
-                    <div style="font-size:0.75rem; color:#666;">#${inv.invoiceNumber} · $${parseFloat(inv.total||0).toFixed(2)} · ${inv.serviceCount || 1} serv.</div>
+                    <div style="font-size:0.75rem; color:#666;">#${inv.invoiceNumber} · $${parseFloat(inv.total||0).toFixed(2)} · ${(inv.items && inv.items.length > 0) ? inv.items.length : (inv.serviceCount || 1)} serv.</div>
                     ${inv.status !== 'pagada' ? `<button onclick="app.openCobroDetalle('${inv.id}')" style="margin-top:4px; background:#16a085; color:white; border:none; border-radius:4px; padding:3px 8px; font-size:0.72rem; cursor:pointer;">💰 Registrar Pago</button>` : ''}
                 </div>`;
             }).join('');
@@ -15978,7 +15976,7 @@ document.addEventListener('click', function(e) {
                 </div>
                 <div><label style="font-size:0.8rem;font-weight:600;">Status</label>
                     <select id="genInvStatus" onchange="app.refreshGeneratedInvoices()" style="width:100%;padding:6px;">
-                        <option value="all">Todos (enviadas+)</option>
+                        <option value="all">Todos</option>
                         <option value="pendiente">⏳ Solo Pendientes</option>
                         <option value="enviada">📧 Enviada</option>
                         <option value="parcial">💛 Pago Parcial</option>
