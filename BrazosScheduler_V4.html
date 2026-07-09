@@ -1707,6 +1707,8 @@ class Scheduler {
         // una pendiente no reaparezca por otra regla (ej. la red de seguridad) usando una
         // clave distinta para el mismo servicio.
         this.dismissedServiceIds = JSON.parse(localStorage.getItem('v35_dismissedServiceIds')) || [];
+        // Notas de cobranza — por qué un cliente está atrasado, para el modal de Cobranza
+        this.collectionNotes = JSON.parse(localStorage.getItem('v35_collectionNotes')) || {};
         // Drive sync
         if (!localStorage.getItem('anaCS_deviceId')) {
             localStorage.setItem('anaCS_deviceId', 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2,5));
@@ -2030,6 +2032,7 @@ class Scheduler {
         localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices || []));
         localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys || []));
         localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds || []));
+        localStorage.setItem('v35_collectionNotes', JSON.stringify(this.collectionNotes || {}));
         localStorage.setItem('v35_estimates', JSON.stringify(this.estimates || []));
         localStorage.setItem('v35_serviceCatalog', JSON.stringify(this.serviceCatalog || []));
         localStorage.setItem('anaCS_lastSavedAt', new Date().toISOString());
@@ -4457,6 +4460,23 @@ class Scheduler {
             return daysDiff < 60;
         });
 
+        // Migración: pendientes viejas de ANTES de que existiera "column" (Frecuencia de
+        // Facturación) se quedaban huérfanas y caían en "Otros" para siempre. Aquí se les
+        // asigna la columna correcta usando el campo Frecuencia de Facturación actual del
+        // cliente, en vez de esperar a que alguna regla las reconozca.
+        this.pendingInvoices.forEach(p => {
+            if (p.column) return; // ya tiene columna asignada, no tocar
+            const propCli = (p.cliId && this.clis.find(c => String(c.id) === String(p.cliId))) ||
+                this.clis.find(c => c.name === p.clientName);
+            const bp = propCli?.billingPeriod || p.billingPeriod;
+            const isConstruccion = propCli?.type === 'construccion' || p.type === 'construccion';
+            if (isConstruccion) p.column = 'construccion';
+            else if (bp === 'weekly') p.column = 'airbnb';
+            else if (bp === 'perservice' || bp === 'biweekly') p.column = 'mensuales';
+            else if (bp === 'monthly' || bp === 'fixed_monthly') p.column = 'finmes';
+            else p.column = 'otros';
+        });
+
         // Agrupar clientes por nombre (para multi-propiedad)
         const clientGroups = {};
         this.clis.forEach(c => {
@@ -5482,6 +5502,194 @@ class Scheduler {
         this.refreshGeneratedInvoices();
     }
 
+    // Exporta a Excel (CSV) exactamente lo que se está viendo en pantalla ahora mismo,
+    // con todos los filtros aplicados (fechas, cliente, estatus, búsqueda). Útil para,
+    // por ejemplo, filtrar por estatus "Enviada"/"Parcial" desde mayo y sacar la lista
+    // de quién falta por pagar.
+    exportInvoicesToExcel() {
+        const list = this._lastFilteredInvoices || this.generatedInvoices || [];
+        if (list.length === 0) { alert('No hay facturas para exportar con los filtros actuales.'); return; }
+
+        const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const statusLabels = { pendiente:'Pendiente', enviada:'Enviada', pagada:'Pagada', vencida:'Vencida', cancelada:'Cancelada', parcial:'Pago Parcial' };
+        const headers = ['# Factura','Cliente','Email','Periodo Inicio','Periodo Fin','Generada','Última vez enviada','Estatus','Total','Monto Pagado','Saldo Pendiente'];
+        const rows = list.map(inv => {
+            const total = parseFloat(inv.total || 0);
+            const pagado = parseFloat(inv.paidAmount || 0);
+            const saldo = (inv.status === 'pagada') ? 0 : (total - pagado);
+            const hist = (inv.sentHistory || []);
+            const ultimoEnvio = hist.length > 0 ? hist[hist.length - 1].date.split('T')[0] : (inv.sentAt || '');
+            return [
+                inv.invoiceNumber, inv.clientName, inv.clientEmail || '', inv.startDate, inv.endDate,
+                inv.generatedDate, ultimoEnvio, statusLabels[inv.status] || inv.status,
+                total.toFixed(2), pagado.toFixed(2), saldo.toFixed(2)
+            ].map(esc).join(',');
+        });
+        const csv = '\uFEFF' + [headers.map(esc).join(','), ...rows].join('\r\n'); // BOM para que Excel lea acentos bien
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const today = new Date().toLocaleDateString('en-CA');
+        a.href = url;
+        a.download = `Facturas_Brazos_${today}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // Imprime exactamente la lista filtrada actual en una ventana aparte, en formato tabla
+    // simple (sin los botones/acciones de la pantalla).
+    printInvoicesList() {
+        const list = this._lastFilteredInvoices || this.generatedInvoices || [];
+        if (list.length === 0) { alert('No hay facturas para imprimir con los filtros actuales.'); return; }
+        const statusLabels = { pendiente:'Pendiente', enviada:'Enviada', pagada:'Pagada', vencida:'Vencida', cancelada:'Cancelada', parcial:'Pago Parcial' };
+        const rows = list.map(inv => {
+            const total = parseFloat(inv.total || 0);
+            const pagado = parseFloat(inv.paidAmount || 0);
+            const saldo = (inv.status === 'pagada') ? 0 : (total - pagado);
+            return `<tr>
+                <td>${inv.invoiceNumber}</td><td>${inv.clientName}</td>
+                <td>${inv.startDate} – ${inv.endDate}</td>
+                <td>${statusLabels[inv.status] || inv.status}</td>
+                <td style="text-align:right;">$${total.toFixed(2)}</td>
+                <td style="text-align:right;">$${saldo.toFixed(2)}</td>
+            </tr>`;
+        }).join('');
+        const totalGeneral = list.reduce((s, i) => s + parseFloat(i.total || 0), 0);
+        const saldoGeneral = list.reduce((s, i) => s + (i.status === 'pagada' ? 0 : (parseFloat(i.total||0) - parseFloat(i.paidAmount||0))), 0);
+        const win = window.open('', '_blank');
+        win.document.write(`
+            <html><head><title>Facturas — Brazos Cleaning</title>
+            <style>
+                body{font-family:Arial,sans-serif;margin:30px;color:#333}
+                h1{color:#0e7490;margin-bottom:4px} table{width:100%;border-collapse:collapse;margin-top:15px}
+                th,td{padding:6px 10px;border-bottom:1px solid #ddd;font-size:0.85rem;text-align:left}
+                th{background:#f4f4f4} tfoot td{font-weight:bold;border-top:2px solid #333}
+                @media print{.no-print{display:none}}
+            </style></head><body>
+            <h1>Facturas — Brazos Cleaning Services</h1>
+            <p>${list.length} factura(s) — generado el ${new Date().toLocaleDateString('es-MX')}</p>
+            <table>
+                <thead><tr><th>#</th><th>Cliente</th><th>Periodo</th><th>Estatus</th><th>Total</th><th>Saldo</th></tr></thead>
+                <tbody>${rows}</tbody>
+                <tfoot><tr><td colspan="4">TOTALES</td><td>$${totalGeneral.toFixed(2)}</td><td>$${saldoGeneral.toFixed(2)}</td></tr></tfoot>
+            </table>
+            <button class="no-print" onclick="window.print()" style="margin-top:20px;padding:10px 20px;">🖨️ Imprimir</button>
+            </body></html>`);
+        win.document.close();
+    }
+
+    // ── COBRANZA: junta por CLIENTE (no por factura) todo lo que debe, para investigar
+    // atrasos y armar una lista de correo. "Atrasada" = enviada/parcial y ya pasó su
+    // plazo de pago (Términos de Pago del cliente) desde que se envió/generó.
+    openCobranzaModal() {
+        const today = new Date();
+        const byClient = {};
+
+        (this.generatedInvoices || []).forEach(inv => {
+            if (!['enviada', 'parcial'].includes(inv.status)) return;
+            const cli = this.clis.find(c => c.name === inv.clientName) || {};
+            const terms = (cli.paymentTerms !== undefined) ? parseInt(cli.paymentTerms) : 15;
+            const hist = inv.sentHistory || [];
+            const baseDateStr = hist.length > 0 ? hist[hist.length - 1].date.split('T')[0] : (inv.sentAt || inv.generatedDate);
+            const baseDate = new Date(baseDateStr + 'T00:00:00');
+            const dueDate = new Date(baseDate);
+            dueDate.setDate(dueDate.getDate() + terms);
+            if (today <= dueDate) return; // todavía no vence, no es "atrasada"
+
+            const daysLate = Math.floor((today - dueDate) / (1000 * 60 * 60 * 24));
+            const saldo = inv.status === 'parcial' ? (parseFloat(inv.total||0) - parseFloat(inv.paidAmount||0)) : parseFloat(inv.total||0);
+
+            if (!byClient[inv.clientName]) {
+                byClient[inv.clientName] = {
+                    clientName: inv.clientName,
+                    email: this.getClientEmail(cli) || inv.clientEmail || '',
+                    invoices: [], totalDebt: 0, oldestDueDate: dueDate, lastSentDate: baseDateStr, maxDaysLate: 0
+                };
+            }
+            const c = byClient[inv.clientName];
+            c.invoices.push({ num: inv.invoiceNumber, saldo, daysLate });
+            c.totalDebt += saldo;
+            if (dueDate < c.oldestDueDate) c.oldestDueDate = dueDate;
+            if (baseDateStr > c.lastSentDate) c.lastSentDate = baseDateStr;
+            if (daysLate > c.maxDaysLate) c.maxDaysLate = daysLate;
+        });
+
+        this._cobranzaList = Object.values(byClient).sort((a, b) => b.maxDaysLate - a.maxDaysLate);
+        this.renderCobranzaList();
+        document.getElementById('cobranzaModal').style.display = 'block';
+    }
+
+    renderCobranzaList() {
+        const list = this._cobranzaList || [];
+        const tbody = document.getElementById('cobranzaTbody');
+        if (!tbody) return;
+        if (list.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#888;">🎉 Nadie tiene pagos atrasados ahora mismo.</td></tr>';
+            document.getElementById('cobranzaCount').textContent = '0 clientes atrasados';
+            return;
+        }
+        document.getElementById('cobranzaCount').textContent = `${list.length} cliente(s) atrasado(s)`;
+        tbody.innerHTML = list.map((c, i) => `
+            <tr>
+                <td style="text-align:center;"><input type="checkbox" class="cobranzaCheck" data-idx="${i}" ${c.email ? 'checked' : ''} ${!c.email ? 'disabled title=\"Sin email registrado\"' : ''}></td>
+                <td>${c.clientName}</td>
+                <td style="font-size:0.8rem;color:#666;">${c.email || '⚠️ sin email'}</td>
+                <td style="text-align:center;">${c.invoices.length}</td>
+                <td style="text-align:right;font-weight:bold;color:#c0392b;">$${c.totalDebt.toFixed(2)}</td>
+                <td style="text-align:center;">${c.maxDaysLate} días</td>
+                <td style="text-align:center;font-size:0.8rem;">${c.lastSentDate}</td>
+                <td><input type="text" value="${(this.collectionNotes[c.clientName]||'').replace(/"/g,'&quot;')}" placeholder="¿Por qué está atrasado?" onchange="app.saveCollectionNote('${c.clientName.replace(/'/g,"\\'")}', this.value)" style="width:100%;padding:4px 6px;font-size:0.8rem;border:1px solid #ccc;border-radius:4px;"></td>
+            </tr>
+        `).join('');
+    }
+
+    saveCollectionNote(clientName, note) {
+        this.collectionNotes = this.collectionNotes || {};
+        this.collectionNotes[clientName] = note;
+        this.save();
+    }
+
+    getSelectedCobranzaClients() {
+        const list = this._cobranzaList || [];
+        return [...document.querySelectorAll('.cobranzaCheck:checked')]
+            .map(chk => list[parseInt(chk.dataset.idx)])
+            .filter(c => c && c.email);
+    }
+
+    copyCollectionEmails() {
+        const selected = this.getSelectedCobranzaClients();
+        if (selected.length === 0) { alert('Selecciona al menos un cliente con email.'); return; }
+        const emails = selected.map(c => c.email).join(', ');
+        navigator.clipboard.writeText(emails).then(() => {
+            alert(`✅ Copiado (${selected.length} correo(s)):\n\n${emails}\n\nPégalo en el campo "Para" o "CCO" de tu correo.`);
+        }).catch(() => {
+            prompt('Copia esta lista de correos manualmente:', emails);
+        });
+    }
+
+    showCollectionEmailTemplate() {
+        const selected = this.getSelectedCobranzaClients();
+        const template = `Estimado cliente,\n\nAl revisar nuestros registros, notamos que tiene un saldo pendiente con Brazos Cleaning Services que ya superó la fecha de pago acordada.\n\nQueríamos consultarle si hay alguna razón particular por la que el pago se haya retrasado, o si necesita que le reenviemos alguna factura para poder completarlo.\n\nQuedamos atentos a su respuesta para poder ayudarle a resolver esto lo antes posible.\n\nGracias,\nBrazos Cleaning Services`;
+        const win = window.open('', '_blank', 'width=650,height=500');
+        win.document.write(`
+            <html><head><title>Plantilla de correo — Cobranza</title>
+            <style>body{font-family:Arial,sans-serif;margin:20px;color:#333} textarea{width:100%;height:260px;font-size:0.95rem;padding:10px;box-sizing:border-box} button{margin-top:10px;padding:10px 20px;background:#1a56a0;color:white;border:none;border-radius:6px;cursor:pointer}</style>
+            </head><body>
+            <h3>📧 Plantilla sugerida (cópiala y pégala en tu correo)</h3>
+            <p style="font-size:0.85rem;color:#666;">Destinatarios seleccionados: ${selected.length} — usa el botón "Copiar Correos" en la otra pantalla para pegarlos en Para/CCO.</p>
+            <textarea readonly id="tplText">${template}</textarea>
+            <br><button onclick="navigator.clipboard.writeText(document.getElementById('tplText').value); alert('✅ Copiado');">📋 Copiar texto</button>
+            </body></html>`);
+        win.document.close();
+    }
+
+    closeCobranzaModal() {
+        document.getElementById('cobranzaModal').style.display = 'none';
+    }
+
     refreshGeneratedInvoices() {
         const start = document.getElementById('genInvStart').value;
         const end = document.getElementById('genInvEnd').value;
@@ -5527,6 +5735,9 @@ class Scheduler {
                 default: return b.generatedDate.localeCompare(a.generatedDate); // date_desc
             }
         });
+        // Guardar la lista tal como se está mostrando ahora mismo (con todos los filtros
+        // aplicados) para que Exportar/Imprimir usen exactamente esto, no todo sin filtrar.
+        this._lastFilteredInvoices = filtered;
         
         const statusColors = { pendiente:'#e67e22', enviada:'#2980b9', parcial:'#d4a017', pagada:'#27ae60', vencida:'#e74c3c', cancelada:'#95a5a6' };
         const statusLabels = { pendiente:'⏳ Pendiente', enviada:'📧 Enviada', pagada:'✅ Pagada', vencida:'🔴 Vencida', cancelada:'🚫 Cancelada' };
@@ -14290,6 +14501,7 @@ Motivo de cancelación (opcional):`);
                 pendingInvoices: this.pendingInvoices || [],
                 dismissedPendingKeys: this.dismissedPendingKeys || [],
                 dismissedServiceIds: this.dismissedServiceIds || [],
+                collectionNotes: this.collectionNotes || {},
                 nominaTotales: this.nominaTotales || [],
                 companyConfig: localStorage.getItem('companyConfig'),
                 companyLogo: localStorage.getItem('companyLogo'),
@@ -14470,6 +14682,7 @@ Motivo de cancelación (opcional):`);
                 if (data.pendingInvoices)  { this.pendingInvoices = data.pendingInvoices; localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices)); }
                 if (data.dismissedPendingKeys) { this.dismissedPendingKeys = data.dismissedPendingKeys; localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys)); }
                 if (data.dismissedServiceIds) { this.dismissedServiceIds = data.dismissedServiceIds; localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds)); }
+                if (data.collectionNotes) { this.collectionNotes = data.collectionNotes; localStorage.setItem('v35_collectionNotes', JSON.stringify(this.collectionNotes)); }
                 if (data.nominaTotales)    { this.nominaTotales = data.nominaTotales; localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales)); }
                 if (data.companyConfig)    localStorage.setItem('companyConfig', data.companyConfig);
                 if (data.companyLogo)      localStorage.setItem('companyLogo', data.companyLogo);
@@ -14495,6 +14708,7 @@ Motivo de cancelación (opcional):`);
                 pendingInvoices: this.pendingInvoices || [],
                 dismissedPendingKeys: this.dismissedPendingKeys || [],
                 dismissedServiceIds: this.dismissedServiceIds || [],
+                collectionNotes: this.collectionNotes || {},
             };
             const driveSide = {
                 emps: data.emps || [], clis: data.clis || [], servs: data.servs || [],
@@ -14502,6 +14716,7 @@ Motivo de cancelación (opcional):`);
                 pendingInvoices: data.pendingInvoices || [],
                 dismissedPendingKeys: data.dismissedPendingKeys || [],
                 dismissedServiceIds: data.dismissedServiceIds || [],
+                collectionNotes: data.collectionNotes || {},
             };
             const winner = localWins ? localSide : driveSide;
             const loser  = localWins ? driveSide : localSide;
@@ -14541,6 +14756,7 @@ Motivo de cancelación (opcional):`);
             // para que una pendiente ya descartada no reaparezca por venir del otro lado.
             this.dismissedPendingKeys = [...new Set([...(winner.dismissedPendingKeys||[]), ...(loser.dismissedPendingKeys||[])])];
             this.dismissedServiceIds = [...new Set([...(winner.dismissedServiceIds||[]), ...(loser.dismissedServiceIds||[])])];
+            this.collectionNotes = Object.assign({}, loser.collectionNotes || {}, winner.collectionNotes || {});
             this.pendingInvoices = this.pendingInvoices.filter(p => !this.dismissedPendingKeys.includes(p.periodKey));
             this.pendingInvoices = this.pendingInvoices.filter(p =>
                 !(p.serviceIds && p.serviceIds.some(sid => this.dismissedServiceIds.includes(sid)))
@@ -14577,6 +14793,7 @@ Motivo de cancelación (opcional):`);
             localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices));
             localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys));
             localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds));
+            localStorage.setItem('v35_collectionNotes', JSON.stringify(this.collectionNotes));
             localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales));
 
             this.refreshSels();
@@ -15948,6 +16165,7 @@ document.addEventListener('click', function(e) {
                 <span style="width:1px; height:22px; background:rgba(255,255,255,0.4); margin:0 2px;"></span>
                 <button onclick="app.verClienteEnPendientes()" title="Ir a Pendientes" style="background:rgba(255,255,255,0.9); color:#f39c12; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">📋 Pendientes</button>
                 <button onclick="app.verClienteEnGenerar()" title="Ir a Generar Factura" style="background:rgba(255,255,255,0.9); color:#e67e22; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">🧾 Generar</button>
+                <button onclick="app.openCobranzaModal()" title="Ver clientes con pagos atrasados" style="background:rgba(255,255,255,0.9); color:#c0392b; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">💰 Cobranza</button>
                 📑 Historial de Facturas Enviadas
             </span>
             <span id="genInvBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.9rem;">0 facturas</span>
@@ -16017,6 +16235,12 @@ document.addEventListener('click', function(e) {
                     <option value="name_asc">Cliente (A-Z)</option>
                     <option value="name_desc">Cliente (Z-A)</option>
                 </select>
+                <button onclick="app.exportInvoicesToExcel()" title="Exporta a Excel/CSV exactamente lo que se ve filtrado ahora" class="btn" style="padding:8px 14px; background:#1e7e34; color:white; font-size:0.85rem; font-weight:bold; white-space:nowrap;">
+                    📊 Exportar a Excel
+                </button>
+                <button onclick="app.printInvoicesList()" title="Imprime la lista filtrada actual" class="btn" style="padding:8px 14px; background:#495057; color:white; font-size:0.85rem; font-weight:bold; white-space:nowrap;">
+                    🖨️ Imprimir
+                </button>
             </div>
         </div>
         
@@ -16065,6 +16289,48 @@ document.addEventListener('click', function(e) {
         <button onclick="app.exitInvoiceNav('generated')" class="btn" style="width: 100%; margin-top: 20px; background: #2c3e50; color: white; padding: 12px;">
             Cerrar
         </button>
+    </div>
+</div>
+
+<!-- Modal Cobranza — clientes con pagos atrasados -->
+<div id="cobranzaModal" class="modal">
+    <div class="modal-content" style="width: 95%; max-width: none;">
+        <h2 style="background: #c0392b; color: white; padding: 15px 20px; margin: -20px -20px 20px -20px; border-radius: 8px 8px 0 0; display:flex; justify-content:space-between; align-items:center;">
+            <span>💰 Cobranza — Clientes con Pagos Atrasados</span>
+            <span id="cobranzaCount" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.9rem;">0 clientes atrasados</span>
+        </h2>
+        <p style="font-size:0.85rem; color:#666; margin-top:0;">
+            "Atrasado" = factura enviada o con pago parcial cuyo plazo (Términos de Pago del cliente) ya venció.
+            Selecciona a quién avisar, escribe una nota si el cliente te explica la razón, y usa los botones de abajo para armar el correo.
+        </p>
+        <div style="max-height: 450px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px;">
+            <table class="finance-table" style="width:100%;">
+                <thead>
+                    <tr style="background:#f4f4f4;">
+                        <th style="width:36px;"></th>
+                        <th>Cliente</th>
+                        <th>Email</th>
+                        <th style="text-align:center;"># Atrasadas</th>
+                        <th style="text-align:right;">Total Adeudado</th>
+                        <th style="text-align:center;">Días de Atraso</th>
+                        <th style="text-align:center;">Última vez Enviada</th>
+                        <th>Nota / Razón del Atraso</th>
+                    </tr>
+                </thead>
+                <tbody id="cobranzaTbody"></tbody>
+            </table>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:15px; flex-wrap:wrap;">
+            <button onclick="app.copyCollectionEmails()" class="btn" style="background:#1a56a0; color:white; padding:10px 18px; font-weight:bold;">
+                📋 Copiar Correos Seleccionados
+            </button>
+            <button onclick="app.showCollectionEmailTemplate()" class="btn" style="background:#6c757d; color:white; padding:10px 18px; font-weight:bold;">
+                📧 Ver Plantilla de Correo Sugerida
+            </button>
+            <button onclick="app.closeCobranzaModal()" class="btn" style="background:#95a5a6; color:white; padding:10px 18px; margin-left:auto;">
+                Cerrar
+            </button>
+        </div>
     </div>
 </div>
 
