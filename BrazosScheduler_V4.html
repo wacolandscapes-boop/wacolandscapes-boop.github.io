@@ -5258,6 +5258,9 @@ class Scheduler {
                     const label = propCli.name + (propCli.propId && propCli.propId !== propCli.name ? ' — ' + propCli.propId : '');
                     document.getElementById('manualInvClient').value = propCli.id;
                     document.getElementById('manualInvClientSearch').value = label;
+                    if (document.getElementById('manualInvEmail')) {
+                        document.getElementById('manualInvEmail').value = this.getClientEmail(propCli);
+                    }
                 }
                 const listEl = document.getElementById('manualInvItemsList');
                 if (listEl) {
@@ -6316,13 +6319,25 @@ class Scheduler {
                     document.getElementById('manualInvClient').value = cli.id;
                     document.getElementById('manualInvClientSearch').value = label;
                 }
-                // Cargar items
+                // Cargar items — si la descripción guardada ya trae la dirección de la
+                // propiedad al principio (de una edición anterior), se le quita antes de
+                // recargarla, porque el generador de PDF la vuelve a anteponer solo — si no,
+                // queda duplicada ("406 Crecent... - 406 Crecent... - Cleaning Service").
                 const listEl = document.getElementById('manualInvItemsList');
                 if (listEl) {
                     listEl.innerHTML = '';
+                    const propPrefix = cli && cli.propId && cli.propId !== cli.name ? cli.propId + ' - ' : null;
                     (invoice.items || []).forEach(item => {
-                        this.addManualInvoiceItem(item.fecha || item.date || invoice.startDate, item.descripcion || item.name || '', item.precio || item.price || 0);
+                        let desc = item.descripcion || item.name || '';
+                        if (propPrefix && desc.startsWith(propPrefix)) desc = desc.slice(propPrefix.length);
+                        this.addManualInvoiceItem(item.fecha || item.date || invoice.startDate, desc, item.precio || item.price || 0);
                     });
+                }
+                // Precargar el email que SÍ se usó cuando se envió esta factura (guardado en
+                // la factura misma) — no depender del email del registro de la propiedad,
+                // que en clientes de construcción como JGM suele estar vacío.
+                if (document.getElementById('manualInvEmail')) {
+                    document.getElementById('manualInvEmail').value = invoice.clientEmail || this.getClientEmail(cli);
                 }
                 if (document.getElementById('manualInvPaymentDue')) {
                     document.getElementById('manualInvPaymentDue').value = invoice.invoiceConfig?.paymentDue || '';
@@ -10757,10 +10772,27 @@ Motivo de cancelación (opcional):`);
         }, 100);
     }
 
+    // El correo es del CLIENTE completo, no de cada propiedad — en clientes multipropiedad
+    // (construcción/airbnb) solo UNA de las propiedades suele tener el email guardado.
+    // Busca primero en la propiedad específica y, si está vacío, en cualquier otra
+    // propiedad que comparta el mismo nombre de cliente.
+    getClientEmail(propCli) {
+        if (!propCli) return '';
+        if (propCli.email) return propCli.email;
+        const sibling = this.clis.find(c => c.name === propCli.name && c.email);
+        return sibling ? sibling.email : '';
+    }
+
     selectManualInvClient(id, label) {
         document.getElementById('manualInvClient').value = id;
         document.getElementById('manualInvClientSearch').value = label;
         document.getElementById('manualInvClientDropdown').style.display = 'none';
+        // Precargar el correo de la propiedad seleccionada (editable si hace falta corregirlo)
+        const emailField = document.getElementById('manualInvEmail');
+        if (emailField) {
+            const cli = this.clis.find(c => String(c.id) === String(id));
+            emailField.value = this.getClientEmail(cli);
+        }
         // Actualizar preview si ya hay items
         if (document.getElementById('manualInvItemsList').children.length > 0) {
             this.updateManualInvoiceTotals();
@@ -10799,8 +10831,13 @@ Motivo de cancelación (opcional):`);
     showManualInvoicePreview() {
         const clientId = document.getElementById('manualInvClient').value;
         if (!clientId) { alert('Por favor selecciona un cliente'); return; }
-        const client = this.clis.find(c => String(c.id) === String(clientId));
-        if (!client) { alert('Cliente no encontrado'); return; }
+        const rawClient = this.clis.find(c => String(c.id) === String(clientId));
+        if (!rawClient) { alert('Cliente no encontrado'); return; }
+        // Usar el correo del campo editable si se puso uno — sin modificar el registro
+        // real del cliente, solo para esta factura. Necesario para clientes de
+        // construcción multipropiedad donde la ficha de la propiedad no tiene email propio.
+        const emailOverride = document.getElementById('manualInvEmail')?.value.trim();
+        const client = emailOverride ? { ...rawClient, email: emailOverride } : rawClient;
 
         const rawItems = this.getManualInvoiceItems();
         for (const it of rawItems) {
@@ -15730,6 +15767,12 @@ document.addEventListener('click', function(e) {
                         onfocus="app.filterManualInvClients(this.value)">
                     <div id="manualInvClientDropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:white; border:1px solid #ddd; border-radius:0 0 6px 6px; max-height:200px; overflow-y:auto; z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
                 </div>
+            </div>
+            <div>
+                <label style="font-weight: bold; display: block; margin-bottom: 5px; font-size: 0.9rem;">Email para enviar:</label>
+                <input type="text" id="manualInvEmail" placeholder="correo@ejemplo.com (se puede editar)"
+                    style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; font-size:0.9rem;">
+                <div style="font-size:0.72rem; color:#888; margin-top:2px;">En clientes de construcción con varias propiedades, el correo puede no estar guardado en la ficha de la propiedad — confírmalo o corrígelo aquí antes de enviar.</div>
             </div>
             <div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
