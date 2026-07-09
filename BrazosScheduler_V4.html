@@ -12157,7 +12157,7 @@ Motivo de cancelación (opcional):`);
                 services.forEach((s, idx) => {
                     const [yr, mo, dy] = s.date.split('-');
                     const dateFmt = `${mo}/${dy}/${yr}`;
-                    const price = s.price || parseFloat(client.price) || 0;
+                    const price = (s.price !== undefined && s.price !== null && s.price !== '' && !isNaN(s.price)) ? parseFloat(s.price) : (parseFloat(client.price) || 0);
                     total_a += price;
 
                     if (idx % 2 === 1) {
@@ -12186,7 +12186,7 @@ Motivo de cancelación (opcional):`);
             } else {
                 // SIN desglose: una sola fila con descripción y total
                 services.forEach(s => {
-                    const price = s.price || parseFloat(client.price) || 0;
+                    const price = (s.price !== undefined && s.price !== null && s.price !== '' && !isNaN(s.price)) ? parseFloat(s.price) : (parseFloat(client.price) || 0);
                     total_a += price;
                 });
                 doc.setFillColor(250,250,250);
@@ -12341,7 +12341,7 @@ Motivo de cancelación (opcional):`);
                 // Corregir zona horaria
                 const [year, month, day] = s.date.split('-');
                 const dateFormatted = `${month}/${day}/${year}`;
-                const price = s.price || parseFloat(client.price) || 0;
+                const price = (s.price !== undefined && s.price !== null && s.price !== '' && !isNaN(s.price)) ? parseFloat(s.price) : (parseFloat(client.price) || 0);
                 total += price;
                 
                 if (index % 2 === 0) {
@@ -12678,7 +12678,7 @@ Motivo de cancelación (opcional):`);
             services.forEach((s,idx) => {
                 const [yr,mo,dy] = s.date.split('-');
                 const dateFmt = `${mo}/${dy}/${yr}`;
-                const price = s.price || parseFloat(client.price) || 0;
+                const price = (s.price !== undefined && s.price !== null && s.price !== '' && !isNaN(s.price)) ? parseFloat(s.price) : (parseFloat(client.price) || 0);
                 total_b += price;
                 if (idx%2===1) { doc.setFillColor(250,250,250); doc.rect(18,y_b,174,rowH_b,'F'); }
                 doc.setDrawColor(200,200,200);
