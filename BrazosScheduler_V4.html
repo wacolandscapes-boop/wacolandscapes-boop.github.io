@@ -1201,13 +1201,14 @@
                             <option value="construccion">🏗️ Construcción</option>
                             <option value="unico">⭐ Único</option>
                         </select>
+                        <label style="font-size:0.8rem; color:#555; margin-top:6px; display:block; grid-column:span 2;">📆 Frecuencia de Facturación</label>
                         <select id="cliBillingPeriod" style="grid-column:span 2">
                             <option value="weekly">📅 Facturar Semanalmente</option>
                             <option value="biweekly">📅 Facturar Quincenalmente</option>
                             <option value="monthly">📅 Facturar Mensualmente</option>
                             <option value="perservice">📅 Facturar por Servicio</option>
                         </select>
-                        <label style="font-size:0.8rem; color:#555; margin-top:6px; display:block; grid-column:span 2;">💳 Tipo de Facturación</label>
+                        <label style="font-size:0.8rem; color:#555; margin-top:6px; display:block; grid-column:span 2;">🎨 Diseño o Estilo de Factura</label>
                         <select id="cliInvoicingType" style="grid-column:span 2">
                             <option value="monthly">📋 Mensual (suma de visitas del mes)</option>
                             <option value="fixed_monthly">📌 Mensual Fijo (monto fijo sin importar visitas)</option>
@@ -4474,155 +4475,13 @@ class Scheduler {
             const cliType = cli.type || 'mensual';
             const billingPeriod = cli.billingPeriod || 'monthly';
 
-            // ── REGLA 1: AIRBNB ──
-            if (cliType === 'airbnb') {
-                const airbnbBilling = cli.billingPeriod || billingPeriod;
-
-                // AirBnB Mensual → último día del mes, columna Programadas
-                if (airbnbBilling === 'monthly' || airbnbBilling === 'fixed_monthly') {
-                    if (currentDay < 15) return; // Mostrar a partir del día 15
-                    const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-                    const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-                    const periodStart = new Date(prevYear, prevMonth, 1).toLocaleDateString('en-CA');
-                    const periodEnd = new Date(prevYear, prevMonth + 1, 0).toLocaleDateString('en-CA');
-                    const monthKey = `${clientName}-airbnb-monthly-${prevYear}-${prevMonth}`;
-                    if (this.pendingInvoices.some(p => p.periodKey === monthKey)) return;
-                    if ((this.generatedInvoices || []).some(g => g.clientName === clientName &&
-                        g.startDate >= periodStart && g.startDate <= periodEnd)) return;
-                    const monthServs = this.servs.filter(s =>
-                        clients.some(c => c.id == s.cliId) && !s.cancelled &&
-                        s.date >= periodStart && s.date <= periodEnd
-                    );
-                    if (monthServs.length === 0) return;
-                    const total = parseFloat(cli.price || 0);
-                    const lastDay = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
-                    this.pendingInvoices.push({
-                        id: Date.now() + Math.random(),
-                        periodKey: monthKey,
-                        clientName, clientEmail: cli.email || '',
-                        clientIds: clients.map(c => c.id),
-                        type: cliType, billingPeriod: airbnbBilling,
-                        startDate: periodStart, endDate: periodEnd,
-                        serviceCount: monthServs.length, total,
-                        urgency: 'normal',
-                        reason: `🏠 AirBnB Mensual — Enviar el ${lastDay}`,
-                        createdAt: today.toISOString()
-                    });
-                    return;
-                }
-
-                // AirBnB Semanal → cada lunes, columna Urgentes
-                if (dayOfWeek !== 1 && dayOfWeek !== 2) return; // Lunes y martes
-                // Calcular lunes de esta semana, luego restar 7 días para semana pasada
-                const thisMonday = new Date(today);
-                thisMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-                const lastMonday = new Date(thisMonday);
-                lastMonday.setDate(thisMonday.getDate() - 7);
-                const lastSunday = new Date(thisMonday);
-                lastSunday.setDate(thisMonday.getDate() - 1);
-                const weekStart = lastMonday.toLocaleDateString('en-CA');
-                const weekEnd = lastSunday.toLocaleDateString('en-CA');
-                const weekKey = `${clientName}-airbnb-${weekStart}`;
-                if (this.pendingInvoices.some(p => p.periodKey === weekKey)) return;
-                if ((this.generatedInvoices || []).some(g => g.clientName === clientName &&
-                    g.startDate === weekStart)) return;
-                const weekServs = this.servs.filter(s =>
-                    clients.some(c => c.id == s.cliId) && !s.cancelled &&
-                    s.date >= weekStart && s.date <= weekEnd
-                );
-                if (weekServs.length === 0) return;
-                const total = weekServs.reduce((sum, s) => {
-                    const c = this.clis.find(c => c.id == s.cliId);
-                    return sum + parseFloat(c?.price || 0);
-                }, 0);
-                this.pendingInvoices.push({
-                    id: Date.now() + Math.random(),
-                    periodKey: weekKey,
-                    clientName, clientEmail: cli.email || '',
-                    clientIds: clients.map(c => c.id),
-                    type: cliType, billingPeriod: airbnbBilling,
-                    startDate: weekStart, endDate: weekEnd,
-                    serviceCount: weekServs.length, total,
-                    urgency: 'high',
-                    reason: '🏠 AirBnB — Lista para enviar mañana',
-                    createdAt: today.toISOString()
-                });
-                return;
-            }
-
-            // ── REGLA 2: SERVICIO ÚNICO → el día del servicio ──
-            if (cliType === 'unico') {
-                // Buscar servicios de hoy o esta semana sin factura
-                const weekAhead = new Date(today);
-                weekAhead.setDate(today.getDate() + 6);
-                const weekAheadStr = weekAhead.toLocaleDateString('en-CA');
-
-                const upcomingServs = this.servs.filter(s =>
-                    clients.some(c => c.id == s.cliId) &&
-                    !s.cancelled &&
-                    s.date >= todayStr && s.date <= weekAheadStr
-                );
-
-                upcomingServs.forEach(s => {
-                    const svcKey = `${clientName}-unico-${s.date}-${s.id}`;
-                    if ((this.generatedInvoices || []).some(g =>
-                        g.clientName === clientName && g.status !== 'cancelada' && g.startDate <= s.date && g.endDate >= s.date)) return;
-
-                    const c = this.clis.find(c => c.id == s.cliId);
-                    const total = parseFloat(c?.price || 0);
-                    const isToday = s.date === todayStr;
-                    const urgency = isToday ? 'high' : 'normal';
-                    const reason = isToday ? '📧 Servicio hoy — Enviar factura' : `📅 Servicio el ${s.date} — Preparar factura`;
-
-                    // Si ya existía (de un cálculo anterior), actualizar su urgencia en vez de
-                    // dejarla congelada con lo que era cuando se creó — así, cuando el día
-                    // programado por fin llega, sí se marca urgente en vez de quedarse "normal".
-                    const existing = this.pendingInvoices.find(p => p.periodKey === svcKey);
-                    if (existing) { existing.urgency = urgency; existing.reason = reason; return; }
-
-                    this.pendingInvoices.push({
-                        id: Date.now() + Math.random(),
-                        periodKey: svcKey,
-                        clientName,
-                        clientEmail: cli.email || '',
-                        clientIds: [s.cliId],
-                        serviceIds: [s.id],
-                        type: cliType,
-                        billingPeriod,
-                        startDate: s.date,
-                        endDate: s.date,
-                        serviceCount: 1,
-                        total,
-                        urgency,
-                        reason,
-                        createdAt: today.toISOString()
-                    });
-                });
-                return;
-            }
-
-            // ── REGLA 2B: CONSTRUCCIÓN → una factura POR PROPIEDAD, cada semana (mismo
-            // patrón que AirBnB Semanal: se arma el lunes/martes con los servicios de la
-            // semana que acaba de terminar). A diferencia de "único", aquí NO se agrupa
-            // por nombre de cliente sino por cada registro individual (cada propiedad tiene
-            // su propio cliId, propId y precio). El precio siempre queda editable porque
-            // varía por trabajo — por eso esto se abre en la pestaña "Factura Manual"
-            // pre-llenada, en vez de generarse automático de un clic.
-            // ── REGLA 2B: CONSTRUCCIÓN → una factura POR PROPIEDAD. Cada propiedad puede
-            // tener su propio periodo (semanal o mensual) según su campo `billingPeriod` —
-            // por ejemplo, la residencia de Joe bajo JGM Properties es mensual, mientras que
-            // otras propiedades de construcción se facturan cada semana. A diferencia de
-            // "único", aquí NO se agrupa por nombre de cliente sino por cada registro
-            // individual (cada propiedad tiene su propio cliId, propId, precio y periodo).
-            // El precio siempre queda editable porque varía por trabajo — por eso esto se
-            // abre en la pestaña "Factura Manual" pre-llenada, en vez de generarse solo.
+            // ── CONSTRUCCIÓN: caso especial, una tarjeta POR PROPIEDAD (no por cliente).
+            // El periodo NUNCA se congela a "solo lunes/martes" ni "solo después del día
+            // 15" — se recalcula cada vez que se abre Pendientes, agregando cualquier
+            // fecha nueva sin facturar al mismo periodo abierto, hasta que se genere la
+            // factura. El precio es fijo por periodo (no se multiplica por visitas) y
+            // siempre queda editable, por eso se abre en la pestaña Manual.
             if (cliType === 'construccion') {
-                // Revisa si una fecha de una PROPIEDAD ESPECÍFICA ya fue facturada.
-                // Prioriza el match por cliId (propiedad exacta) cuando la factura ya lo
-                // guarda; solo si es una factura vieja sin ese dato (de antes de esta
-                // función) cae al match por nombre de cliente completo — que puede
-                // bloquear fechas por error si el cliente tiene varias propiedades con
-                // facturas de otras propiedades en fechas parecidas.
                 const alreadyInvoiced = (svcDate, propId) => (this.generatedInvoices || []).some(g => {
                     if (g.status === 'cancelada') return false;
                     if (g.clientName !== clientName) return false;
@@ -4636,54 +4495,36 @@ class Scheduler {
                 clients.forEach(propCli => {
                     const propBilling = propCli.billingPeriod || 'weekly';
                     const isMonthly = (propBilling === 'monthly' || propBilling === 'fixed_monthly');
-                    let periodEnd, backlogStart, periodLabel;
+                    const periodLabel = isMonthly ? 'Mes' : 'Semana';
 
-                    if (isMonthly) {
-                        // Igual que AirBnB Mensual: se arma a partir del día 15, con el mes anterior completo
-                        if (currentDay < 15) return;
-                        const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-                        const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-                        periodEnd = new Date(prevYear, prevMonth + 1, 0); // último día del mes anterior
-                        backlogStart = new Date(periodEnd);
-                        backlogStart.setDate(backlogStart.getDate() - 90); // respaldo de 3 meses por si se saltó un mes
-                        periodLabel = 'Mes';
-                    } else {
-                        // Semanal (default): igual que AirBnB Semanal — lunes/martes con la semana pasada
-                        if (dayOfWeek !== 1 && dayOfWeek !== 2) return;
-                        const thisMonday = new Date(today);
-                        thisMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-                        periodEnd = new Date(thisMonday);
-                        periodEnd.setDate(thisMonday.getDate() - 1); // domingo pasado
-                        backlogStart = new Date(thisMonday);
-                        backlogStart.setDate(thisMonday.getDate() - 60); // respaldo de 60 días por si se saltó una semana
-                        periodLabel = 'Semana';
-                    }
-
-                    const periodEndStr = periodEnd.toLocaleDateString('en-CA');
+                    // Ventana de respaldo amplia (6 meses) hasta HOY — sin cortes por día
+                    // de la semana ni por día del mes, para que el periodo se vaya
+                    // expandiendo solo con cada servicio nuevo sin facturar.
+                    const backlogStart = new Date(today);
+                    backlogStart.setDate(today.getDate() - 180);
                     const backlogStartStr = backlogStart.toLocaleDateString('en-CA');
 
                     const propServs = this.servs.filter(s =>
                         String(s.cliId) === String(propCli.id) && !s.cancelled &&
-                        s.date >= backlogStartStr && s.date <= periodEndStr
+                        s.date >= backlogStartStr && s.date <= todayStr
                     );
                     const uninvoiced = propServs.filter(s => !alreadyInvoiced(s.date, propCli.id));
                     if (uninvoiced.length === 0) return;
 
-                    // Refrescar: si ya había un pendiente de esta propiedad, lo reemplazamos con datos actualizados
-                    this.pendingInvoices = this.pendingInvoices.filter(p => !(p.type === 'construccion' && p.cliId === propCli.id));
+                    // Reemplazar la pendiente anterior de esta propiedad con la versión
+                    // actualizada (mismo registro que se expande, no uno nuevo cada vez).
+                    this.pendingInvoices = this.pendingInvoices.filter(p => !(p.column === 'construccion' && p.cliId === propCli.id));
 
                     const dates = uninvoiced.map(s => s.date).sort();
                     const propLabel = (propCli.propId && propCli.propId !== clientName) ? propCli.propId : clientName;
-                    // El precio de la propiedad es un monto FIJO por periodo, no por visita —
-                    // se cobra una sola vez sin importar si hubo 1, 2 o 3 servicios dentro
-                    // del periodo (antes se multiplicaba por cantidad de servicios, inflando
-                    // el cobro).
+                    // El precio de la propiedad es un monto FIJO por periodo, no por visita.
                     const total = parseFloat(propCli.price || 0);
 
                     this.pendingInvoices.push({
                         id: Date.now() + Math.random(),
-                        periodKey: `${clientName}-construccion-${propCli.id}-${periodEndStr}`,
-                        clientName, clientEmail: cli.email || '',
+                        periodKey: `${clientName}-construccion-${propCli.id}`,
+                        column: 'construccion',
+                        clientName, clientEmail: this.getClientEmail(propCli),
                         clientIds: [propCli.id],
                         cliId: propCli.id,
                         propLabel,
@@ -4694,7 +4535,7 @@ class Scheduler {
                         billingPeriod: propBilling,
                         startDate: dates[0], endDate: dates[dates.length - 1],
                         serviceCount: uninvoiced.length, total,
-                        urgency: isMonthly ? 'normal' : 'high',
+                        urgency: 'high',
                         reason: `🏗️ ${propLabel} — ${periodLabel} ${dates[0]} a ${dates[dates.length-1]} — ${uninvoiced.length} servicio(s) (precio editable antes de enviar)`,
                         createdAt: today.toISOString()
                     });
@@ -4702,23 +4543,65 @@ class Scheduler {
                 return;
             }
 
-            // ── REGLA 3: RECURRENTES (semanal/quincenal/mensual) ──
-            // Mensual con 1 visita/mes → el día del servicio
-            // Semanal/Quincenal/Mensual con múltiples visitas → día 15
+            // A partir de aquí, la columna se decide por FRECUENCIA DE FACTURACIÓN
+            // (cli.billingPeriod) — no por el "tipo" de cliente. Así lo pidió Ranu:
+            // el tipo de cliente (mensual/airbnb/único) ya no importa para esto.
 
-            // Verificar si es mensual con 1 sola visita este mes
-            const thisMonthStart = new Date(currentYear, currentMonth, 1).toLocaleDateString('en-CA');
-            const thisMonthEnd = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('en-CA');
-            const thisMonthServs = this.servs.filter(s =>
-                clients.some(c => c.id == s.cliId) && !s.cancelled &&
-                s.date >= thisMonthStart && s.date <= thisMonthEnd
-            );
-            // perservice → facturar el día del servicio (semana pasada + semana actual)
-            if (billingPeriod === 'perservice') {
-                // Calcular lunes de la semana actual
+            // ── billingPeriod = "weekly" → columna AIRBNB ──
+            // Se arma cada lunes/martes con los servicios de la semana que acaba de
+            // terminar (lunes a domingo pasado).
+            if (billingPeriod === 'weekly') {
+                if (dayOfWeek !== 1 && dayOfWeek !== 2) return;
+                const thisMonday = new Date(today);
+                thisMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+                const lastMonday = new Date(thisMonday);
+                lastMonday.setDate(thisMonday.getDate() - 7);
+                const lastSunday = new Date(thisMonday);
+                lastSunday.setDate(thisMonday.getDate() - 1);
+                const weekStart = lastMonday.toLocaleDateString('en-CA');
+                const weekEnd = lastSunday.toLocaleDateString('en-CA');
+                const weekKey = `${clientName}-airbnb-${weekStart}`;
+                if (this.pendingInvoices.some(p => p.periodKey === weekKey)) return;
+                if ((this.generatedInvoices || []).some(g => g.clientName === clientName &&
+                    g.status !== 'cancelada' && g.startDate <= weekEnd && g.endDate >= weekStart)) return;
+                const weekServs = this.servs.filter(s =>
+                    clients.some(c => c.id == s.cliId) && !s.cancelled &&
+                    s.date >= weekStart && s.date <= weekEnd
+                );
+                if (weekServs.length === 0) return;
+                const total = weekServs.reduce((sum, s) => {
+                    const c = this.clis.find(c => c.id == s.cliId);
+                    return sum + parseFloat(c?.price || 0);
+                }, 0);
+                this.pendingInvoices.push({
+                    id: Date.now() + Math.random(),
+                    periodKey: weekKey,
+                    column: 'airbnb',
+                    clientName, clientEmail: cli.email || '',
+                    clientIds: clients.map(c => c.id),
+                    type: cliType, billingPeriod,
+                    startDate: weekStart, endDate: weekEnd,
+                    serviceCount: weekServs.length, total,
+                    urgency: 'high',
+                    reason: '📅 Semanal — Lista para enviar',
+                    createdAt: today.toISOString()
+                });
+                return;
+            }
+
+            // ── billingPeriod = "perservice" o "biweekly" → columna MENSUALES ──
+            // Clientes frecuentes con un servicio (o pocos) por ciclo, se factura por
+            // fecha exacta — semana pasada + semana actual.
+            if (billingPeriod === 'perservice' || billingPeriod === 'biweekly') {
+                const thisMonthStart = new Date(currentYear, currentMonth, 1).toLocaleDateString('en-CA');
+                const thisMonthEnd = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('en-CA');
+                const thisMonthServs = this.servs.filter(s =>
+                    clients.some(c => c.id == s.cliId) && !s.cancelled &&
+                    s.date >= thisMonthStart && s.date <= thisMonthEnd
+                );
+
                 const weekStart = new Date(today);
                 weekStart.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-                // Incluir también semana pasada para servicios no facturados
                 const twoWeeksAgo = new Date(weekStart);
                 twoWeeksAgo.setDate(weekStart.getDate() - 7);
                 const weekEnd = new Date(weekStart);
@@ -4730,7 +4613,7 @@ class Scheduler {
                 if (weekServs.length === 0) return;
 
                 weekServs.forEach(svc => {
-                    const svcKey = `${clientName}-perservice-${svc.date}-${svc.id}`;
+                    const svcKey = `${clientName}-mensuales-${svc.date}-${svc.id}`;
                     if ((this.generatedInvoices || []).some(g =>
                         g.clientName === clientName && g.status !== 'cancelada' && g.startDate <= svc.date && g.endDate >= svc.date)) return;
                     const total = parseFloat(cli.price || 0);
@@ -4741,16 +4624,13 @@ class Scheduler {
                             isPast ? `⚠️ Servicio del ${svc.date} — Pendiente de enviar` :
                             `📅 Servicio el ${svc.date} — Preparar factura`;
 
-                    // Actualizar en vez de dejar congelada la urgencia de cuando se creó
-                    // (esto fue lo que le pasó a Milo's Restaurant: se creó como "normal"
-                    // unos días antes, y cuando por fin llegó el día del servicio, nunca se
-                    // volvió a marcar como urgente).
                     const existing = this.pendingInvoices.find(p => p.periodKey === svcKey);
-                    if (existing) { existing.urgency = urgency; existing.reason = reason; return; }
+                    if (existing) { existing.urgency = urgency; existing.reason = reason; existing.column = 'mensuales'; return; }
 
                     this.pendingInvoices.push({
                         id: Date.now() + Math.random(),
                         periodKey: svcKey,
+                        column: 'mensuales',
                         clientName,
                         clientEmail: cli.email || '',
                         clientIds: clients.map(c => c.id),
@@ -4769,102 +4649,54 @@ class Scheduler {
                 return;
             }
 
-            // Mensual → mostrar TODOS los servicios de la SEMANA ACTUAL como urgentes (lunes
-            // a domingo de esta semana), no solo si es la única visita del mes ni solo el día
-            // exacto — así se ve de una vez todo lo que hay que facturar esta semana.
-            if (cliType === 'mensual') {
-                const curWeekStart = new Date(today);
-                curWeekStart.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // lunes de esta semana
-                const curWeekEnd = new Date(curWeekStart);
-                curWeekEnd.setDate(curWeekStart.getDate() + 6); // domingo de esta semana
-                const curWeekStartStr = curWeekStart.toLocaleDateString('en-CA');
-                const curWeekEndStr = curWeekEnd.toLocaleDateString('en-CA');
+            // ── billingPeriod = "monthly" o "fixed_monthly" → columna ENVIAR AL FINAL DEL MES ──
+            // Se junta todo el mes y se muestra a partir del día 15.
+            if (billingPeriod === 'monthly' || billingPeriod === 'fixed_monthly') {
+                if (currentDay < 15) return;
+                const periodStart = new Date(currentYear, currentMonth, 1).toLocaleDateString('en-CA');
+                const periodEnd = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('en-CA');
+                const periodKey = `${clientName}-${currentYear}-${String(currentMonth+1).padStart(2,'0')}-recurrente`;
 
-                const weekServs = thisMonthServs.filter(s => s.date >= curWeekStartStr && s.date <= curWeekEndStr);
-                weekServs.forEach(svc => {
-                    const svcKey = `${clientName}-mensualsemana-${svc.date}-${svc.id}`;
-                    if ((this.generatedInvoices || []).some(g =>
-                        g.clientName === clientName && g.status !== 'cancelada' && g.startDate <= svc.date && g.endDate >= svc.date)) return;
-                    const total = parseFloat(cli.price || 0);
-                    const isToday = svc.date === todayStr;
-                    const isPastThisWeek = svc.date < todayStr;
-                    // "high" si ya tocaba enviarla (hoy o días pasados de esta semana);
-                    // "thisweek" si es un servicio de esta semana que todavía no llega —
-                    // igual se muestra en Urgentes/Mensuales para que se vea toda la semana junta.
-                    const urgency = (isToday || isPastThisWeek) ? 'high' : 'thisweek';
-                    const reason = isToday ? '📧 Servicio hoy — Enviar factura' :
-                            isPastThisWeek ? `⚠️ Servicio del ${svc.date} (esta semana) — Enviar factura` :
-                            `📅 Servicio programado el ${svc.date} (esta semana)`;
+                if (this.pendingInvoices.some(p => p.periodKey === periodKey)) return;
+                if (hasGeneratedInvoice(clientName, periodStart, periodEnd)) return;
 
-                    const existing = this.pendingInvoices.find(p => p.periodKey === svcKey);
-                    if (existing) { existing.urgency = urgency; existing.reason = reason; return; }
+                const monthServs = this.servs.filter(s =>
+                    clients.some(c => c.id == s.cliId) &&
+                    !s.cancelled &&
+                    s.date >= periodStart && s.date <= periodEnd
+                );
+                if (monthServs.length === 0) return;
 
-                    this.pendingInvoices.push({
-                        id: Date.now() + Math.random(),
-                        periodKey: svcKey,
-                        clientName, clientEmail: cli.email || '',
-                        clientIds: clients.map(c => c.id),
-                        serviceIds: [svc.id],
-                        type: cliType, billingPeriod,
-                        startDate: svc.date, endDate: svc.date,
-                        serviceCount: 1, total,
-                        urgency,
-                        reason,
-                        createdAt: today.toISOString()
-                    });
+                let total = 0;
+                if (billingPeriod === 'fixed_monthly' || cli.invoicingType === 'fixed_monthly') {
+                    total = parseFloat(cli.price || 0);
+                } else {
+                    total = monthServs.reduce((sum, s) => {
+                        const c = this.clis.find(c => String(c.id) === String(s.cliId));
+                        return sum + parseFloat(c?.price || cli.price || 0);
+                    }, 0);
+                }
+
+                const lastDay = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
+
+                this.pendingInvoices.push({
+                    id: Date.now() + Math.random(),
+                    periodKey,
+                    column: 'finmes',
+                    clientName,
+                    clientEmail: cli.email || '',
+                    clientIds: clients.map(c => c.id),
+                    type: cliType,
+                    billingPeriod,
+                    startDate: periodStart,
+                    endDate: periodEnd,
+                    serviceCount: monthServs.length,
+                    total,
+                    urgency: 'normal',
+                    reason: `📋 Mensual — Revisar y enviar el ${lastDay}`,
+                    createdAt: today.toISOString()
                 });
-                return;
             }
-
-        // Recurrentes → mostrar a partir del día 15 con servicios del mes actual
-        if (currentDay < 15) return;
-
-        const periodStart = new Date(currentYear, currentMonth, 1).toLocaleDateString('en-CA');
-        const periodEnd = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('en-CA');
-        const periodKey = `${clientName}-${currentYear}-${String(currentMonth+1).padStart(2,'0')}-recurrente`;
-
-        if (this.pendingInvoices.some(p => p.periodKey === periodKey)) return;
-        const alreadyGenerated = hasGeneratedInvoice(clientName, periodStart, periodEnd);
-        if (alreadyGenerated) return;
-
-        const monthServs = this.servs.filter(s =>
-            clients.some(c => c.id == s.cliId) &&
-            !s.cancelled &&
-            s.date >= periodStart && s.date <= periodEnd
-        );
-        if (monthServs.length === 0) return;
-
-        let total = 0;
-        if ((billingPeriod === 'monthly' || billingPeriod === 'fixed_monthly') &&
-            cli.invoicingType !== 'monthly') {
-            total = parseFloat(cli.price || 0);
-        } else {
-            total = monthServs.reduce((sum, s) => {
-                const c = this.clis.find(c => String(c.id) === String(s.cliId));
-                return sum + parseFloat(c?.price || cli.price || 0);
-            }, 0);
-        }
-
-        const typeLabel = cliType === 'semanal' ? 'Semanal' :
-                          cliType === 'quincenal' ? 'Quincenal' : 'Mensual';
-        const lastDay = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
-
-        this.pendingInvoices.push({
-            id: Date.now() + Math.random(),
-            periodKey,
-            clientName,
-            clientEmail: cli.email || '',
-            clientIds: clients.map(c => c.id),
-            type: cliType,
-            billingPeriod,
-            startDate: periodStart,
-            endDate: periodEnd,
-            serviceCount: monthServs.length,
-            total,
-            urgency: 'normal',
-            reason: `📋 ${typeLabel} — Revisar y enviar el ${lastDay}`,
-            createdAt: today.toISOString()
-        });
         });
 
         // Ordenar: urgentes primero, luego alfabético
@@ -4887,9 +4719,21 @@ class Scheduler {
             safetyBacklogStart.setDate(today.getDate() - 120);
             const safetyBacklogStartStr = safetyBacklogStart.toLocaleDateString('en-CA');
 
+            // Decide a qué columna pertenece un pendiente según Frecuencia de Facturación —
+            // la misma regla que usan las reglas principales de arriba.
+            const columnFor = (bp, isConstruccion) => {
+                if (isConstruccion) return 'construccion';
+                if (bp === 'weekly') return 'airbnb';
+                if (bp === 'perservice' || bp === 'biweekly') return 'mensuales';
+                if (bp === 'monthly' || bp === 'fixed_monthly') return 'finmes';
+                return 'otros';
+            };
+
             // (A) Backlog de servicios nunca facturados
             this.clis.forEach(propCli => {
-                if (propCli.type === 'unico') return; // único ya se factura el mismo día
+                // Construcción ya tiene su propio manejo completo arriba (se expande solo,
+                // sin cortes por fecha) — no hace falta que la red de seguridad la repita.
+                if (propCli.type === 'construccion') return;
                 if (propCli.excludeInvoicing) return; // "No facturar por Brazos"
                 const oldServs = this.servs.filter(s =>
                     String(s.cliId) === String(propCli.id) && !s.cancelled &&
@@ -4923,6 +4767,7 @@ class Scheduler {
                 this.pendingInvoices.push({
                     id: Date.now() + Math.random(),
                     periodKey: key,
+                    column: columnFor(propCli.billingPeriod, false),
                     clientName: propCli.name, clientEmail: propCli.email || '',
                     clientIds: [propCli.id],
                     cliId: propCli.id,
@@ -4957,6 +4802,8 @@ class Scheduler {
                     ? this.clis.filter(c => g.clientIds.map(String).includes(String(c.id)))
                     : this.clis.filter(c => c.name === g.clientName);
                 if (gClients.length > 0 && gClients.every(c => c.excludeInvoicing)) return;
+                const isConstruccionInv = gClients.some(c => c.type === 'construccion');
+                const invColumn = columnFor(gClients[0]?.billingPeriod, isConstruccionInv);
 
                 const overlappingSent = (this.generatedInvoices || []).find(o =>
                     o !== g && o.clientName === g.clientName &&
@@ -4969,6 +4816,7 @@ class Scheduler {
                     this.pendingInvoices.push({
                         id: Date.now() + Math.random(),
                         periodKey: key,
+                        column: invColumn,
                         clientName: g.clientName, clientEmail: g.clientEmail || '',
                         clientIds: g.clientIds || [],
                         type: g.type || 'mensual',
@@ -4992,6 +4840,7 @@ class Scheduler {
                 this.pendingInvoices.push({
                     id: Date.now() + Math.random(),
                     periodKey: key,
+                    column: invColumn,
                     clientName: g.clientName, clientEmail: g.clientEmail || '',
                     clientIds: g.clientIds || [],
                     type: g.type || 'mensual',
@@ -5065,15 +4914,15 @@ class Scheduler {
                 (p.reason || '').toLowerCase().includes(pendingSearch))
             : this.pendingInvoices;
 
-        // Separar en urgentes y por-enviar-fin-de-mes ("thisweek" = mensual de esta semana, también va en urgentes)
-        const urgentes = filteredPending.filter(p => p.urgency === 'high' || p.urgency === 'overdue' || p.urgency === 'thisweek');
-        const porEnviarFinMes = filteredPending.filter(p => !['high','overdue','thisweek'].includes(p.urgency));
-
-        // Sub-clasificar Urgentes por tipo, como pediste: Airbnb / Construcción / Mensuales
-        const urgAirbnb = urgentes.filter(p => p.type === 'airbnb');
-        const urgConstruccion = urgentes.filter(p => p.type === 'construccion');
-        const urgMensuales = urgentes.filter(p => p.type === 'mensual');
-        const urgOtros = urgentes.filter(p => !['airbnb','construccion','mensual'].includes(p.type));
+        // 4 columnas simplificadas, según Frecuencia de Facturación de cada cliente —
+        // ya no por tipo de cliente ni por "urgente vs no urgente".
+        const dfAirbnb = filteredPending.filter(p => p.column === 'airbnb');
+        const dfMensuales = filteredPending.filter(p => p.column === 'mensuales');
+        const dfConstruccion = filteredPending.filter(p => p.column === 'construccion');
+        const dfFinMes = filteredPending.filter(p => p.column === 'finmes');
+        // Cualquier pendiente sin columna reconocida (datos viejos de antes de este cambio,
+        // o casos sin Frecuencia de Facturación definida) — para no perderla de vista.
+        const dfOtros = filteredPending.filter(p => !['airbnb','mensuales','construccion','finmes'].includes(p.column));
 
         const buildCard = (pending, index) => {
             const [startYear, startMonth, startDay] = pending.startDate.split('-');
@@ -5144,17 +4993,17 @@ class Scheduler {
         this._pendingCollapsed = this._pendingCollapsed || {};
 
         const sections = [
-            { key:'airbnb', title:'Airbnb', icon:'🏖️', list:urgAirbnb, color:'#fde8e8', textColor:'#c0392b',
-              desc:'Clientes tipo Airbnb. Se arma cada lunes/martes con los servicios de la SEMANA ANTERIOR (lunes a domingo pasado).' },
-            { key:'construccion', title:'Construcción', icon:'🏗️', list:urgConstruccion, color:'#fde8e8', textColor:'#c0392b',
-              desc:'Una tarjeta por PROPIEDAD (no por cliente) de clientes tipo Construcción, ej. JGM o Sorrells. Cada propiedad usa el periodo (semanal o mensual) que le configures.' },
-            { key:'mensuales', title:'Mensuales', icon:'📆', list:urgMensuales, color:'#fde8e8', textColor:'#c0392b',
-              desc:'Clientes tipo Mensual con algún servicio en la SEMANA ACTUAL (lunes a domingo de esta semana), sin importar si es su única visita del mes o no.' },
+            { key:'airbnb', title:'Airbnb', icon:'🏖️', list:dfAirbnb, color:'#fde8e8', textColor:'#c0392b',
+              desc:'Frecuencia de Facturación = Semanal. Se arma cada lunes/martes con los servicios de la SEMANA ANTERIOR (lunes a domingo pasado).' },
+            { key:'mensuales', title:'Mensuales', icon:'📆', list:dfMensuales, color:'#fde8e8', textColor:'#c0392b',
+              desc:'Frecuencia de Facturación = Por Servicio (o Quincenal). Clientes frecuentes, se factura por la fecha exacta de cada visita.' },
+            { key:'construccion', title:'Construcción', icon:'🏗️', list:dfConstruccion, color:'#fde8e8', textColor:'#c0392b',
+              desc:'Una tarjeta por PROPIEDAD (no por cliente), con dirección. El periodo se va expandiendo solo con cada servicio nuevo sin facturar, hasta que se genere la factura.' },
         ];
-        if (urgOtros.length > 0) sections.push({ key:'otros', title:'Otros', icon:'📦', list:urgOtros, color:'#fde8e8', textColor:'#c0392b',
-              desc:'Cualquier otro tipo de cliente (semanal, quincenal, diario, único) que también necesite factura.' });
-        sections.push({ key:'finmes', title:`Por Enviar al Fin de Mes (${lastDayLabel})`, icon:'📋', list:porEnviarFinMes, color:'#fff3cd', textColor:'#856404',
-              desc:'Clientes recurrentes que se facturan una vez consolidados al final del mes, en vez de urgente.' });
+        if (dfOtros.length > 0) sections.push({ key:'otros', title:'Otros', icon:'📦', list:dfOtros, color:'#fde8e8', textColor:'#c0392b',
+              desc:'Pendientes sin Frecuencia de Facturación reconocida (datos de antes de este ajuste). Revísalas y confirma su ficha de cliente.' });
+        sections.push({ key:'finmes', title:`Enviar al Final del Mes (${lastDayLabel})`, icon:'📋', list:dfFinMes, color:'#fff3cd', textColor:'#856404',
+              desc:'Frecuencia de Facturación = Mensual. Se junta todo el mes y se muestra a partir del día 15.' });
 
         const sectionHeader = (s, isFullscreen) => `
             <div style="cursor:pointer; background:${s.color}; color:${s.textColor}; padding:8px 10px; border-radius:6px; font-weight:700; font-size:0.8rem; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
@@ -8478,7 +8327,7 @@ Motivo de cancelación (opcional):`);
                 style="flex:2;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;">
             <input type="number" placeholder="$Precio" value="${price}"
                 style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;" min="0" step="0.01">
-            <select title="Periodo de facturación de esta propiedad" style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.78rem;">
+            <select title="Frecuencia de facturación de esta propiedad" style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.78rem;">
                 <option value="weekly" ${billing==='weekly'?'selected':''}>📅 Semanal</option>
                 <option value="monthly" ${billing==='monthly'?'selected':''}>🗓️ Mensual</option>
             </select>
@@ -16249,7 +16098,7 @@ document.addEventListener('click', function(e) {
 
         <div style="display: flex; gap: 10px; align-items:center; margin-top: 10px; flex-shrink:0;">
             <p style="margin: 0; color: #856404; font-size:0.78rem; flex:1;">
-                💡 Se detecta automático según recurrencia de cada cliente — revisa antes de generar. <span title="🏖️ Airbnb: clientes tipo Airbnb, se arma cada lunes con la semana anterior.&#10;🏗️ Construcción: una tarjeta por PROPIEDAD (no por cliente), semanal o mensual según lo que configures en cada propiedad.&#10;📆 Mensuales: clientes de tipo mensual con servicio en la semana actual.&#10;📦 Otros: cualquier otro tipo (semanal, quincenal, diario, único) que necesite factura." style="cursor:help; text-decoration:underline dotted; font-weight:600;">¿Qué significan las categorías?</span>
+                💡 Se detecta automático según Frecuencia de Facturación de cada cliente — revisa antes de generar. <span title="🏖️ Airbnb: Frecuencia = Semanal.&#10;📆 Mensuales: Frecuencia = Por Servicio (o Quincenal), por fecha exacta de cada visita.&#10;🏗️ Construcción: una tarjeta por PROPIEDAD, el periodo se va expandiendo solo hasta que se facture.&#10;📋 Enviar al Final del Mes: Frecuencia = Mensual, se junta todo el mes.&#10;📦 Otros: pendientes sin Frecuencia de Facturación reconocida — revisa su ficha." style="cursor:help; text-decoration:underline dotted; font-weight:600;">¿Qué significan las categorías?</span>
             </p>
             <button onclick="app.generateAllPendingInvoices()" class="btn" style="background: #27ae60; color: white; padding: 10px 18px; font-size: 0.9rem; font-weight: bold; display:none; white-space:nowrap;">
                 📄 Generar TODAS
