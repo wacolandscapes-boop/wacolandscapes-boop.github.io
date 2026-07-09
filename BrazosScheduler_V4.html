@@ -4777,6 +4777,49 @@ class Scheduler {
                 const unhandled = oldServs.filter(s => !isHandled(s.date, s.id));
                 if (unhandled.length === 0) return;
 
+                // Clientes semanales (Airbnb): agrupar por SEMANA CALENDARIO (lunes-domingo),
+                // usando la MISMA clave que la regla principal semanal — así nunca se genera
+                // un rango "crudo" (primera a última fecha) que no alinee con semana
+                // calendario, que fue justo lo que causó las facturas con periodos
+                // desfasados por un día para Hospitaller.
+                if (propCli.billingPeriod === 'weekly') {
+                    const byWeek = {};
+                    unhandled.forEach(s => {
+                        const d = new Date(s.date + 'T00:00:00');
+                        const dow = d.getDay();
+                        const monday = new Date(d);
+                        monday.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+                        const mondayStr = monday.toLocaleDateString('en-CA');
+                        if (!byWeek[mondayStr]) byWeek[mondayStr] = [];
+                        byWeek[mondayStr].push(s);
+                    });
+                    Object.keys(byWeek).forEach(mondayStr => {
+                        const weekServs = byWeek[mondayStr];
+                        const sunday = new Date(mondayStr + 'T00:00:00');
+                        sunday.setDate(sunday.getDate() + 6);
+                        const sundayStr = sunday.toLocaleDateString('en-CA');
+                        const weekKey = `${propCli.name}-airbnb-${mondayStr}`; // misma clave que la regla principal
+                        if (this.pendingInvoices.some(p => p.periodKey === weekKey)) return;
+                        const total = weekServs.reduce((sum) => sum + parseFloat(propCli.price || 0), 0);
+                        this.pendingInvoices.push({
+                            id: Date.now() + Math.random(),
+                            periodKey: weekKey,
+                            column: 'airbnb',
+                            clientName: propCli.name, clientEmail: this.getClientEmail(propCli),
+                            clientIds: [propCli.id],
+                            serviceIds: weekServs.map(s => s.id),
+                            type: propCli.type, serviceType: propCli.serviceType || '',
+                            billingPeriod: propCli.billingPeriod,
+                            startDate: mondayStr, endDate: sundayStr,
+                            serviceCount: weekServs.length, total,
+                            urgency: 'overdue',
+                            reason: `⚠️ Semana ${mondayStr} a ${sundayStr} — ${weekServs.length} servicio(s) de hace más de una semana SIN factura generada`,
+                            createdAt: today.toISOString()
+                        });
+                    });
+                    return;
+                }
+
                 const key = `${propCli.name}-${propCli.id}-backlog-redseguridad`;
                 if (this.pendingInvoices.some(p => p.periodKey === key)) return;
 
@@ -5305,7 +5348,13 @@ class Scheduler {
             return {
                 fecha: s.date || '',
                 descripcion: desc,
-                precio: parseFloat(s.price) || 0
+                // Los servicios del calendario NUNCA traen su propio precio guardado (eso
+                // vive en la ficha del cliente) — por eso esto siempre calculaba $0 para
+                // facturas generadas automático. Ahora usa el precio del cliente cuando el
+                // servicio no trae uno explícito (ej. precio ajustado a mano por trabajo).
+                precio: (s.price !== undefined && s.price !== null && s.price !== '' && !isNaN(s.price))
+                    ? parseFloat(s.price)
+                    : (parseFloat(client?.price) || 0)
             };
         });
     }
