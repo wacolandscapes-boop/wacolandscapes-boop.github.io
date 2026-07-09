@@ -4566,7 +4566,7 @@ class Scheduler {
                 upcomingServs.forEach(s => {
                     const svcKey = `${clientName}-unico-${s.date}-${s.id}`;
                     if ((this.generatedInvoices || []).some(g =>
-                        g.clientName === clientName && g.startDate === s.date)) return;
+                        g.clientName === clientName && g.status !== 'cancelada' && g.startDate <= s.date && g.endDate >= s.date)) return;
 
                     const c = this.clis.find(c => c.id == s.cliId);
                     const total = parseFloat(c?.price || 0);
@@ -4732,7 +4732,7 @@ class Scheduler {
                 weekServs.forEach(svc => {
                     const svcKey = `${clientName}-perservice-${svc.date}-${svc.id}`;
                     if ((this.generatedInvoices || []).some(g =>
-                        g.clientName === clientName && g.startDate === svc.date)) return;
+                        g.clientName === clientName && g.status !== 'cancelada' && g.startDate <= svc.date && g.endDate >= svc.date)) return;
                     const total = parseFloat(cli.price || 0);
                     const isToday = svc.date === todayStr;
                     const isPast = svc.date < todayStr;
@@ -4784,7 +4784,7 @@ class Scheduler {
                 weekServs.forEach(svc => {
                     const svcKey = `${clientName}-mensualsemana-${svc.date}-${svc.id}`;
                     if ((this.generatedInvoices || []).some(g =>
-                        g.clientName === clientName && g.startDate === svc.date)) return;
+                        g.clientName === clientName && g.status !== 'cancelada' && g.startDate <= svc.date && g.endDate >= svc.date)) return;
                     const total = parseFloat(cli.price || 0);
                     const isToday = svc.date === todayStr;
                     const isPastThisWeek = svc.date < todayStr;
@@ -4950,6 +4950,13 @@ class Scheduler {
                 if (g.status !== 'pendiente') return;
                 const key = `genUnsent-${g.id}`;
                 if (this.pendingInvoices.some(p => p.periodKey === key)) return;
+                // "No facturar por Brazos" (ej. Hospitaller/Victor) — este chequeo faltaba
+                // aquí, por eso Hospitaller seguía reapareciendo en "Por Enviar al Fin de
+                // Mes" aunque ya estuviera marcado excluido en su ficha de cliente.
+                const gClients = (g.clientIds && g.clientIds.length > 0)
+                    ? this.clis.filter(c => g.clientIds.map(String).includes(String(c.id)))
+                    : this.clis.filter(c => c.name === g.clientName);
+                if (gClients.length > 0 && gClients.every(c => c.excludeInvoicing)) return;
 
                 const overlappingSent = (this.generatedInvoices || []).find(o =>
                     o !== g && o.clientName === g.clientName &&
@@ -6355,6 +6362,7 @@ class Scheduler {
                 }
                 const hiddenNum = document.getElementById('editingInvoiceNumber');
                 if (hiddenNum) hiddenNum.value = invoice.invoiceNumber;
+                this._updateEditingInvoiceBadge();
             } else {
                 // Factura normal — abrir tab Generar
                 const clientSel = document.getElementById('invoiceClient');
@@ -6375,8 +6383,24 @@ class Scheduler {
                 if (document.getElementById('invoiceEnd')) document.getElementById('invoiceEnd').value = invoice.endDate;
                 const hiddenNum = document.getElementById('editingInvoiceNumber');
                 if (hiddenNum) hiddenNum.value = invoice.invoiceNumber;
+                this._updateEditingInvoiceBadge();
             }
         }, 300);
+    }
+
+    // Muestra/oculta el indicador de "Editando factura #XXXX" en el encabezado, según si
+    // el campo oculto editingInvoiceNumber tiene un valor puesto o no.
+    _updateEditingInvoiceBadge() {
+        const badge = document.getElementById('editingInvoiceNumBadge');
+        const numEl = document.getElementById('editingInvoiceNumber');
+        if (!badge) return;
+        const num = numEl ? numEl.value : '';
+        if (num) {
+            badge.textContent = `✏️ Editando factura #${num}`;
+            badge.style.display = 'inline-block';
+        } else {
+            badge.style.display = 'none';
+        }
     }
 
     cancelInvoice(id) {
@@ -10482,6 +10506,7 @@ Motivo de cancelación (opcional):`);
         modal.style.display = 'block';
         modal.style.pointerEvents = 'all';
         window.currentPDFData = null; // Limpiar datos del preview anterior
+        this._updateEditingInvoiceBadge();
         const select = document.getElementById('invoiceClient');
         const currentValue = select.value; // Guardar valor actual si existe
         select.innerHTML = '<option value="">-- Selecciona Cliente --</option>';
@@ -11094,6 +11119,7 @@ Motivo de cancelación (opcional):`);
         if (btn) btn.textContent = '—';
         const hiddenNum = document.getElementById('editingInvoiceNumber');
         if (hiddenNum) hiddenNum.value = '';
+        this._updateEditingInvoiceBadge();
         this._editingInvoiceNumber = null;
         this.fromPending = false;
     }
@@ -11423,9 +11449,13 @@ Motivo de cancelación (opcional):`);
             existing.sentAt = existing.sentAt || today;
             this._addSentHistory(existing, 'guardar como enviada');
             existing.invoiceConfig = pdfData.invoiceConfig || existing.invoiceConfig;
-            existing.serviceCount = pdfData.serviceCount || existing.serviceCount;
-            existing.total = pdfData.total || existing.total;
-            if ((!existing.items || existing.items.length === 0) && pdfData._services) {
+            // Actualizar SIEMPRE con lo recién editado — antes solo se tocaban los items
+            // si estaban vacíos, y las fechas nunca se actualizaban en absoluto.
+            if (pdfData.serviceCount !== undefined) existing.serviceCount = pdfData.serviceCount;
+            if (pdfData.total !== undefined && pdfData.total !== null) existing.total = pdfData.total;
+            if (pdfData.startDate) existing.startDate = pdfData.startDate;
+            if (pdfData.endDate) existing.endDate = pdfData.endDate;
+            if (pdfData._services) {
                 existing.items = this.buildInvoiceItems(pdfData._services, pdfData.client);
             }
         } else {
@@ -11563,9 +11593,18 @@ Motivo de cancelación (opcional):`);
             if (!alreadyExists.clientIds || alreadyExists.clientIds.length === 0) {
                 alreadyExists.clientIds = cli ? [cli.id] : [];
             }
-            if ((!alreadyExists.items || alreadyExists.items.length === 0) && pdfData._services) {
+            // Actualizar SIEMPRE los datos con lo recién editado/regenerado — antes esto
+            // solo pasaba si la factura no tenía NINGUNA línea todavía, así que cualquier
+            // edición real (agregar/quitar fechas, cambiar precios) nunca se guardaba en
+            // una factura que ya tenía al menos 1 línea. Esto fue lo que le pasó a la #7585.
+            if (pdfData._services) {
                 alreadyExists.items = this.buildInvoiceItems(pdfData._services, pdfData.client);
             }
+            if (pdfData.startDate) alreadyExists.startDate = pdfData.startDate;
+            if (pdfData.endDate) alreadyExists.endDate = pdfData.endDate;
+            if (pdfData.total !== undefined && pdfData.total !== null) alreadyExists.total = pdfData.total;
+            if (pdfData.serviceCount !== undefined) alreadyExists.serviceCount = pdfData.serviceCount;
+            if (pdfData.client?.email) alreadyExists.clientEmail = pdfData.client.email;
             this.save();
             return;
         }
@@ -12823,7 +12862,7 @@ Motivo de cancelación (opcional):`);
             // Corregir zona horaria
             const [year, month, day] = s.date.split('-');
             const dateFormatted = `${month}/${day}/${year}`;
-            const price = isFixedMonthly ? 0 : (s.price || parseFloat(client.price) || 0);
+            const price = isFixedMonthly ? 0 : ((s.price !== undefined && s.price !== null && s.price !== '' && !isNaN(s.price)) ? parseFloat(s.price) : (parseFloat(client.price) || 0));
             if (!isFixedMonthly) total += price;
             
             if (index % 2 === 0) {
@@ -15575,7 +15614,10 @@ document.addEventListener('click', function(e) {
             <button onclick="app.toggleMinimizeInvoice()" id="btnMinimizeInvoice" title="Minimizar" style="position: absolute; top: 8px; right: 45px; background: rgba(255,255,255,0.25); color: white; border: none; width: 30px; height: 30px; border-radius: 50%; font-size: 1rem; font-weight: bold; cursor: pointer; line-height: 1; z-index: 10;">—</button>
             
             <div style="display: flex; justify-content: space-between; align-items: center; padding-right: 45px;">
-                <h2 style="margin: 0; font-size: 1.3rem;">💼 Facturación</h2>
+                <h2 style="margin: 0; font-size: 1.3rem; display:flex; align-items:center; gap:8px;">
+                    💼 Facturación
+                    <span id="editingInvoiceNumBadge" style="display:none; background:rgba(255,255,255,0.9); color:#e67e22; font-size:0.8rem; font-weight:700; padding:3px 10px; border-radius:20px;"></span>
+                </h2>
                 <div style="display: flex; gap: 8px;">
                     <button onclick="app.verClienteEnPendientes()" title="Ir a Pendientes" class="btn" style="background: rgba(255,255,255,0.9); color:#f39c12; padding: 8px 12px; font-size: 0.9rem; font-weight:bold;">
                         📋 Pendientes
