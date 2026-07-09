@@ -4674,7 +4674,11 @@ class Scheduler {
 
                     const dates = uninvoiced.map(s => s.date).sort();
                     const propLabel = (propCli.propId && propCli.propId !== clientName) ? propCli.propId : clientName;
-                    const total = uninvoiced.reduce((sum) => sum + parseFloat(propCli.price || 0), 0);
+                    // El precio de la propiedad es un monto FIJO por periodo, no por visita —
+                    // se cobra una sola vez sin importar si hubo 1, 2 o 3 servicios dentro
+                    // del periodo (antes se multiplicaba por cantidad de servicios, inflando
+                    // el cobro).
+                    const total = parseFloat(propCli.price || 0);
 
                     this.pendingInvoices.push({
                         id: Date.now() + Math.random(),
@@ -5094,6 +5098,7 @@ class Scheduler {
                         </h3>
                         ${isOverdue ? '<span style="flex-shrink:0; background:#c0392b; color:white; font-size:0.62rem; padding:2px 6px; border-radius:20px; font-weight:700; white-space:nowrap;">⚠️ ATRASADA</span>' : isUrgent ? '<span style="flex-shrink:0; background:#e74c3c; color:white; font-size:0.62rem; padding:2px 6px; border-radius:20px; font-weight:700; white-space:nowrap;">⚡ HOY</span>' : ''}
                     </div>
+                    ${pending.propLabel && pending.propLabel !== pending.clientName ? `<div style="font-size:0.7rem; color:#888; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📍 ${pending.propLabel}</div>` : ''}
                     <div title="${(pending.reason||'').replace(/"/g,'&quot;')}" style="cursor:help; color:${(isUrgent||isThisWeek)?'#c0392b':'#666'}; font-size: 0.74rem; margin-top:3px; display:flex; justify-content:space-between; gap:6px; overflow:hidden;">
                         <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${pending.serviceCount === 1 ? `📅 ${startFormatted}` : `${startFormatted}–${endFormatted} · ${pending.serviceCount} serv.`}</span>
                         <span style="color: #27ae60; font-weight:bold; flex-shrink:0;">$${pending.total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
@@ -5266,8 +5271,14 @@ class Scheduler {
                 if (listEl) {
                     listEl.innerHTML = '';
                     const defaultPrice = propCli ? (propCli.price || 0) : 0;
-                    (pending.serviceDates || [pending.startDate]).forEach(date => {
-                        this.addManualInvoiceItem(date, 'Limpieza', defaultPrice);
+                    const svcDates = pending.serviceDates || [pending.startDate];
+                    // Todas las fechas quedan visibles en la factura (para que quede
+                    // documentado cuándo se limpió), pero el monto fijo del periodo solo
+                    // se pone en la ÚLTIMA fecha — las anteriores en $0, para no inflar el
+                    // cobro si el precio es un monto fijo que cubre varias visitas.
+                    svcDates.forEach((date, i) => {
+                        const price = (i === svcDates.length - 1) ? defaultPrice : 0;
+                        this.addManualInvoiceItem(date, 'Limpieza', price);
                     });
                 }
                 document.getElementById('btnBackToPending').style.display = 'block';
