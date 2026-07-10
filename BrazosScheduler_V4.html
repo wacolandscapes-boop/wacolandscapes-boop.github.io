@@ -6381,6 +6381,14 @@ class Scheduler {
         if (inv.sentHistory.length > 30) inv.sentHistory = inv.sentHistory.slice(-30); // no crecer sin límite
     }
 
+    // Una factura "avanzada" (pagada, parcial, vencida o cancelada) nunca debe
+    // regresar a "enviada" solo porque se imprimió una copia o se reenvió por
+    // email — eso borraba el registro de pago. Imprimir/reenviar solo debe
+    // dejar constancia en sentHistory, sin tocar el estatus real de cobro.
+    _isInvoiceStatusAdvanced(status) {
+        return status === 'pagada' || status === 'parcial' || status === 'vencida' || status === 'cancelada';
+    }
+
     changeInvoiceStatus(idOrNum, clientName, newStatus) {
         if (!this.generatedInvoices) return;
         // Buscar por id primero, luego por invoiceNumber + clientName
@@ -11710,7 +11718,13 @@ Motivo de cancelación (opcional):`);
             console.warn(`⚠️ Colisión de número de factura detectada — reasignado a #${invoiceNumber}`);
         }
         if (alreadyExists) {
-            if (status === 'enviada') { alreadyExists.status = 'enviada'; alreadyExists.sentAt = new Date().toISOString().split('T')[0]; this._addSentHistory(alreadyExists, 'reenviado (PDF)'); }
+            if (status === 'enviada') {
+                this._addSentHistory(alreadyExists, 'reenviado (PDF)');
+                if (!this._isInvoiceStatusAdvanced(alreadyExists.status)) {
+                    alreadyExists.status = 'enviada';
+                    alreadyExists.sentAt = new Date().toISOString().split('T')[0];
+                }
+            }
             if (!alreadyExists.clientIds || alreadyExists.clientIds.length === 0) {
                 alreadyExists.clientIds = cli ? [cli.id] : [];
             }
@@ -11815,8 +11829,10 @@ Motivo de cancelación (opcional):`);
             if (!this.generatedInvoices) this.generatedInvoices = [];
             let genInv = this.generatedInvoices.find(i => i.invoiceNumber === invNum && i.clientName === client.name);
             if (genInv) {
-                genInv.status = 'enviada';
-                genInv.sentAt = new Date().toLocaleDateString('en-CA');
+                if (!this._isInvoiceStatusAdvanced(genInv.status)) {
+                    genInv.status = 'enviada';
+                    genInv.sentAt = new Date().toLocaleDateString('en-CA');
+                }
                 if ((!genInv.items || genInv.items.length === 0) && window.currentPDFData?._services) {
                     genInv.items = this.buildInvoiceItems(window.currentPDFData._services, client);
                 }
@@ -14238,10 +14254,25 @@ Motivo de cancelación (opcional):`);
             const adjNet = row.totalBilled - adjCost;
             pdfGrandCost += adjCost;
             pdfGrandBilled += row.totalBilled;
+            const shopTransitCostEl = document.getElementById('prodShopTransitCost_' + grpId);
+            const shopTransitCost = shopTransitCostEl ? parseFloat(shopTransitCostEl.textContent.replace(/[$,—]/g,'') || 0) : 0;
+            const shopNoteHTML = (() => {
+                const sbd = row.shopByDate || {};
+                const days = Object.keys(sbd).sort();
+                if (days.length === 0) return '';
+                if (view === 'week' && days.length > 1) {
+                    const items = days.map(d => {
+                        const [y,mo,da] = d.split('-');
+                        return `📅 ${da}/${mo}: 🏠${sbd[d].shopOut||'—'} → 🏁${sbd[d].shopBack||'—'}`;
+                    }).join(' &nbsp;|&nbsp; ');
+                    return `<div style="padding:4px 12px;font-size:10px;background:rgba(255,255,255,0.15);">${items}</div>`;
+                }
+                return `<div style="padding:4px 12px;font-size:10px;background:rgba(255,255,255,0.15);">🏠 Salida del Shop: <strong>${row.shopOut || '—'}</strong> &nbsp; 🏁 Regreso al Shop: <strong>${row.shopBack || '—'}</strong></div>`;
+            })();
             groupsHTML+=`<div style="margin-bottom:18px;border:1px solid #ccc;border-radius:6px;overflow:hidden;page-break-inside:avoid">
               <div style="background:#0e7490;color:white;padding:8px 12px">
-                <strong>👥 ${grp} (${empCount} empleados)</strong> — ${row.doneCount} servicios · ${fmtH(adjHrs)}${row.transitHrs > 0 ? ' + 🚗 ' + fmtH(row.transitHrs * empCount) + ' traslado' : ''} · Facturado: $${fmt(row.totalBilled)} · Costo MO: $${fmt(adjCost)} · <strong>Neto: $${fmt(adjNet)}</strong>
-              </div>`;
+                <strong>👥 ${grp} (${empCount} empleados)</strong> — ${row.doneCount} servicios · ${fmtH(adjHrs)}${row.transitHrs > 0 ? ' + 🚗 ' + fmtH(row.transitHrs * empCount) + ' traslado' : ''}${row.shopTransitHrs > 0 ? ' + 🏠 ' + fmtH(row.shopTransitHrs * empCount) + ' shop' : ''} · Facturado: $${fmt(row.totalBilled)} · Costo MO: $${fmt(adjCost)} · <strong>Neto: $${fmt(adjNet)}</strong>
+              </div>${shopNoteHTML}`;
             groupsHTML+=`<table style="width:100%;border-collapse:collapse;font-size:10px">
               <thead><tr style="background:#f5f5f5">
                 <th style="padding:5px 8px;text-align:left">Fecha</th><th style="padding:5px 8px;text-align:left">Cliente</th>
@@ -14260,13 +14291,22 @@ Motivo de cancelación (opcional):`);
                 <td style="padding:5px 8px;text-align:center;font-size:9px">${s.status==='done'?'✅ Terminado':s.status==='active'?'⏳ Activo':'🔜 Pendiente'}</td>
               </tr>`).join('')}
               </tbody>
-              ${row.transitHrs > 0 ? `<tfoot><tr style="background:#fffde7;border-top:2px solid #f57f17;">
+              ${(row.transitHrs > 0 || row.shopTransitHrs > 0) ? `<tfoot>
+              ${row.transitHrs > 0 ? `<tr style="background:#fffde7;border-top:2px solid #f57f17;">
                 <td colspan="4" style="padding:5px 8px;color:#f57f17;font-style:italic;">🚗 Traslado entre servicios (${empCount} empleados)</td>
                 <td style="padding:5px 8px;text-align:center;color:#f57f17;font-weight:600">${fmtH(row.transitHrs * empCount)}</td>
                 <td style="padding:5px 8px;text-align:right;color:#f57f17">—</td>
                 <td style="padding:5px 8px;text-align:right;color:#f57f17;font-weight:600">${transitCost > 0 ? '$' + fmt(transitCost) : '—'}</td>
                 <td></td>
-              </tr></tfoot>` : ''}
+              </tr>` : ''}
+              ${row.shopTransitHrs > 0 ? `<tr style="background:#fce4ec;border-top:2px solid #e91e63;">
+                <td colspan="4" style="padding:5px 8px;color:#e91e63;font-style:italic;">🏠 Traslado Shop (${row.shopOut||''}→${row.shopBack||''}) (${empCount} empleados)</td>
+                <td style="padding:5px 8px;text-align:center;color:#e91e63;font-weight:600">${fmtH(row.shopTransitHrs * empCount)}</td>
+                <td style="padding:5px 8px;text-align:right;color:#e91e63">—</td>
+                <td style="padding:5px 8px;text-align:right;color:#e91e63;font-weight:600">${shopTransitCost > 0 ? '$' + fmt(shopTransitCost) : '—'}</td>
+                <td></td>
+              </tr>` : ''}
+              </tfoot>` : ''}
               </table></div>`;
         });
 
