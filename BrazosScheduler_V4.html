@@ -6391,6 +6391,18 @@ class Scheduler {
         const wasPaidLike = inv.status === 'pagada' || inv.status === 'parcial';
         const goingToUnpaid = newStatus === 'pendiente' || newStatus === 'enviada';
 
+        // Si se cancela desde este menú, pedir la razón igual que el botón de Acciones —
+        // antes cancelaba directo sin preguntar, dejando la factura sin nota del motivo.
+        if (newStatus === 'cancelada') {
+            const razon = prompt('¿Por qué se cancela la factura #' + inv.invoiceNumber + '? (la nota queda guardada en la factura)', '');
+            if (razon === null) {
+                // El usuario canceló el prompt — no cambiar el estatus, revertir el dropdown.
+                this.refreshGeneratedInvoices();
+                return;
+            }
+            inv.notes = (inv.notes ? inv.notes + ' ' : '') + '[Cancelada] ' + (razon || 'Sin motivo especificado');
+        }
+
         inv.status = newStatus;
         if (newStatus === 'enviada' && !inv.sentAt) inv.sentAt = new Date().toLocaleDateString('en-CA');
         if (newStatus === 'enviada') this._addSentHistory(inv, 'manual (cambio de estatus)');
@@ -13916,6 +13928,14 @@ Motivo de cancelación (opcional):`);
                 }
                 if(gd.shopOut && !groupRows[grp].shopOut) groupRows[grp].shopOut = gd.shopOut;
                 if(gd.shopBack && !groupRows[grp].shopBack) groupRows[grp].shopBack = gd.shopBack;
+                // Además, guardar el shop POR DÍA (para la vista semanal, donde cada día
+                // tiene su propia salida/regreso — antes solo se guardaba uno para toda la semana).
+                if(!groupRows[grp].shopByDate) groupRows[grp].shopByDate = {};
+                if(gd.shopOut || gd.shopBack){
+                    if(!groupRows[grp].shopByDate[dt]) groupRows[grp].shopByDate[dt] = {};
+                    if(gd.shopOut && !groupRows[grp].shopByDate[dt].shopOut) groupRows[grp].shopByDate[dt].shopOut = gd.shopOut;
+                    if(gd.shopBack && !groupRows[grp].shopByDate[dt].shopBack) groupRows[grp].shopByDate[dt].shopBack = gd.shopBack;
+                }
                 (gd.services||[]).slice().sort((a,b)=>{const ta=a.scheduledStart||'',tb=b.scheduledStart||'';if(ta&&tb)return ta.localeCompare(tb);if(ta)return -1;if(tb)return 1;return 0;}).forEach(svc=>{
                     let hrs=0;
                     if(svc.checkin&&svc.checkout){const[sh,sm]=svc.checkin.split(':').map(Number),[eh,em]=svc.checkout.split(':').map(Number);hrs=Math.max(0,((eh*60+em)-(sh*60+sm))/60);}
@@ -14069,10 +14089,24 @@ Motivo de cancelación (opcional):`);
                   <strong style="font-size:1rem;">👥 ${grp} <span style="font-weight:700;font-size:0.82rem;">(${activeMembers.length} empleados)</span></strong>
                   <strong style="font-size:0.82rem;">${row.doneCount} servicios completados</strong>
                 </div>
-                ${(row.shopOut || row.shopBack) ? `<div style="display:flex;justify-content:center;gap:16px;margin-bottom:8px;font-size:0.8rem;background:rgba(255,255,255,0.15);border-radius:6px;padding:4px 8px;">
-                  <span>🏠 Salida del Shop: <strong>${row.shopOut || '—'}</strong></span>
-                  <span>🏁 Regreso al Shop: <strong>${row.shopBack || '—'}</strong></span>
-                </div>` : ''}
+                ${(() => {
+                    const sbd = row.shopByDate || {};
+                    const days = Object.keys(sbd).sort();
+                    if (days.length === 0) return '';
+                    // Vista semana (varios días con shop) → mostrar cada día por separado.
+                    if (view === 'week' && days.length > 1) {
+                        const items = days.map(d => {
+                            const [y,mo,da] = d.split('-');
+                            return `<span style="white-space:nowrap;">📅 ${da}/${mo}: 🏠${sbd[d].shopOut||'—'} → 🏁${sbd[d].shopBack||'—'}</span>`;
+                        }).join(' &nbsp;|&nbsp; ');
+                        return `<div style="margin-bottom:8px;font-size:0.75rem;background:rgba(255,255,255,0.15);border-radius:6px;padding:4px 8px;line-height:1.6;">${items}</div>`;
+                    }
+                    // Vista día (o un solo día) → mostrar salida/regreso simple.
+                    return `<div style="display:flex;justify-content:center;gap:16px;margin-bottom:8px;font-size:0.8rem;background:rgba(255,255,255,0.15);border-radius:6px;padding:4px 8px;">
+                      <span>🏠 Salida del Shop: <strong>${row.shopOut || '—'}</strong></span>
+                      <span>🏁 Regreso al Shop: <strong>${row.shopBack || '—'}</strong></span>
+                    </div>`;
+                })()}
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center;margin-bottom:10px;">
                   <div><div style="font-size:0.7rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">⏱ Trabajo en Campo</div><div style="font-size:1rem;font-weight:700;">${fmtH(row.totalHrs)}</div></div>
                   <div><div style="font-size:0.7rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">🚗 Traslado</div><div style="font-size:1rem;font-weight:700;">${row.transitHrs > 0 ? fmtH(row.transitHrs) : '—'}</div></div>
