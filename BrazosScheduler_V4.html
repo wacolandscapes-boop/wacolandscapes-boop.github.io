@@ -14069,6 +14069,10 @@ Motivo de cancelación (opcional):`);
                   <strong style="font-size:1rem;">👥 ${grp} <span style="font-weight:700;font-size:0.82rem;">(${activeMembers.length} empleados)</span></strong>
                   <strong style="font-size:0.82rem;">${row.doneCount} servicios completados</strong>
                 </div>
+                ${(row.shopOut || row.shopBack) ? `<div style="display:flex;justify-content:center;gap:16px;margin-bottom:8px;font-size:0.8rem;background:rgba(255,255,255,0.15);border-radius:6px;padding:4px 8px;">
+                  <span>🏠 Salida del Shop: <strong>${row.shopOut || '—'}</strong></span>
+                  <span>🏁 Regreso al Shop: <strong>${row.shopBack || '—'}</strong></span>
+                </div>` : ''}
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center;margin-bottom:10px;">
                   <div><div style="font-size:0.7rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">⏱ Trabajo en Campo</div><div style="font-size:1rem;font-weight:700;">${fmtH(row.totalHrs)}</div></div>
                   <div><div style="font-size:0.7rem;font-weight:700;opacity:0.8;text-transform:uppercase;margin-bottom:2px">🚗 Traslado</div><div style="font-size:1rem;font-weight:700;">${row.transitHrs > 0 ? fmtH(row.transitHrs) : '—'}</div></div>
