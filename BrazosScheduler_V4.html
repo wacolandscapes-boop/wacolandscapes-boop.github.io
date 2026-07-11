@@ -2488,6 +2488,30 @@ class Scheduler {
     }
 
     // ── Helper: llenar celda con servicios ──────────────────────────
+    // Busca la salida/regreso del Shop de un grupo en una fecha, cruzando los
+    // horarios que reporta BrazosCalendar (brazos_horarios_FECHA). Primero intenta
+    // en memoria (_prodReports, si ya se abrió el reporte de Producción) y si no
+    // existe cae a localStorage directamente — así funciona aunque el reporte de
+    // Producción nunca se haya abierto en esta sesión.
+    _getShopTimesForDayGroup(dStr, nombreGrupo) {
+        try {
+            let dayData = (this._prodReports && this._prodReports[dStr]) || null;
+            if (!dayData) {
+                const key = 'brazos_horarios_' + dStr;
+                dayData = JSON.parse(localStorage.getItem(key) || 'null');
+            }
+            if (!dayData) return null;
+            let shopOut = null, shopBack = null;
+            Object.values(dayData).forEach(empData => {
+                if (!empData || empData.group !== nombreGrupo) return;
+                if (empData.shopOut && !shopOut) shopOut = empData.shopOut;
+                if (empData.shopBack && !shopBack) shopBack = empData.shopBack;
+            });
+            if (!shopOut && !shopBack) return null;
+            return { shopOut, shopBack };
+        } catch(e) { return null; }
+    }
+
     _fillCell(cell, dStr, nombreGrupo, fCli, fRecurrence='all') {
         let daily = this.servs.filter(s => {
             if(s.date !== dStr) return false;
@@ -2512,6 +2536,16 @@ class Scheduler {
             if (bTime) return 1;
             return 0;
         });
+
+        // ── Salida del Shop (se muestra ANTES del primer servicio del día) ──
+        const shopTimes = this._getShopTimesForDayGroup(dStr, nombreGrupo);
+        if (shopTimes && shopTimes.shopOut) {
+            const shopOutDiv = document.createElement('div');
+            shopOutDiv.style.cssText = 'font-size:0.68rem;font-weight:700;color:#e91e63;background:#fce4ec;border-radius:4px;padding:2px 6px;margin-bottom:3px;text-align:center;';
+            shopOutDiv.textContent = `🏠 Salida: ${this.fmt12(shopTimes.shopOut)}`;
+            cell.appendChild(shopOutDiv);
+        }
+
         daily.forEach(s => {
             const c = this.clis.find(cl => cl.id == s.cliId); if(!c) return;
             const div = document.createElement('div'); div.className = 'service-event';
@@ -2607,6 +2641,14 @@ class Scheduler {
             div.addEventListener('dragend', () => { div.style.opacity = '1'; div.style.cursor = 'default'; });
             cell.appendChild(div);
         });
+
+        // ── Regreso al Shop (se muestra DESPUÉS del último servicio del día) ──
+        if (shopTimes && shopTimes.shopBack) {
+            const shopBackDiv = document.createElement('div');
+            shopBackDiv.style.cssText = 'font-size:0.68rem;font-weight:700;color:#e91e63;background:#fce4ec;border-radius:4px;padding:2px 6px;margin-top:3px;margin-bottom:3px;text-align:center;';
+            shopBackDiv.textContent = `🏁 Regreso: ${this.fmt12(shopTimes.shopBack)}`;
+            cell.appendChild(shopBackDiv);
+        }
 
         // ── Notas de celda ──
         const noteKey = `${dStr}__${nombreGrupo}`;
@@ -4445,6 +4487,8 @@ class Scheduler {
         if (!this.pendingInvoices) this.pendingInvoices = [];
 
         // Helper: verificar si ya existe factura generada/enviada para un cliente y período específico
+        // (esta versión de coincidencia EXACTA la sigue usando tal cual la regla de
+        // Fin de Mes más abajo — no se toca a propósito).
         const hasGeneratedInvoice = (clientName, periodStart, periodEnd) => {
             return (this.generatedInvoices || []).some(g =>
                 g.clientName === clientName &&
@@ -4453,9 +4497,30 @@ class Scheduler {
             );
         };
 
+        // Verificación de "ya facturado" para la limpieza GENERAL de pendientes de abajo
+        // (la que corre para TODAS las columnas antes de que se re-evalúe cada regla).
+        // Usa TRASLAPE de fechas, no coincidencia exacta del día de inicio, y si la
+        // tarjeta trae IDs de propiedad, confirma que la factura real cubra al menos una
+        // de esas propiedades. Antes esta limpieza general reutilizaba la función de
+        // arriba (coincidencia exacta) — para clientes multipropiedad como Hospitaller,
+        // donde el rango real de cada semana depende de qué propiedades tuvieron
+        // servicio, el inicio casi nunca calzaba exacto con lo que la tarjeta esperaba,
+        // así que facturas YA ENVIADAS se quedaban pegadas en Pendientes para siempre.
+        const hasOverlappingGeneratedInvoice = (p) => {
+            return (this.generatedInvoices || []).some(g => {
+                if (g.clientName !== p.clientName) return false;
+                if (g.status === 'cancelada') return false;
+                if (!(g.startDate && g.endDate && g.startDate <= p.endDate && g.endDate >= p.startDate)) return false;
+                if (p.clientIds && p.clientIds.length > 0 && g.clientIds && g.clientIds.length > 0) {
+                    return g.clientIds.some(id => p.clientIds.map(String).includes(String(id)));
+                }
+                return true;
+            });
+        };
+
         // Limpiar pendientes que ya tienen factura generada
         this.pendingInvoices = this.pendingInvoices.filter(p => {
-            if (hasGeneratedInvoice(p.clientName, p.startDate, p.endDate)) return false;
+            if (hasOverlappingGeneratedInvoice(p)) return false;
             const daysDiff = (today - new Date(p.createdAt)) / (1000 * 60 * 60 * 24);
             return daysDiff < 60;
         });
@@ -4749,12 +4814,101 @@ class Scheduler {
                 return 'otros';
             };
 
-            // (A) Backlog de servicios nunca facturados
+            // (A1) Backlog SEMANAL (Airbnb) — agrupado por NOMBRE DE CLIENTE combinando
+            // TODAS las propiedades hermanas (Cottage/River/La Bicicleta, etc.), igual
+            // que la regla principal semanal (líneas ~4612+). Antes esto se procesaba
+            // propiedad por propiedad con una clave de periodo que NO incluía el ID de
+            // la propiedad (`${nombre}-airbnb-${lunes}`) — así que para clientes
+            // multipropiedad, en cuanto la primera propiedad creaba la tarjeta de una
+            // semana, las demás propiedades de esa MISMA semana se daban por "ya
+            // cubiertas" y sus servicios nunca aparecían en ninguna tarjeta. Esto fue lo
+            // que le pasó a Hospitaller (propiedades y fechas que faltaban en Pendientes).
+            const weeklyPropsByName = {};
+            this.clis.forEach(c => {
+                if (c.type === 'construccion') return;
+                if (c.excludeInvoicing) return;
+                if (c.billingPeriod !== 'weekly') return;
+                (weeklyPropsByName[c.name] = weeklyPropsByName[c.name] || []).push(c);
+            });
+            Object.keys(weeklyPropsByName).forEach(name => {
+                const props = weeklyPropsByName[name];
+                const oldServs = this.servs.filter(s =>
+                    props.some(p => String(p.id) === String(s.cliId)) && !s.cancelled &&
+                    s.date >= safetyBacklogStartStr && s.date <= safetyCutoffStr
+                );
+                if (oldServs.length === 0) return;
+
+                const isHandled = (svcDate, svcId) => {
+                    const inGenerated = (this.generatedInvoices || []).some(g =>
+                        g.clientName === name && g.status !== 'cancelada' &&
+                        g.startDate <= svcDate && g.endDate >= svcDate);
+                    if (inGenerated) return true;
+                    return this.pendingInvoices.some(p =>
+                        p.clientName === name &&
+                        ((p.serviceIds && p.serviceIds.includes(svcId)) ||
+                         (p.startDate <= svcDate && p.endDate >= svcDate))
+                    );
+                };
+
+                const unhandled = oldServs.filter(s => !isHandled(s.date, s.id));
+                if (unhandled.length === 0) return;
+
+                // Agrupar por SEMANA CALENDARIO (lunes-domingo), usando la MISMA clave
+                // que la regla principal semanal — así nunca se genera un rango "crudo"
+                // que no alinee con semana calendario, y nunca se duplica con la tarjeta
+                // que ya haya creado la regla principal para la semana más reciente.
+                const byWeek = {};
+                unhandled.forEach(s => {
+                    const d = new Date(s.date + 'T00:00:00');
+                    const dow = d.getDay();
+                    const monday = new Date(d);
+                    monday.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+                    const mondayStr = monday.toLocaleDateString('en-CA');
+                    if (!byWeek[mondayStr]) byWeek[mondayStr] = [];
+                    byWeek[mondayStr].push(s);
+                });
+                Object.keys(byWeek).forEach(mondayStr => {
+                    const weekServs = byWeek[mondayStr];
+                    const sunday = new Date(mondayStr + 'T00:00:00');
+                    sunday.setDate(sunday.getDate() + 6);
+                    const sundayStr = sunday.toLocaleDateString('en-CA');
+                    const weekKey = `${name}-airbnb-${mondayStr}`; // misma clave que la regla principal
+                    if (this.pendingInvoices.some(p => p.periodKey === weekKey)) return;
+                    const total = weekServs.reduce((sum, s) => {
+                        const p = props.find(pp => String(pp.id) === String(s.cliId));
+                        return sum + parseFloat(p?.price || 0);
+                    }, 0);
+                    // clientIds/propiedades que realmente contribuyeron servicios esa
+                    // semana — para que "isHandled" de otras reglas las reconozca a todas.
+                    const contributingIds = [...new Set(weekServs.map(s => String(s.cliId)))];
+                    this.pendingInvoices.push({
+                        id: Date.now() + Math.random(),
+                        periodKey: weekKey,
+                        column: 'airbnb',
+                        clientName: name, clientEmail: this.getClientEmail(props[0]),
+                        clientIds: contributingIds,
+                        serviceIds: weekServs.map(s => s.id),
+                        serviceDates: weekServs.map(s => s.date).sort(),
+                        type: props[0].type, serviceType: props[0].serviceType || '',
+                        billingPeriod: 'weekly',
+                        startDate: mondayStr, endDate: sundayStr,
+                        serviceCount: weekServs.length, total,
+                        urgency: 'overdue',
+                        reason: `⚠️ Semana ${mondayStr} a ${sundayStr} — ${weekServs.length} servicio(s) de hace más de una semana SIN factura generada`,
+                        createdAt: today.toISOString()
+                    });
+                });
+            });
+
+            // (A2) Backlog del resto de propiedades (no semanales) — se sigue procesando
+            // propiedad por propiedad, con clave que sí incluye el ID de la propiedad
+            // (`propCli.id`), así que aquí nunca hubo colisión entre propiedades hermanas.
             this.clis.forEach(propCli => {
                 // Construcción ya tiene su propio manejo completo arriba (se expande solo,
                 // sin cortes por fecha) — no hace falta que la red de seguridad la repita.
                 if (propCli.type === 'construccion') return;
                 if (propCli.excludeInvoicing) return; // "No facturar por Brazos"
+                if (propCli.billingPeriod === 'weekly') return; // ya cubierto arriba en (A1)
                 const oldServs = this.servs.filter(s =>
                     String(s.cliId) === String(propCli.id) && !s.cancelled &&
                     s.date >= safetyBacklogStartStr && s.date <= safetyCutoffStr
@@ -4776,49 +4930,6 @@ class Scheduler {
 
                 const unhandled = oldServs.filter(s => !isHandled(s.date, s.id));
                 if (unhandled.length === 0) return;
-
-                // Clientes semanales (Airbnb): agrupar por SEMANA CALENDARIO (lunes-domingo),
-                // usando la MISMA clave que la regla principal semanal — así nunca se genera
-                // un rango "crudo" (primera a última fecha) que no alinee con semana
-                // calendario, que fue justo lo que causó las facturas con periodos
-                // desfasados por un día para Hospitaller.
-                if (propCli.billingPeriod === 'weekly') {
-                    const byWeek = {};
-                    unhandled.forEach(s => {
-                        const d = new Date(s.date + 'T00:00:00');
-                        const dow = d.getDay();
-                        const monday = new Date(d);
-                        monday.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
-                        const mondayStr = monday.toLocaleDateString('en-CA');
-                        if (!byWeek[mondayStr]) byWeek[mondayStr] = [];
-                        byWeek[mondayStr].push(s);
-                    });
-                    Object.keys(byWeek).forEach(mondayStr => {
-                        const weekServs = byWeek[mondayStr];
-                        const sunday = new Date(mondayStr + 'T00:00:00');
-                        sunday.setDate(sunday.getDate() + 6);
-                        const sundayStr = sunday.toLocaleDateString('en-CA');
-                        const weekKey = `${propCli.name}-airbnb-${mondayStr}`; // misma clave que la regla principal
-                        if (this.pendingInvoices.some(p => p.periodKey === weekKey)) return;
-                        const total = weekServs.reduce((sum) => sum + parseFloat(propCli.price || 0), 0);
-                        this.pendingInvoices.push({
-                            id: Date.now() + Math.random(),
-                            periodKey: weekKey,
-                            column: 'airbnb',
-                            clientName: propCli.name, clientEmail: this.getClientEmail(propCli),
-                            clientIds: [propCli.id],
-                            serviceIds: weekServs.map(s => s.id),
-                            type: propCli.type, serviceType: propCli.serviceType || '',
-                            billingPeriod: propCli.billingPeriod,
-                            startDate: mondayStr, endDate: sundayStr,
-                            serviceCount: weekServs.length, total,
-                            urgency: 'overdue',
-                            reason: `⚠️ Semana ${mondayStr} a ${sundayStr} — ${weekServs.length} servicio(s) de hace más de una semana SIN factura generada`,
-                            createdAt: today.toISOString()
-                        });
-                    });
-                    return;
-                }
 
                 const key = `${propCli.name}-${propCli.id}-backlog-redseguridad`;
                 if (this.pendingInvoices.some(p => p.periodKey === key)) return;
@@ -5019,7 +5130,7 @@ class Scheduler {
                     </div>
                     ${pending.propLabel && pending.propLabel !== pending.clientName ? `<div style="font-size:0.7rem; color:#888; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📍 ${pending.propLabel}</div>` : ''}
                     <div title="${(pending.reason||'').replace(/"/g,'&quot;')}" style="cursor:help; color:${(isUrgent||isThisWeek)?'#c0392b':'#666'}; font-size: 0.74rem; margin-top:3px; display:flex; justify-content:space-between; gap:6px; overflow:hidden;">
-                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${pending.serviceCount === 1 ? `📅 ${startFormatted}` : `${startFormatted}–${endFormatted} · ${pending.serviceCount} serv.`}</span>
+                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${(pending.serviceCount === 1 && pending.column !== 'airbnb') ? `📅 ${startFormatted}` : `${startFormatted}–${endFormatted} · ${pending.serviceCount} serv.`}</span>
                         <span style="color: #27ae60; font-weight:bold; flex-shrink:0;">$${pending.total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
                     </div>
                     ${pending.isDuplicateGhost ? `
@@ -5250,9 +5361,15 @@ class Scheduler {
         if (this.currentPendingIndex !== undefined && this.currentPendingIndex !== null) {
             const pending = this.pendingInvoices[this.currentPendingIndex];
             if (pending) {
-                // Registrar como generada
-                this.registerGeneratedInvoice(pending);
-                
+                // NOTA: antes aquí también se llamaba a this.registerGeneratedInvoice(pending),
+                // lo cual creaba una SEGUNDA factura — con un número nuevo desperdiciado y
+                // estatus "pendiente" — cada vez que se facturaba algo desde una tarjeta de
+                // Pendientes. La factura REAL ya quedó registrada por quien llamó a esta
+                // función (printPDF/sendInvoiceByGmail vía _registerInvoiceFromPDF, o
+                // saveAsEnviada) justo antes de llegar aquí. El único trabajo que le
+                // corresponde a markPendingAsGenerated() es quitar la tarjeta de Pendientes,
+                // ya que se atendió — no crear ninguna factura por su cuenta.
+
                 // Eliminar de pendientes
                 this.pendingInvoices.splice(this.currentPendingIndex, 1);
                 this.updatePendingBadge();
@@ -5346,6 +5463,14 @@ class Scheduler {
                 desc = client.propId + ' - ' + desc;
             }
             return {
+                // ID y cliId del servicio original — con esto queda un registro EXACTO de
+                // qué servicio ya se facturó (antes solo se guardaba la fecha, lo cual
+                // fallaba si un cliente tenía 2 servicios el mismo día, o si la fecha de un
+                // servicio se corregía después de facturar). Facturas generadas ANTES de
+                // este cambio no tendrán "id" aquí — el chequeo de "ya facturado" hace
+                // fallback a fecha+cliente para esos casos viejos.
+                id: s.id,
+                cliId: s.cliId,
                 fecha: s.date || '',
                 descripcion: desc,
                 // Los servicios del calendario NUNCA traen su propio precio guardado (eso
@@ -5357,6 +5482,46 @@ class Scheduler {
                     : (parseFloat(client?.price) || 0)
             };
         });
+    }
+
+    // ── Fuente única de verdad: "¿este servicio ya fue facturado?" ──────────────
+    // Antes cada regla de detectPendingInvoices() tenía su propio chequeo ad-hoc
+    // (algunas comparaban fecha exacta de inicio, otras solo si la fecha caía en un
+    // rango, otras no revisaban la propiedad) — y esa inconsistencia es lo que dejaba
+    // colar duplicados. Esta función centraliza el chequeo para que todas las reglas
+    // usen exactamente el mismo criterio.
+    //   svc = { id, date, cliId }
+    _isServiceInvoiced(svc) {
+        const inGenerated = (this.generatedInvoices || []).some(g => {
+            if (g.status === 'cancelada') return false;
+            // 1) Match preciso por ID de servicio — facturas generadas después de este
+            //    cambio guardan el id exacto en cada línea (items[].id).
+            if (g.items && g.items.some(it => it && it.id !== undefined && it.id !== null && String(it.id) === String(svc.id))) return true;
+            // 2) Fallback para facturas viejas cuyos items no tienen "id" — coincide por
+            //    fecha exacta + que la propiedad/cliente esté entre los clientIds de la
+            //    factura (o la factura no tenga clientIds, en cuyo caso se asume que sí
+            //    aplica, igual que hacía el chequeo original).
+            if (g.items && g.items.length > 0 && g.items.some(it => it && (it.id === undefined || it.id === null) && it.fecha === svc.date)) {
+                if (!g.clientIds || g.clientIds.length === 0) return true;
+                return g.clientIds.some(id => String(id) === String(svc.cliId));
+            }
+            // 3) Último fallback — facturas sin "items" guardados en absoluto (de antes de
+            //    que existiera este registro): usar el rango de fechas de la factura.
+            if ((!g.items || g.items.length === 0) && g.startDate && g.endDate && g.startDate <= svc.date && g.endDate >= svc.date) {
+                if (!g.clientIds || g.clientIds.length === 0) return true;
+                return g.clientIds.some(id => String(id) === String(svc.cliId));
+            }
+            return false;
+        });
+        if (inGenerated) return true;
+        // También cuenta como "ya cubierto" si otra tarjeta pendiente creada en esta
+        // misma pasada de detectPendingInvoices() ya incluye este servicio — para que
+        // dos reglas distintas no generen dos tarjetas del mismo servicio.
+        return (this.pendingInvoices || []).some(p =>
+            (p.serviceIds && p.serviceIds.includes(svc.id)) ||
+            (!p.serviceIds && p.startDate <= svc.date && p.endDate >= svc.date &&
+             (!p.clientIds || p.clientIds.some(id => String(id) === String(svc.cliId))))
+        );
     }
 
     viewInvoiceItems(id) {
@@ -13996,7 +14161,11 @@ Motivo de cancelación (opcional):`);
         });
 
         // Save for CSV export
-        // ── CALCULAR TIEMPOS DE TRASLADO ENTRE SERVICIOS ──
+        // ── CALCULAR TIEMPOS DE TRASLADO ENTRE SERVICIOS Y TRASLADO SHOP ──
+        // Se calcula DÍA POR DÍA y luego se suma. Antes, en vista semanal, se usaba
+        // una sola salida/regreso de Shop (la del primer día con datos) comparada
+        // contra las horas de TODA la semana — daba números incorrectos apenas
+        // había más de un día con registro de Shop en el rango.
         Object.keys(groupRows).forEach(grp => {
             const row = groupRows[grp];
             // Agrupar servicios por fecha
@@ -14005,28 +14174,40 @@ Motivo de cancelación (opcional):`);
                 if (!byDate[s.date]) byDate[s.date] = [];
                 byDate[s.date].push(s);
             });
-            let totalTransitHrs = 0;
+            const shopByDate = row.shopByDate || {};
+            let totalTransitHrs = 0, totalShopTransitHrs = 0, totalBreakMin = 0;
             Object.keys(byDate).forEach(dt => {
-                const dayServs = byDate[dt]
+                const dayServsAll = byDate[dt]
                     .filter(s => s.checkin && s.checkout)
                     .sort((a, b) => a.checkin.localeCompare(b.checkin));
-                for (let i = 0; i < dayServs.length - 1; i++) {
-                    const [eh, em] = dayServs[i].checkout.split(':').map(Number);
-                    const [sh, sm] = dayServs[i+1].checkin.split(':').map(Number);
+                let dayTransitHrs = 0;
+                for (let i = 0; i < dayServsAll.length - 1; i++) {
+                    const [eh, em] = dayServsAll[i].checkout.split(':').map(Number);
+                    const [sh, sm] = dayServsAll[i+1].checkin.split(':').map(Number);
                     const transitMin = (sh * 60 + sm) - (eh * 60 + em);
-                    if (transitMin > 0) totalTransitHrs += transitMin / 60;
+                    if (transitMin > 0) dayTransitHrs += transitMin / 60;
+                }
+                totalTransitHrs += dayTransitHrs;
+
+                const dayShop = shopByDate[dt];
+                const dayFieldHrs = byDate[dt].filter(s => s.status === 'done').reduce((sum, sv) => sum + (sv.hrs || 0), 0);
+                if (dayShop && dayShop.shopOut && dayShop.shopBack) {
+                    const [soh,som]=dayShop.shopOut.split(':').map(Number), [sbh,sbm]=dayShop.shopBack.split(':').map(Number);
+                    let totalShopMin = (sbh*60+sbm)-(soh*60+som);
+                    // Descontar 30 min de break (comida) si esa jornada Shop→Shop fue de
+                    // 7+ horas — mismo criterio que "Resumen de Horas Trabajadas" y
+                    // AppNomina. Antes este descuento nunca se aplicaba aquí, así que el
+                    // break se pagaba de más como si fuera tiempo de traslado.
+                    if (totalShopMin >= 420) { totalShopMin -= 30; totalBreakMin += 30; }
+                    totalShopTransitHrs += Math.max(0, (totalShopMin - dayFieldHrs*60 - dayTransitHrs*60) / 60);
+                } else if (dayShop && dayShop.shopOut && dayServsAll.length) {
+                    const [soh,som]=dayShop.shopOut.split(':').map(Number),[fh,fm]=dayServsAll[0].checkin.split(':').map(Number);
+                    totalShopTransitHrs += Math.max(0,((fh*60+fm)-(soh*60+som))/60);
                 }
             });
             row.transitHrs = totalTransitHrs;
-            let shopTransitHrs = 0;
-            if (row.shopOut && row.shopBack) {
-                const [soh,som]=row.shopOut.split(':').map(Number), [sbh,sbm]=row.shopBack.split(':').map(Number);
-                shopTransitHrs = Math.max(0,((sbh*60+sbm)-(soh*60+som)-row.totalHrs*60-totalTransitHrs*60)/60);
-            } else if (row.shopOut) {
-                const first=row.services.filter(s=>s.checkin).sort((a,b)=>a.checkin.localeCompare(b.checkin))[0];
-                if(first){const [soh,som]=row.shopOut.split(':').map(Number),[fh,fm]=first.checkin.split(':').map(Number);shopTransitHrs=Math.max(0,((fh*60+fm)-(soh*60+som))/60);}
-            }
-            row.shopTransitHrs = shopTransitHrs;
+            row.shopTransitHrs = totalShopTransitHrs;
+            row.breakMinDeducted = totalBreakMin;
         });
 
         if(!Object.keys(groupRows).length){content.innerHTML='<p style="color:#888;text-align:center;padding:40px">Sin datos para este período.</p>';return;}
@@ -14085,13 +14266,14 @@ Motivo de cancelación (opcional):`);
                     <span style="font-size:1rem;font-weight:700;color:#f57f17" id="prodTransitCost_${grpId}">—</span>
                   </div>` : ''}
                   ${row.shopTransitHrs > 0 ? `
-                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:6px 10px;background:#fce4ec;border-radius:6px;border-left:3px solid #e91e63;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;padding:6px 10px;background:#fce4ec;border-radius:6px;border-left:3px solid #e91e63;">
                     <div style="display:flex;align-items:center;gap:8px;">
                       <span style="font-size:0.85rem;color:#e91e63;">🏠 Traslado Shop (${row.shopOut||''}→${row.shopBack||''})</span>
                       <span style="font-size:0.82rem;color:#e91e63;font-weight:600">${fmtH(row.shopTransitHrs)}</span>
                     </div>
                     <span style="font-size:1rem;font-weight:700;color:#e91e63" id="prodShopTransitCost_${grpId}">—</span>
-                  </div>` : ''}
+                  </div>
+                  ${row.breakMinDeducted > 0 ? `<div style="font-size:0.72rem;color:#888;margin:0 0 8px 12px;">🍽️ Ya se descontaron ${row.breakMinDeducted} min de break (no pagado)</div>` : ''}` : ''}
                   <div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:2px solid #0e7490;margin-top:4px;">
                     <span style="font-size:0.9rem;font-weight:700;color:#0e7490;">💰 Total Costo MO</span>
                     <span style="font-size:1.2rem;font-weight:700;color:#0e7490;" id="prodMOTotal_${grpId}" data-total-cost="0">$${fmt(row.totalCost)}</span>
@@ -14814,6 +14996,14 @@ Motivo de cancelación (opcional):`);
                 if (data.companyConfig)    localStorage.setItem('companyConfig', data.companyConfig);
                 if (data.companyLogo)      localStorage.setItem('companyLogo', data.companyLogo);
                 if (data.customColors)     localStorage.setItem('customColors', data.customColors);
+                // Re-evaluar Pendientes ya con los datos reales de Drive — si no se hace
+                // esto aquí, las tarjetas se calculan con lo que había ANTES de conectar a
+                // Drive, y una factura enviada desde otro dispositivo (que este todavía no
+                // conocía) se sigue mostrando como pendiente cada vez que se recarga la
+                // página, aunque ya esté enviada.
+                this.detectPendingInvoices();
+                localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices));
+                if (document.getElementById('pendingInvoicesModal')?.style.display === 'block') this.renderPendingInvoices();
                 this.refreshSels();
                 this.render();
                 return;
@@ -14909,6 +15099,13 @@ Motivo de cancelación (opcional):`);
                 if (data.customColors)  localStorage.setItem('customColors', data.customColors);
             }
 
+            // Re-evaluar Pendientes ya con generatedInvoices fusionado (el real, completo)
+            // — si no se hace esto aquí, tarjetas pendientes calculadas ANTES de conectar
+            // a Drive (con datos de este dispositivo nada más) se guardan tal cual y
+            // siguen apareciendo como pendientes en cada recarga, aunque la factura ya
+            // se haya enviado desde otro dispositivo.
+            this.detectPendingInvoices();
+
             // Guardar todo lo fusionado en localStorage
             localStorage.setItem('v35_emps', JSON.stringify(this.emps));
             localStorage.setItem('v35_clis', JSON.stringify(this.clis));
@@ -14923,6 +15120,7 @@ Motivo de cancelación (opcional):`);
             localStorage.setItem('v35_collectionNotes', JSON.stringify(this.collectionNotes));
             localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales));
 
+            if (document.getElementById('pendingInvoicesModal')?.style.display === 'block') this.renderPendingInvoices();
             this.refreshSels();
             this.render();
 
