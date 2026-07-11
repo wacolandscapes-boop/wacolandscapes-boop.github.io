@@ -4525,6 +4525,20 @@ class Scheduler {
             return daysDiff < 60;
         });
 
+        // Quitar cascarones fantasma HUÉRFANOS: tarjetas "ya generada, nunca enviada"
+        // (isGeneratedUnsent) o "duplicado fantasma" (isDuplicateGhost) cuya factura de
+        // origen YA NO está en estado "pendiente" — porque se canceló, se envió, se pagó
+        // o se eliminó. Sin esta línea, al cancelar o enviar esa factura la tarjeta se
+        // quedaba pegada para siempre apuntando a algo que ya no existe como pendiente,
+        // y como es un "borrado" la sincronización la revivía una y otra vez. Al purgarla
+        // en CADA detección (que corre al cargar y tras cada sync, en todos los
+        // dispositivos), los cascarones se limpian solos y suben limpios — no regresan.
+        this.pendingInvoices = this.pendingInvoices.filter(p => {
+            if (!p.isGeneratedUnsent && !p.isDuplicateGhost) return true; // no es cascarón → se queda
+            const src = (this.generatedInvoices || []).find(g => String(g.id) === String(p.genInvoiceId));
+            return !!(src && src.status === 'pendiente'); // solo se queda si su factura sigue REALMENTE pendiente
+        });
+
         // Migración: pendientes viejas de ANTES de que existiera "column" (Frecuencia de
         // Facturación) se quedaban huérfanas y caían en "Otros" para siempre. Aquí se les
         // asigna la columna correcta usando el campo Frecuencia de Facturación actual del
