@@ -4561,6 +4561,35 @@ class Scheduler {
             return !!(src && src.status === 'pendiente'); // solo se queda si su factura sigue REALMENTE pendiente
         });
 
+        // Quitar tarjetas POR-SERVICIO cuyo servicio YA NO EXISTE en esa fecha ──────────
+        // Cuando se MUEVE (reagenda) un servicio en el calendario, el servicio recibe una
+        // fecha nueva, pero la tarjeta vieja se quedaba pegada en la fecha ANTERIOR. Cada
+        // reagendada dejaba otro fantasma: un servicio movido 06/25 → 06/30 → 07/09 → 07/16
+        // terminaba mostrando CUATRO tarjetas, cuando solo la última (07/16) es real. El
+        // usuario creía que el calendario le estaba BORRANDO servicios pasados — no era eso:
+        // el servicio estaba vivo en su fecha nueva, y las tarjetas viejas eran las que
+        // mentían.
+        // Esto también limpia las tarjetas de FORMATO VIEJO de llave (`-perservice-`), que
+        // el código actual ya no reconoce (hoy genera `-mensuales-`): al no coincidir la
+        // llave, nunca se actualizaban ni se borraban, y se creaba una segunda tarjeta al
+        // lado — la misma fecha aparecía DUPLICADA con dos llaves distintas (por eso el
+        // dedupe por periodKey de arriba no alcanzaba a cazar este caso).
+        // Regla: si la tarjeta es de un solo día y su llave es del tipo por-servicio,
+        // debe existir HOY un servicio de ese cliente en esa fecha exacta. Si no existe,
+        // el servicio se movió o se eliminó → la tarjeta es basura y se va.
+        this.pendingInvoices = this.pendingInvoices.filter(p => {
+            const esPorServicio = typeof p.periodKey === 'string' &&
+                                  (p.periodKey.includes('-mensuales-') || p.periodKey.includes('-perservice-'));
+            if (!esPorServicio) return true;                       // otras reglas (semanal, fin de mes, construcción) no se tocan
+            if (!p.startDate || p.startDate !== p.endDate) return true; // solo tarjetas de UN día
+            const idsCliente = (p.clientIds || []).map(String);
+            if (idsCliente.length === 0) return true;             // sin cliente identificable → no se puede validar, se conserva
+            const hayServicioEseDia = (this.servs || []).some(s =>
+                s.date === p.startDate && idsCliente.includes(String(s.cliId))
+            );
+            return hayServicioEseDia;                             // sin servicio en esa fecha → tarjeta huérfana → fuera
+        });
+
         // Migración: pendientes viejas de ANTES de que existiera "column" (Frecuencia de
         // Facturación) se quedaban huérfanas y caían en "Otros" para siempre. Aquí se les
         // asigna la columna correcta usando el campo Frecuencia de Facturación actual del
@@ -7072,15 +7101,16 @@ Motivo de cancelación (opcional):`);
             <p>Thank you for your business! · ${companyConfig.name || 'Brazos Cleaning Services'}</p>
             <p>This receipt confirms payment in full for the above services.</p>
         </div>
-
-        <scr' + 'ipt>window.onload = function() { window.print(); }</scr' + 'ipt>
-        
-<!-- VERSION STAMP -->
-<div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
-    v 06/20/2026 10:51 AM CT
-</div>
 </body></html>`);
         win.document.close();
+        // La impresión se dispara desde AQUÍ, no con una etiqueta <script> dentro del texto
+        // del recibo. Antes iba escrita como <scr' + 'ipt> dentro de las comillas invertidas:
+        // ese truco de partir la palabra solo sirve en texto normal, no aquí — el navegador
+        // no la reconocía como código y la IMPRIMÍA COMO TEXTO al pie del recibo del cliente
+        // ("window.onload = function() { window.print(); }"), y además la impresión
+        // automática nunca se disparaba. También se quitó de este recibo la etiqueta verde
+        // de versión (v 06/20/2026...), que se había colado dentro del documento del cliente.
+        setTimeout(() => { try { win.focus(); win.print(); } catch (e) { /* el usuario puede imprimir manualmente */ } }, 500);
     }
 
     async emailReceipt(id) {
