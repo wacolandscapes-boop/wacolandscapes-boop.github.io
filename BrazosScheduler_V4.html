@@ -4641,11 +4641,25 @@ class Scheduler {
             // Clientes/propiedades marcados "No facturar por Brazos" (ej. Hospitaller
             // atendido por Victor) se excluyen aquí — siguen programándose normal en el
             // calendario, pero nunca generan pendiente/urgente/factura desde el Scheduler.
-            const clients = clientsAll.filter(c => !c.excludeInvoicing);
-            if (clients.length === 0) return;
-            const cli = clients[0];
-            const cliType = cli.type || 'mensual';
-            const billingPeriod = cli.billingPeriod || 'monthly';
+            const clientsActivos = clientsAll.filter(c => !c.excludeInvoicing);
+            if (clientsActivos.length === 0) return;
+
+            // ── Separar CONSTRUCCIÓN del resto ──────────────────────────────────────
+            // Antes el tipo del grupo se tomaba del PRIMER registro (`clients[0].type`).
+            // JGM Properties tiene tres registros con el mismo nombre: uno "semanal" y dos
+            // de "construcción" — y como el primero era el semanal, la app concluía que
+            // TODO el grupo era semanal y la regla de construcción NUNCA corría para esas
+            // dos propiedades. Su tarjeta quedaba como un fósil de una versión vieja: nadie
+            // la actualizaba, así que nunca ampliaba el rango y ESCONDÍA servicios reales
+            // sin facturar (JGM mostraba solo el 07/01 aunque también hubo trabajo el
+            // 07/02). El caso inverso también existía: si el primer registro era de
+            // construcción (Sorrells), TODAS las propiedades del grupo —incluso las que no
+            // son de construcción— se procesaban como si lo fueran.
+            // Ahora las propiedades de construcción se procesan SIEMPRE con su propia regla
+            // (que sí sabe expandir el periodo con cada servicio nuevo), y las demás siguen
+            // su camino normal, sin importar en qué orden estén registradas.
+            const construccionProps = clientsActivos.filter(c => c.type === 'construccion');
+            const clients = clientsActivos.filter(c => c.type !== 'construccion');
 
             // ── CONSTRUCCIÓN: caso especial, una tarjeta POR PROPIEDAD (no por cliente).
             // El periodo NUNCA se congela a "solo lunes/martes" ni "solo después del día
@@ -4653,7 +4667,7 @@ class Scheduler {
             // fecha nueva sin facturar al mismo periodo abierto, hasta que se genere la
             // factura. El precio es fijo por periodo (no se multiplica por visitas) y
             // siempre queda editable, por eso se abre en la pestaña Manual.
-            if (cliType === 'construccion') {
+            if (construccionProps.length > 0) {
                 const alreadyInvoiced = (svcDate, propId) => (this.generatedInvoices || []).some(g => {
                     if (g.status === 'cancelada') return false;
                     if (g.clientName !== clientName) return false;
@@ -4664,7 +4678,7 @@ class Scheduler {
                     return true; // factura vieja sin clientIds — no podemos distinguir la propiedad, se asume que sí aplica
                 });
 
-                clients.forEach(propCli => {
+                construccionProps.forEach(propCli => {
                     const propBilling = propCli.billingPeriod || 'weekly';
                     const isMonthly = (propBilling === 'monthly' || propBilling === 'fixed_monthly');
                     const periodLabel = isMonthly ? 'Mes' : 'Semana';
@@ -4702,7 +4716,7 @@ class Scheduler {
                         propLabel,
                         serviceIds: uninvoiced.map(s => s.id),
                         serviceDates: dates,
-                        type: cliType,
+                        type: 'construccion',
                         serviceType: propCli.serviceType || 'construccion',
                         billingPeriod: propBilling,
                         startDate: dates[0], endDate: dates[dates.length - 1],
@@ -4712,8 +4726,15 @@ class Scheduler {
                         createdAt: today.toISOString()
                     });
                 });
-                return;
             }
+
+            // Si el grupo era SOLO de construcción, aquí termina. Si además tiene
+            // propiedades de otro tipo (JGM: dos de construcción + una semanal), se sigue
+            // adelante con esas — antes un `return` cortaba aquí y las dejaba sin procesar.
+            if (clients.length === 0) return;
+            const cli = clients[0];
+            const cliType = cli.type || 'mensual';
+            const billingPeriod = cli.billingPeriod || 'monthly';
 
             // A partir de aquí, la columna se decide por FRECUENCIA DE FACTURACIÓN
             // (cli.billingPeriod) — no por el "tipo" de cliente. Así lo pidió Ranu:
