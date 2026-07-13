@@ -4486,6 +4486,22 @@ class Scheduler {
 
         if (!this.pendingInvoices) this.pendingInvoices = [];
 
+        // ── Traducir llaves de FORMATO VIEJO al formato actual ──────────────────
+        // Una versión anterior nombraba la llave de las tarjetas por-servicio con el valor
+        // de billingPeriod (`Cliente-perservice-FECHA-idServicio`); el código actual la
+        // nombra con la columna (`Cliente-mensuales-FECHA-idServicio`). Son la MISMA regla
+        // y la misma tarjeta, pero al no coincidir el texto de la llave, la detección no
+        // reconocía la tarjeta vieja: ni la actualizaba ni la borraba, y creaba otra al
+        // lado — el mismo servicio salía DUPLICADO (ej. Emily Pruitt, 07/10, dos tarjetas
+        // del mismo servicio). Traducirlas aquí las vuelve la misma llave, y el dedupe de
+        // abajo las colapsa en una sola. (La lista de descartadas no usa el formato viejo,
+        // así que esto no revive nada que el usuario ya haya descartado.)
+        this.pendingInvoices.forEach(p => {
+            if (typeof p.periodKey === 'string' && p.periodKey.includes('-perservice-')) {
+                p.periodKey = p.periodKey.replace('-perservice-', '-mensuales-');
+            }
+        });
+
         // ── DEDUPE por periodKey ────────────────────────────────────────────────
         // Cada tarjeta lleva un `id` aleatorio distinto cada vez que se crea, y la fusión
         // con Drive une los arreglos comparando ese `id`. Como la MISMA tarjeta creada en
@@ -4498,15 +4514,21 @@ class Scheduler {
         // "HOY" el día 13).
         // La identidad real de una tarjeta es su periodKey, no su `id`. Aquí colapsamos las
         // repetidas a una sola ANTES de que corran las reglas, para que la que quede reciba
-        // la actualización de urgencia correcta. Corre en cada detección (al cargar y tras
-        // cada sync), así que los duplicados que lleguen de Drive se limpian solos.
-        const _keysVistas = new Set();
-        this.pendingInvoices = this.pendingInvoices.filter(p => {
-            if (!p.periodKey) return true;               // sin llave → no se puede comparar, se conserva
-            if (_keysVistas.has(p.periodKey)) return false; // repetida → fuera
-            _keysVistas.add(p.periodKey);
-            return true;
+        // la actualización de urgencia correcta. Cuando hay repetidas se conserva la MÁS
+        // COMPLETA (la que trae serviceIds): las tarjetas de formato viejo a veces no los
+        // traían, y quedarse con esa dejaría a la app sin saber qué servicios facturar.
+        const _porLlave = new Map();
+        this.pendingInvoices.forEach(p => {
+            if (!p.periodKey) return;
+            const previa = _porLlave.get(p.periodKey);
+            if (!previa) { _porLlave.set(p.periodKey, p); return; }
+            const completaNueva  = (p.serviceIds || []).length > 0;
+            const completaPrevia = (previa.serviceIds || []).length > 0;
+            if (completaNueva && !completaPrevia) _porLlave.set(p.periodKey, p); // la nueva es mejor
         });
+        this.pendingInvoices = this.pendingInvoices.filter(p =>
+            !p.periodKey || _porLlave.get(p.periodKey) === p
+        );
 
         // Helper: verificar si ya existe factura generada/enviada para un cliente y período específico
         // (esta versión de coincidencia EXACTA la sigue usando tal cual la regla de
