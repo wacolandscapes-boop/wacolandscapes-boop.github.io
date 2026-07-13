@@ -4486,6 +4486,28 @@ class Scheduler {
 
         if (!this.pendingInvoices) this.pendingInvoices = [];
 
+        // ── DEDUPE por periodKey ────────────────────────────────────────────────
+        // Cada tarjeta lleva un `id` aleatorio distinto cada vez que se crea, y la fusión
+        // con Drive une los arreglos comparando ese `id`. Como la MISMA tarjeta creada en
+        // dos dispositivos (o en dos sesiones antes de sincronizar) nace con dos `id`
+        // distintos, la fusión las veía como dos tarjetas diferentes y CONSERVABA LAS DOS:
+        // el usuario veía la misma factura duplicada (mismo cliente, misma fecha, mismo
+        // monto). Peor aún, al recalcular, la detección buscaba la tarjeta por su periodKey,
+        // encontraba SOLO LA PRIMERA y la actualizaba — la segunda se quedaba congelada con
+        // la urgencia vieja para siempre (por eso un servicio del día 10 seguía marcado
+        // "HOY" el día 13).
+        // La identidad real de una tarjeta es su periodKey, no su `id`. Aquí colapsamos las
+        // repetidas a una sola ANTES de que corran las reglas, para que la que quede reciba
+        // la actualización de urgencia correcta. Corre en cada detección (al cargar y tras
+        // cada sync), así que los duplicados que lleguen de Drive se limpian solos.
+        const _keysVistas = new Set();
+        this.pendingInvoices = this.pendingInvoices.filter(p => {
+            if (!p.periodKey) return true;               // sin llave → no se puede comparar, se conserva
+            if (_keysVistas.has(p.periodKey)) return false; // repetida → fuera
+            _keysVistas.add(p.periodKey);
+            return true;
+        });
+
         // Helper: verificar si ya existe factura generada/enviada para un cliente y período específico
         // (esta versión de coincidencia EXACTA la sigue usando tal cual la regla de
         // Fin de Mes más abajo — no se toca a propósito).
