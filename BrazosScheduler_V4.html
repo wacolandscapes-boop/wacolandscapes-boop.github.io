@@ -5019,11 +5019,33 @@ class Scheduler {
                 if (unhandled.length === 0) return;
 
                 const key = `${propCli.name}-${propCli.id}-backlog-redseguridad`;
-                if (this.pendingInvoices.some(p => p.periodKey === key)) return;
 
                 const dates = unhandled.map(s => s.date).sort();
                 const propLabel = (propCli.propId && propCli.propId !== propCli.name) ? propCli.propId : propCli.name;
                 const total = unhandled.reduce((sum) => sum + parseFloat(propCli.price || 0), 0);
+
+                // Si la tarjeta YA EXISTE, se ACTUALIZA con los servicios que hay hoy — antes
+                // aquí había un `if (existe) return;` que la saltaba por completo, así que la
+                // tarjeta se quedaba CONGELADA tal como nació: se creaba con el servicio del
+                // 07/01 y al capturar después el del 07/02 nunca se enteraba — seguía diciendo
+                // "1 servicio, 07/01 → 07/01" y ESCONDÍA trabajo real sin facturar. En
+                // construcción el rango tiene que crecer solo con cada servicio nuevo (igual
+                // que ya lo hace la regla principal de construcción), porque el precio se
+                // ajusta después, fecha por fecha, en la factura Manual.
+                const existente = this.pendingInvoices.find(p => p.periodKey === key);
+                if (existente) {
+                    existente.serviceIds = unhandled.map(s => s.id);
+                    existente.serviceDates = dates;
+                    existente.startDate = dates[0];
+                    existente.endDate = dates[dates.length - 1];
+                    existente.serviceCount = unhandled.length;
+                    existente.total = total;
+                    existente.propLabel = propLabel;
+                    existente.column = columnFor(propCli.billingPeriod, false);
+                    existente.urgency = 'overdue';
+                    existente.reason = `⚠️ ${propLabel} — ${unhandled.length} servicio(s) de hace más de una semana SIN factura generada`;
+                    return;
+                }
 
                 this.pendingInvoices.push({
                     id: Date.now() + Math.random(),
