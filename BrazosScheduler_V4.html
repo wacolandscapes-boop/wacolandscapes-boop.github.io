@@ -6560,6 +6560,7 @@ class Scheduler {
     openCobroDetalle(id) {
         const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(id));
         if (!inv) return;
+        this._editingPaymentIndex = null;   // se entra siempre en modo "agregar", no "editar"
 
         // ── MIGRACIÓN de pagos en formato viejo ────────────────────────────────────
         // Las versiones anteriores guardaban el pago SOLO como resumen (paidAmount,
@@ -6664,14 +6665,47 @@ class Scheduler {
             <div style="font-size:0.82rem;font-weight:700;color:#444;margin-bottom:6px;">Historial de pagos:</div>
             <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
                 ${payments.map((p,i) => `
-                <tr style="border-bottom:1px solid #f0f0f0;">
+                <tr style="border-bottom:1px solid #f0f0f0;${this._editingPaymentIndex === i ? 'background:#fff7e6;' : ''}">
                     <td style="padding:4px 6px;color:#666;">${p.date}</td>
                     <td style="padding:4px 6px;font-weight:700;color:#27ae60;">$${parseFloat(p.amount).toFixed(2)}</td>
                     <td style="padding:4px 6px;">${methodIcons[p.method]||''} ${p.method||''}</td>
                     <td style="padding:4px 6px;color:#888;">${p.ref||''}</td>
-                    <td style="padding:4px 6px;"><button onclick="app.removePayment('${inv.id}',${i})" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:0.8rem;">✕</button></td>
+                    <td style="padding:4px 6px;white-space:nowrap;">
+                        <button onclick="app.editPayment('${inv.id}',${i})" title="Editar este pago" style="background:none;border:none;color:#e67e22;cursor:pointer;font-size:0.8rem;">✏️</button>
+                        <button onclick="app.removePayment('${inv.id}',${i})" title="Borrar este pago" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:0.8rem;">✕</button>
+                    </td>
                 </tr>`).join('')}
-            </table>`;
+            </table>
+            ${this._editingPaymentIndex !== null && this._editingPaymentIndex !== undefined
+                ? `<div style="margin-top:6px;padding:6px 8px;background:#fff7e6;border:1px solid #fde68a;border-radius:6px;font-size:0.76rem;color:#b45309;font-weight:700;">
+                     ✏️ Editando el pago del ${payments[this._editingPaymentIndex]?.date || ''} — al Guardar se ACTUALIZA ese pago (no se agrega otro).
+                     <button onclick="app.cancelEditPayment()" style="margin-left:8px;background:none;border:1px solid #b45309;color:#b45309;border-radius:4px;cursor:pointer;font-size:0.72rem;padding:1px 6px;">Cancelar edición</button>
+                   </div>`
+                : `<div style="margin-top:6px;font-size:0.72rem;color:#888;">Los campos de abajo AGREGAN un pago nuevo. Para cambiar uno existente, usa el ✏️.</div>`}`;
+    }
+
+    // ── EDITAR un pago existente ────────────────────────────────────────────────
+    // Antes NO se podía editar un pago: el formulario de abajo SIEMPRE agregaba uno
+    // nuevo. Si se quería corregir la fecha o el método de un pago ya registrado, lo
+    // natural era llenar los campos y guardar... y la app AGREGABA UN SEGUNDO PAGO,
+    // duplicando el monto. Le pasó a la #7608 (Stacey Irvine): quedó con $303.10
+    // pagados en una factura de $151.55 — exactamente el doble.
+    editPayment(invId, index) {
+        const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(invId));
+        if (!inv || !inv.payments || !inv.payments[index]) return;
+        const p = inv.payments[index];
+        this._editingPaymentIndex = index;
+        document.getElementById('cobroDetallePaidAt').value = String(p.date || '').split('T')[0];
+        document.getElementById('cobroDetallePaidAmount').value = parseFloat(p.amount || 0).toFixed(2);
+        document.getElementById('cobroDetallePayMethod').value = p.method || '';
+        document.getElementById('cobroDetallePayRef').value = p.ref || '';
+        this.renderPaymentHistory(inv);
+    }
+
+    cancelEditPayment() {
+        const id = document.getElementById('cobroDetalleId').value;
+        this._editingPaymentIndex = null;
+        this.openCobroDetalle(id);
     }
 
     // Borra un pago huérfano (resumen sin historial) y deja la factura como Enviada.
@@ -6776,7 +6810,34 @@ class Scheduler {
 
         if (amount > 0 && paidAt) {
             if (!inv.payments) inv.payments = [];
-            inv.payments.push({ date: paidAt, amount, method, ref, notes });
+
+            const editando = (this._editingPaymentIndex !== null && this._editingPaymentIndex !== undefined
+                              && inv.payments[this._editingPaymentIndex]);
+
+            // Aviso de SOBREPAGO: si lo que quedaría pagado supera lo facturado, se avisa
+            // antes de guardar. Así se caza a tiempo un pago capturado dos veces.
+            const yaPagado = inv.payments.reduce((s,p) => s + parseFloat(p.amount||0), 0);
+            const otros = editando ? yaPagado - parseFloat(inv.payments[this._editingPaymentIndex].amount || 0) : yaPagado;
+            const quedaria = otros + amount;
+            const facturado = parseFloat(inv.total || 0);
+            if (quedaria > facturado + 0.01) {
+                const ok = confirm(
+                    `⚠️ El pago se pasa de lo facturado.\n\n` +
+                    `Facturado:      $${facturado.toFixed(2)}\n` +
+                    `Quedaría pagado: $${quedaria.toFixed(2)}\n` +
+                    `Diferencia:     $${(quedaria - facturado).toFixed(2)} de más\n\n` +
+                    `¿Es correcto? (Si querías CORREGIR un pago existente, cancela y usa el botón ✏️ del historial.)`
+                );
+                if (!ok) return;
+            }
+
+            if (editando) {
+                // ACTUALIZA el pago existente — no agrega otro
+                inv.payments[this._editingPaymentIndex] = { date: paidAt, amount, method, ref, notes };
+                this._editingPaymentIndex = null;
+            } else {
+                inv.payments.push({ date: paidAt, amount, method, ref, notes });
+            }
             // Calculate total paid
             const totalPaid = inv.payments.reduce((s,p) => s + parseFloat(p.amount||0), 0);
             inv.paidAmount = totalPaid.toFixed(2);
