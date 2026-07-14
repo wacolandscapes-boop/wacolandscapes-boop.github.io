@@ -11863,6 +11863,78 @@ Motivo de cancelación (opcional):`);
         }
     }
     
+    // ════════════════════════════════════════════════════════════════════════════
+    //  EDITAR MONTOS DE UNA FACTURA
+    // ════════════════════════════════════════════════════════════════════════════
+    // El precio SIEMPRE venía de la ficha del cliente y no había forma de cambiarlo para
+    // una factura concreta: si un mes se cobraba distinto (un descuento, un trabajo extra,
+    // un servicio que no se hizo), había que ir a EDITAR LA FICHA del cliente, facturar, y
+    // regresarla a su precio — con el riesgo de olvidarlo y dejar mal el precio para
+    // siempre. Construcción ya se abría en Manual con los precios editables; esto hace lo
+    // mismo para CUALQUIER cliente: pasa los mismos servicios y precios que llevaría la
+    // factura automática a la pestaña Manual, donde cada línea se puede cambiar.
+    // La ficha del cliente NO se toca: lo editado vale solo para esta factura.
+    editarMontosFactura() {
+        const clientId = document.getElementById('invoiceClient').value;
+        const startDate = document.getElementById('invoiceStart').value;
+        const endDate = document.getElementById('invoiceEnd').value;
+
+        if (!clientId) { alert('Primero selecciona un cliente.'); return; }
+        if (!startDate || !endDate) { alert('Primero selecciona el período (Desde / Hasta).'); return; }
+
+        const client = this.clis.find(c => c.id == clientId);
+        if (!client) { alert('Cliente no encontrado.'); return; }
+
+        // Mismos servicios que juntaría la factura automática: todas las propiedades que
+        // comparten el nombre del cliente (Airbnb/Único/Construcción tienen varias).
+        const idsDelCliente = this.clis.filter(c => c.name === client.name).map(c => String(c.id));
+        const servicios = (this.servs || [])
+            .filter(s => idsDelCliente.includes(String(s.cliId))
+                      && s.date >= startDate && s.date <= endDate
+                      && !s.cancelled)
+            .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+        if (servicios.length === 0) {
+            alert(`No hay servicios de ${client.name} entre ${startDate} y ${endDate}.\n\n` +
+                  `Si quieres facturar algo que no está en el calendario, usa la pestaña Manual directamente.`);
+            return;
+        }
+
+        this.switchInvoiceTab('manual');
+        setTimeout(() => {
+            document.getElementById('manualInvClient').value = client.id;
+            document.getElementById('manualInvClientSearch').value = client.name;
+            const emailEl = document.getElementById('manualInvEmail');
+            if (emailEl) emailEl.value = this.getClientEmail(client);
+
+            const listEl = document.getElementById('manualInvItemsList');
+            if (!listEl) return;
+            listEl.innerHTML = '';
+
+            servicios.forEach(s => {
+                const cliDelServicio = this.clis.find(c => String(c.id) === String(s.cliId)) || client;
+                const precio = parseFloat(cliDelServicio.price || client.price || 0);
+                let desc = s.name || 'Limpieza';
+                // Si es una propiedad con nombre propio, se pone en la descripción para que
+                // en la factura se vea a cuál corresponde cada línea.
+                if (cliDelServicio.propId && cliDelServicio.propId !== cliDelServicio.name) {
+                    desc = cliDelServicio.propId + ' - ' + desc;
+                }
+                this.addManualInvoiceItem(s.date, desc, precio);
+            });
+
+            const total = servicios.reduce((suma, s) => {
+                const c = this.clis.find(x => String(x.id) === String(s.cliId)) || client;
+                return suma + parseFloat(c.price || client.price || 0);
+            }, 0);
+
+            alert(`✏️ ${servicios.length} servicio(s) cargados con el precio de la ficha ` +
+                  `($${total.toFixed(2)} en total).\n\n` +
+                  `Ahora puedes cambiar el precio de cada línea, poner $0.00 en las que no se cobran, ` +
+                  `o agregar líneas nuevas.\n\nLa ficha del cliente NO se modifica.`);
+        }, 200);
+    }
+
     previewInvoice() {
         const clientId = document.getElementById('invoiceClient').value;
         const startDate = document.getElementById('invoiceStart').value;
@@ -16891,6 +16963,21 @@ document.addEventListener('click', function(e) {
             <div id="invoicePreview" style="background: #f9f9f9; padding: 15px; border-radius: 8px; display: none;">
                 <h4 style="margin-top: 0;">Vista Previa:</h4>
                 <div id="invoicePreviewContent"></div>
+            </div>
+
+            <!-- El precio SIEMPRE salía de la ficha del cliente, sin forma de cambiarlo para
+                 una factura concreta (un descuento, un extra, un mes con precio distinto).
+                 Este botón pasa la factura a la pestaña Manual ya PRE-LLENADA con los mismos
+                 servicios y precios que llevaría la automática — de ahí se edita lo que sea.
+                 La ficha del cliente NO se toca: el cambio es solo para esta factura. -->
+            <div style="background:#fdf2f8; border-left:4px solid #ec4899; padding:12px 14px; border-radius:8px;">
+                <div style="font-size:0.85rem; color:#831843; margin-bottom:8px;">
+                    ✏️ <strong>¿Necesitas cambiar los montos de esta factura?</strong><br>
+                    <span style="font-size:0.78rem;">Pásala a Manual con los servicios ya cargados y edita los precios línea por línea. El precio de la ficha del cliente no se modifica.</span>
+                </div>
+                <button type="button" onclick="app.editarMontosFactura()" class="btn" style="background:#ec4899; color:white; padding:9px 16px; font-size:0.85rem; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">
+                    ✏️ Editar montos de esta factura
+                </button>
             </div>
         </div>
         
