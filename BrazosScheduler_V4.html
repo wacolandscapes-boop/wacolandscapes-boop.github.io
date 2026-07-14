@@ -5476,13 +5476,17 @@ class Scheduler {
                     listEl.innerHTML = '';
                     const defaultPrice = propCli ? (propCli.price || 0) : 0;
                     const svcDates = pending.serviceDates || [pending.startDate];
+                    const svcIds = pending.serviceIds || [];
                     // Todas las fechas quedan visibles en la factura (para que quede
                     // documentado cuándo se limpió), pero el monto fijo del periodo solo
                     // se pone en la ÚLTIMA fecha — las anteriores en $0, para no inflar el
                     // cobro si el precio es un monto fijo que cubre varias visitas.
+                    // Cada línea se lleva el id de SU servicio: así la factura de
+                    // construcción también queda atada al calendario (antes no lo estaba,
+                    // y la app tenía que adivinar por fecha qué servicio ya se facturó).
                     svcDates.forEach((date, i) => {
                         const price = (i === svcDates.length - 1) ? defaultPrice : 0;
-                        this.addManualInvoiceItem(date, 'Limpieza', price);
+                        this.addManualInvoiceItem(date, 'Limpieza', price, svcIds[i] || '', propCli ? propCli.id : '');
                     });
                 }
                 document.getElementById('btnBackToPending').style.display = 'block';
@@ -6893,15 +6897,43 @@ class Scheduler {
     }
 
     editInvoiceNumber(id, currentNumber) {
-        const inv2 = this.generatedInvoices ? this.generatedInvoices.find(i => String(i.id) === String(id)) : null;
-        const clientName = inv2 ? inv2.clientName : '';
-        const newNum = prompt(`Editar número de factura para ${clientName}:\nNúmero actual: ${currentNumber}`, currentNumber);
+        const inv = this.generatedInvoices ? this.generatedInvoices.find(i => String(i.id) === String(id)) : null;
+        if (!inv) return;
+        const newNum = prompt(
+            `Editar número de factura para ${inv.clientName}:\n` +
+            `Número actual: ${currentNumber}\n\n` +
+            `(Útil para registrar facturas hechas fuera de la app —\n` +
+            `por ejemplo, con el número que ya tenía en QuickBooks.)`,
+            currentNumber);
         if (!newNum || isNaN(parseInt(newNum))) return;
         const num = parseInt(newNum);
-        const inv = this.generatedInvoices.find(i => String(i.id) === String(id));
-        if (!inv) return;
+        if (num === parseInt(currentNumber)) return;
+
+        // ── GUARDIA ANTICOLISIÓN ───────────────────────────────────────────────────
+        // Antes NO se revisaba si el número ya era de otra factura: se podía dejar a DOS
+        // facturas con el MISMO número sin ningún aviso — justo el problema que costó días
+        // de limpieza. Al registrar facturas viejas con su número de QuickBooks el riesgo
+        // de chocar es real, así que aquí se avisa y se bloquea.
+        const choque = (this.generatedInvoices || []).find(i =>
+            String(i.id) !== String(id) && parseInt(i.invoiceNumber) === num);
+        if (choque) {
+            alert(
+                `⛔ El número #${num} YA ES de otra factura:\n\n` +
+                `   Cliente: ${choque.clientName}\n` +
+                `   Período: ${choque.startDate} → ${choque.endDate}\n` +
+                `   Total:   $${parseFloat(choque.total || 0).toFixed(2)}\n` +
+                `   Estado:  ${choque.status}\n\n` +
+                `Dos facturas no pueden compartir el mismo número. Usa otro.`
+            );
+            return;
+        }
+
+        if (!confirm(`¿Cambiar la factura de ${inv.clientName} del #${currentNumber} al #${num}?`)) return;
+
         inv.invoiceNumber = num;
-        // Actualizar lastInvoiceNumber si el nuevo es mayor
+        // El contador solo SUBE, nunca baja: si esta factura vieja lleva un número menor
+        // (ej. una de QuickBooks de mayo), el contador se queda donde estaba, para que la
+        // próxima factura nueva no reutilice un número ya usado.
         const currentLast = parseInt(localStorage.getItem('lastInvoiceNumber') || '0');
         if (num > currentLast) localStorage.setItem('lastInvoiceNumber', num.toString());
         this.save();
@@ -11743,11 +11775,21 @@ Motivo de cancelación (opcional):`);
         document.getElementById('manualTaxFieldContainer').style.display = cb.checked ? 'block' : 'none';
     }
 
-    addManualInvoiceItem(date='', desc='', price='') {
+    addManualInvoiceItem(date='', desc='', price='', svcId='', svcCliId='') {
         const list = document.getElementById('manualInvItemsList');
         if (!list) return;
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;gap:4px;margin-bottom:6px;align-items:center;';
+        // Vínculo al servicio REAL del calendario. Las facturas automáticas guardan el id
+        // de cada servicio, y con eso la app sabe EXACTAMENTE cuál quedó facturado (sin
+        // eso hay que adivinar por fecha, y eso falla si un cliente tiene dos servicios el
+        // mismo día, o si después se corrige la fecha de un servicio). Las líneas manuales
+        // no lo guardaban: al editar montos se perdía esa protección. Ahora, cuando la
+        // línea nace de un servicio real (pendiente pre-llenada), se lleva su id pegado —
+        // así editar los montos NO cuesta perder el vínculo. Las líneas escritas a mano
+        // simplemente no traen id, igual que antes.
+        if (svcId) row.dataset.svcId = svcId;
+        if (svcCliId) row.dataset.svcCliId = svcCliId;
         row.innerHTML = `
             <input type="date" value="${date}" class="manualInvDate" style="flex:1.2;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;">
             <input type="text" placeholder="Descripción" value="${desc}" class="manualInvDesc" style="flex:2;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:0.85rem;">
@@ -11763,7 +11805,11 @@ Motivo de cancelación (opcional):`);
         return [...list.children].map(row => ({
             date: row.querySelector('.manualInvDate').value,
             name: row.querySelector('.manualInvDesc').value.trim(),
-            price: parseFloat(row.querySelector('.manualInvPrice').value)
+            price: parseFloat(row.querySelector('.manualInvPrice').value),
+            // Si la línea vino de un servicio real, se lleva su vínculo — así la factura
+            // manual queda igual de bien atada al calendario que la automática.
+            id: row.dataset.svcId || undefined,
+            cliId: row.dataset.svcCliId || undefined
         }));
     }
 
@@ -11920,7 +11966,10 @@ Motivo de cancelación (opcional):`);
                 if (cliDelServicio.propId && cliDelServicio.propId !== cliDelServicio.name) {
                     desc = cliDelServicio.propId + ' - ' + desc;
                 }
-                this.addManualInvoiceItem(s.date, desc, precio);
+                // Se pasa el id del servicio real: la factura manual queda ATADA al
+                // calendario igual que la automática, así editar montos no cuesta perder
+                // la protección contra duplicados.
+                this.addManualInvoiceItem(s.date, desc, precio, s.id, s.cliId);
             });
 
             const total = servicios.reduce((suma, s) => {
