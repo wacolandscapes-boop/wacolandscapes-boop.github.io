@@ -4325,7 +4325,38 @@ class Scheduler {
     
     // ==================== MÓDULO DE FACTURAS PENDIENTES ====================
     
+    // ════════════════════════════════════════════════════════════════════════════
+    //  CANDADO DE SINCRONIZACIÓN — congela Drive mientras se factura
+    // ════════════════════════════════════════════════════════════════════════════
+    // Los TRES disparadores de sincronización (el reloj de 5 minutos, el save() por
+    // cada cambio menor, y la revisión al volver a la pestaña) pasan todos por
+    // driveSyncNow(). Poniendo el candado en esa única puerta se congelan los tres
+    // de golpe. Sin esto, Drive podía bajar y FUSIONAR a media facturación: como la
+    // fusión conserva todo lo que existe en cualquiera de los dos lados, revivía
+    // registros que se acababan de quitar y dejaba facturas fantasma.
+    // El candado se pone al ENTRAR a Pendientes/Enviadas y se suelta al CERRAR,
+    // haciendo UNA sola sincronización limpia con todo ya cuadrado (Fase 4).
+    // Si algo falla a media operación, el candado se suelta igual al cerrar el modal,
+    // para que la sincronización nunca se quede congelada para siempre.
+    _pausarSync(motivo) {
+        this._syncPausado = true;
+        this._syncPausadoDesde = Date.now();
+        console.log('🔒 Sincronización con Drive PAUSADA —', motivo);
+    }
+
+    async _reanudarSync(motivo) {
+        if (!this._syncPausado) return;
+        this._syncPausado = false;
+        console.log('🔓 Sincronización con Drive REANUDADA —', motivo);
+        // Una única escritura limpia con el resultado final
+        if (this.driveConnected) {
+            try { await this.driveSyncNow(); }
+            catch (e) { console.warn('⚠️ No se pudo sincronizar al reanudar:', e); }
+        }
+    }
+
     openPendingInvoices() {
+        this._pausarSync('se abrió Facturas Pendientes');
         this._navToInvoiceModal('pending');
     }
 
@@ -4348,6 +4379,19 @@ class Scheduler {
     
     closePendingInvoices() {
         document.getElementById('pendingInvoicesModal').style.display = 'none';
+        this._maybeReanudarSync();
+    }
+
+    // Suelta el candado SOLO si ya no queda ningún modal de facturación abierto.
+    // Se revisa en el siguiente tick porque al navegar de Pendientes a Enviadas la app
+    // cierra uno y abre el otro: si se soltara en el cierre, el candado se caería a
+    // media faena. Con el tick, para cuando revisamos, el otro modal ya está abierto.
+    _maybeReanudarSync() {
+        setTimeout(() => {
+            const p = document.getElementById('pendingInvoicesModal')?.style.display === 'block';
+            const g = document.getElementById('generatedInvoicesModal')?.style.display === 'block';
+            if (!p && !g) this._reanudarSync('se cerró Facturación');
+        }, 0);
     }
 
     // ── Navegación tipo navegador (atrás/adelante) entre los modales de facturación ──
@@ -5783,6 +5827,7 @@ class Scheduler {
     }
     
     openGeneratedInvoices() {
+        this._pausarSync('se abrió Facturas Enviadas');
         this._navToInvoiceModal('generated');
     }
 
@@ -5818,6 +5863,7 @@ class Scheduler {
     
     closeGeneratedInvoices() {
         document.getElementById('generatedInvoicesModal').style.display = 'none';
+        this._maybeReanudarSync();
     }
     
     filterGenInvClientList() {
@@ -6124,7 +6170,19 @@ class Scheduler {
                 <td style="text-align: center;">${(inv.items && inv.items.length > 0) ? inv.items.length : (inv.serviceCount || '—')}</td>
                 <td style="text-align: right;">
                     <b>$${(inv.paidAmount ? parseFloat(inv.paidAmount) : inv.total).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</b>
-                    ${inv.paidAmount && parseFloat(inv.paidAmount) !== inv.total ? `<div style="font-size:0.68rem;color:#888;margin-top:1px;">Facturado: $${inv.total.toFixed(2)}</div>` : ''}
+                    ${(() => {
+                        // La línea "Facturado:" solo tiene sentido cuando lo PAGADO y lo
+                        // FACTURADO son de verdad distintos. Antes se comparaban los números
+                        // en crudo, y varios totales están guardados sin redondear (ej. la
+                        // #7497 vale 1028.375): la app veía 1028.38 ≠ 1028.375 y mostraba
+                        // "Facturado: $1028.38" debajo de "$1,028.38" — la misma cifra dos
+                        // veces. Ahora se comparan ya redondeados a centavos.
+                        if (!inv.paidAmount) return '';
+                        const pagado = Math.round(parseFloat(inv.paidAmount) * 100);
+                        const facturado = Math.round(parseFloat(inv.total || 0) * 100);
+                        if (pagado === facturado) return '';
+                        return `<div style="font-size:0.68rem;color:#888;margin-top:1px;">Facturado: $${parseFloat(inv.total || 0).toFixed(2)}</div>`;
+                    })()}
                     ${inv.applyTax && inv.taxRate > 0 && !inv.paidAmount ? `<div style="font-size:0.68rem;color:#888;margin-top:1px;">Sub: $${(inv.subtotal||inv.total).toFixed(2)} + ${inv.taxRate}% tax</div>` : ''}
                 </td>
                 <td>
@@ -6136,8 +6194,24 @@ class Scheduler {
                         <option value="vencida" ${inv.status==='vencida'?'selected':''}>🔴 Vencida</option>
                         <option value="cancelada" ${inv.status==='cancelada'?'selected':''}>🚫 Cancelada</option>
                     </select>
-                    ${inv.status==='pagada' && inv.paidAt ? `<div style="font-size:0.7rem;color:#27ae60;margin-top:2px;">📅 ${inv.paidAt.split('T')[0].split('-').slice(1).join('/')}/${inv.paidAt.split('T')[0].split('-')[0].slice(2)}${inv.paymentMethod ? ' · '+({cash:'💵',check:'🏦',credit:'💳',zelle:'📱'}[inv.paymentMethod] || (inv.paymentMethod.includes('Stripe') ? '💳 Stripe' : '💰')) : ''}</div>` : ''}
+                    ${(inv.status==='pagada' || inv.status==='parcial') && inv.paidAt ? (() => {
+                        // Antes la fecha del pago SOLO se mostraba en las pagadas: en las
+                        // PARCIALES no aparecía, y parecía que no se hubiera guardado.
+                        const d = inv.paidAt.split('T')[0].split('-');
+                        const icono = {cash:'💵',check:'🏦',credit:'💳',zelle:'📱'}[inv.paymentMethod]
+                                      || (String(inv.paymentMethod||'').includes('Stripe') ? '💳 Stripe' : '💰');
+                        const color = inv.status==='pagada' ? '#27ae60' : '#d4a017';
+                        return `<div style="font-size:0.7rem;color:${color};margin-top:2px;">📅 ${d[1]}/${d[2]}/${d[0].slice(2)}${inv.paymentMethod ? ' · '+icono : ''}</div>`;
+                    })() : ''}
                     ${inv.paymentRef ? `<div style="font-size:0.68rem;color:#888;">${inv.paymentRef}</div>` : ''}
+                    ${inv.depositEta ? (() => {
+                        // Dinero en tránsito: el cliente ya pagó pero aún no cae en el banco.
+                        // Si la fecha ya pasó, se pinta en gris (ya debió reflejarse).
+                        const hoyISO = new Date().toISOString().split('T')[0];
+                        const yaCayo = inv.depositEta <= hoyISO;
+                        const [dy, dm, dd] = inv.depositEta.split('-');
+                        return `<div style="font-size:0.68rem;margin-top:2px;color:${yaCayo ? '#95a5a6' : '#1d4ed8'};font-weight:${yaCayo ? '400' : '700'};" title="${yaCayo ? 'Ya debió reflejarse en el banco' : 'Depósito estimado en banco'}">🏦 ${yaCayo ? 'depositado ~' : 'llega '}${dm}/${dd}/${dy.slice(2)}</div>`;
+                    })() : ''}
                 </td>
                 <td>
                     ${!isCancelled ? `
@@ -6486,6 +6560,44 @@ class Scheduler {
     openCobroDetalle(id) {
         const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(id));
         if (!inv) return;
+
+        // ── MIGRACIÓN de pagos en formato viejo ────────────────────────────────────
+        // Las versiones anteriores guardaban el pago SOLO como resumen (paidAmount,
+        // paidAt, paymentMethod, paymentRef), sin la lista `payments`. Esos registros
+        // están completos —traen su fecha, su método y su referencia— pero al no estar
+        // en el historial no se mostraban, y sin fila no había ✕ que apretar: no se
+        // podían corregir ni borrar (le pasó a la #7518 de Saint John).
+        // Aquí se convierten al formato nuevo usando SUS PROPIOS DATOS. No hay que
+        // recapturar nada: la fecha, el método y la referencia son los que ya tenían.
+        if ((!Array.isArray(inv.payments) || inv.payments.length === 0)
+            && parseFloat(inv.paidAmount || 0) > 0 && inv.paidAt) {
+            inv.payments = [{
+                date: String(inv.paidAt).split('T')[0],
+                amount: parseFloat(inv.paidAmount),
+                method: inv.paymentMethod || '',
+                ref: inv.paymentRef || '',
+                notes: 'Migrado del resumen (registro anterior al historial de pagos)'
+            }];
+            console.log(`🔄 Pago de la #${inv.invoiceNumber} migrado al historial: $${inv.paidAmount} del ${inv.paidAt}`);
+            this.save();
+        }
+
+        // ── AUTO-REPARACIÓN: el resumen debe cuadrar SIEMPRE con el historial ──────
+        // El resumen (paidAmount/status) y el historial (payments) son dos registros
+        // distintos, y podían desfasarse: si se registraba un pago dos veces por error
+        // y luego se borraba uno, el resumen se quedaba con el monto viejo. La #7518
+        // (Saint John) terminó diciendo "$370 pagada" con el historial VACÍO — el doble
+        // de su factura de $185. El historial es la verdad; el resumen se recalcula.
+        if (Array.isArray(inv.payments) && inv.payments.length > 0) {
+            const suma = inv.payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+            if (Math.round(suma * 100) !== Math.round(parseFloat(inv.paidAmount || 0) * 100)) {
+                console.warn(`🔧 Resumen de la #${inv.invoiceNumber} desfasado: decía $${inv.paidAmount}, el historial suma $${suma.toFixed(2)}. Corregido.`);
+                inv.paidAmount = suma.toFixed(2);
+                inv.status = suma >= parseFloat(inv.total || 0) ? 'pagada' : (suma > 0 ? 'parcial' : 'enviada');
+                this.save();
+            }
+        }
+
         document.getElementById('cobroDetalleId').value = id;
         const num = inv.invoiceNumber?.toString().padStart(4,'0');
         const totalPaid = (inv.payments||[]).reduce((s,p) => s + parseFloat(p.amount||0), 0);
@@ -6493,11 +6605,18 @@ class Scheduler {
         document.getElementById('cobroDetalleTitle').textContent = `💰 #${num} — ${inv.clientName}`;
         document.getElementById('cobroDetalleStatus').value = inv.status || 'pendiente';
         document.getElementById('cobroDetalleSentAt').value = inv.sentAt || '';
-        document.getElementById('cobroDetallePaidAt').value = '';
+        // La fecha del pago arranca en HOY. Antes venía VACÍA, y si se capturaba el monto
+        // sin poner la fecha, el pago NO se guardaba y la app no avisaba nada: se perdía
+        // en silencio (probable origen de varios pagos que quedaron sin historial).
+        document.getElementById('cobroDetallePaidAt').value = new Date().toISOString().split('T')[0];
         document.getElementById('cobroDetallePaidAmount').value = balance > 0 ? balance.toFixed(2) : '';
         document.getElementById('cobroDetallePayMethod').value = '';
         document.getElementById('cobroDetallePayRef').value = '';
         document.getElementById('cobroDetalleNotes').value = '';
+        // Fecha estimada de depósito: se conserva la última capturada, para que si el
+        // dinero aún no cae, siga a la vista al volver a abrir la factura.
+        const dep = document.getElementById('cobroDetalleDepositEta');
+        if (dep) dep.value = inv.depositEta || '';
         // Render payment history
         this.renderPaymentHistory(inv);
         // Show balance info
@@ -6513,8 +6632,33 @@ class Scheduler {
         const el = document.getElementById('cobroPaymentHistory');
         if (!el) return;
         const payments = inv.payments || [];
-        if (payments.length === 0) { el.style.display = 'none'; return; }
         const methodIcons = {cash:'💵',check:'🏦',credit:'💳',zelle:'📱',other:'💰'};
+
+        // ── PAGO HUÉRFANO: resumen sin historial ───────────────────────────────────
+        // Si la factura dice que tiene un pago (paidAmount) pero el historial está
+        // VACÍO, antes no se mostraba NADA — y sin fila no había ✕ que apretar, así que
+        // no había forma de corregirlo desde la pantalla: quedaba atorado para siempre
+        // (le pasó a la #7518, que decía "$370 pagada" siendo una factura de $185).
+        // Aquí se muestra ese registro huérfano con su botón para borrarlo.
+        const montoHuerfano = parseFloat(inv.paidAmount || 0);
+        if (payments.length === 0 && montoHuerfano > 0) {
+            el.style.display = 'block';
+            el.innerHTML = `
+                <div style="font-size:0.82rem;font-weight:700;color:#b45309;margin-bottom:6px;">⚠️ Pago sin detalle (registro antiguo o desfasado):</div>
+                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;">
+                    <tr>
+                        <td style="padding:6px;color:#666;">${inv.paidAt ? String(inv.paidAt).split('T')[0] : '—'}</td>
+                        <td style="padding:6px;font-weight:700;color:#b45309;">$${montoHuerfano.toFixed(2)}</td>
+                        <td style="padding:6px;">${methodIcons[inv.paymentMethod] || ''} ${inv.paymentMethod || ''}</td>
+                        <td style="padding:6px;color:#888;">${inv.paymentRef || ''}</td>
+                        <td style="padding:6px;"><button onclick="app.clearOrphanPayment('${inv.id}')" title="Borrar este pago y dejar la factura como Enviada" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:0.85rem;font-weight:700;">✕</button></td>
+                    </tr>
+                </table>
+                <div style="font-size:0.7rem;color:#92400e;margin-top:4px;">Este pago no tiene detalle en el historial. Bórralo con la ✕ si es incorrecto, y vuelve a capturarlo abajo.</div>`;
+            return;
+        }
+
+        if (payments.length === 0) { el.style.display = 'none'; return; }
         el.style.display = 'block';
         el.innerHTML = `
             <div style="font-size:0.82rem;font-weight:700;color:#444;margin-bottom:6px;">Historial de pagos:</div>
@@ -6528,6 +6672,26 @@ class Scheduler {
                     <td style="padding:4px 6px;"><button onclick="app.removePayment('${inv.id}',${i})" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:0.8rem;">✕</button></td>
                 </tr>`).join('')}
             </table>`;
+    }
+
+    // Borra un pago huérfano (resumen sin historial) y deja la factura como Enviada.
+    clearOrphanPayment(invId) {
+        const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(invId));
+        if (!inv) return;
+        const monto = parseFloat(inv.paidAmount || 0);
+        if (!confirm(`¿Borrar el pago de $${monto.toFixed(2)} de la factura #${inv.invoiceNumber}?\n\n` +
+                     `La factura volverá a quedar como ENVIADA (sin pago).\n` +
+                     `Después puedes capturar el pago correcto abajo.`)) return;
+
+        inv.paidAmount = null;
+        inv.paidAt = null;
+        inv.paymentMethod = null;
+        inv.paymentRef = null;
+        inv.payments = [];
+        inv.status = 'enviada';
+        this.save();
+        this.openCobroDetalle(invId);
+        this.refreshGeneratedInvoices();
     }
 
     removePayment(invId, index) {
@@ -6581,9 +6745,17 @@ class Scheduler {
     }
 
     saveCobroDetalle() {
+        // Candado antiduplicados: un doble clic aquí registraba el MISMO pago dos veces,
+        // inflando el total pagado y marcando como "pagada" una factura a medio cobrar.
+        if (this._clicDuplicado('saveCobroDetalle')) return;
         const id = document.getElementById('cobroDetalleId').value;
         const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(id));
         if (!inv) return;
+
+        // Fecha estimada de depósito (pagos en tránsito: Zelle, Bill.com, ACH). Es
+        // informativa: NO cambia el estado de la factura, solo dice cuándo cae el dinero.
+        const depEl = document.getElementById('cobroDetalleDepositEta');
+        inv.depositEta = depEl && depEl.value ? depEl.value : null;
 
         // Add payment to history if amount entered
         const amount = parseFloat(document.getElementById('cobroDetallePaidAmount').value || 0);
@@ -6591,6 +6763,16 @@ class Scheduler {
         const method = document.getElementById('cobroDetallePayMethod').value || '';
         const ref = document.getElementById('cobroDetallePayRef').value || '';
         const notes = document.getElementById('cobroDetalleNotes').value || '';
+
+        // Un pago necesita monto Y fecha. Antes, si venía el monto pero faltaba la fecha,
+        // la app se saltaba el registro EN SILENCIO: no guardaba el pago y tampoco avisaba.
+        // Ranu creía haberlo capturado y no quedaba nada. Ahora se avisa y no se pierde.
+        // (Si NO hay monto, no se avisa nada: es el caso válido de solo cambiar el estatus.)
+        if (amount > 0 && !paidAt) {
+            alert('⚠️ Falta la FECHA DEL PAGO.\n\nCapturaste un monto de $' + amount.toFixed(2) +
+                  ' pero sin fecha el pago no se puede registrar.\n\nPon la fecha y vuelve a guardar.');
+            return;
+        }
 
         if (amount > 0 && paidAt) {
             if (!inv.payments) inv.payments = [];
@@ -12035,6 +12217,10 @@ Motivo de cancelación (opcional):`);
                     <button onclick="app.saveAsEnviada()" class="btn" style="background: #16a085; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         ✅ Guardar como Enviada
                     </button>
+                    ${(this.generatedInvoices || []).some(i => i.invoiceNumber === parseInt(pdfData.invoiceNumber)) ? `
+                    <button onclick="app.saveInvoiceChanges()" class="btn" style="background: #8e44ad; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;" title="Corrige la factura sin cambiar su estado ni anotar un envío nuevo">
+                        💾 Guardar Cambios
+                    </button>` : ''}
                     ${client.email ? `<button onclick="app.sendInvoiceByGmail(window.currentPDFData.blob, window.currentPDFData.client, window.currentPDFData.invoiceNumber, window.currentPDFData.total || 0, window.currentPDFData.startDate || '${startDate}', window.currentPDFData.endDate || '${endDate}')" class="btn" style="background: #ea4335; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         📧 Enviar por Gmail
                     </button>` : ''}
@@ -12094,7 +12280,79 @@ Motivo de cancelación (opcional):`);
         }
     }
 
+    // ════════════════════════════════════════════════════════════════════════════
+    //  CANDADO ANTIDUPLICADOS — protege contra el doble clic
+    // ════════════════════════════════════════════════════════════════════════════
+    // Causa raíz comprobada del desastre de facturas fantasma: un mouse con FALLA
+    // MECÁNICA mandaba dos clics donde Ranu daba uno. La app obedecía los dos y
+    // generaba DOS facturas del mismo cliente y periodo, con milisegundos de
+    // diferencia — el patrón exacto que se encontró en los datos (Bailey Hatch,
+    // Bob Mills, Home Abstract, Azar Szantos, Laroque, Alvey, Joe Maxwell...).
+    // La segunda copia quedaba colgada como "pendiente, nunca enviada" = fantasma.
+    // Aquí se ignora cualquier repetición de la MISMA acción dentro de 3 segundos.
+    // Es un candado por TIEMPO, no por bandera: no puede quedarse trabado nunca —
+    // si una operación falla, a los 3 segundos el botón vuelve a responder solo.
+    _clicDuplicado(accion, ms = 3000) {
+        const ahora = Date.now();
+        this._ultimoClic = this._ultimoClic || {};
+        const previo = this._ultimoClic[accion];
+        if (previo && (ahora - previo) < ms) {
+            console.warn(`⛔ Clic duplicado IGNORADO (${accion}) — ${ahora - previo}ms después del anterior`);
+            return true;
+        }
+        this._ultimoClic[accion] = ahora;
+        return false;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    //  GUARDAR CAMBIOS — corregir una factura SIN reenviarla
+    // ════════════════════════════════════════════════════════════════════════════
+    // "Guardar como Enviada" hace DOS cosas a la vez: actualiza los datos Y marca la
+    // factura como enviada, anotando un envío en su historial. Eso está bien cuando
+    // de verdad se está entregando (hay clientes a los que no se les manda correo
+    // pero igual hay que registrarla como enviada). Pero cuando solo se quiere
+    // CORREGIR algo —impuestos que faltaron, fechas mal puestas, un monto— ese botón
+    // ensucia el historial con "reenvíos" que nunca ocurrieron.
+    // Este botón solo corrige: actualiza fechas, total, líneas e impuestos, y DEJA EL
+    // ESTADO COMO ESTABA (enviada sigue enviada, pagada sigue pagada, parcial sigue
+    // parcial). No anota ningún envío.
+    saveInvoiceChanges() {
+        if (this._clicDuplicado('saveInvoiceChanges')) return;
+        const pdfData = window.currentPDFData;
+        if (!pdfData || !pdfData.invoiceNumber) return;
+        const invoiceNumber = parseInt(pdfData.invoiceNumber);
+
+        const existing = (this.generatedInvoices || []).find(i => i.invoiceNumber === invoiceNumber);
+        if (!existing) {
+            alert('Esta factura todavía no está registrada.\n\nUsa "✅ Guardar como Enviada" para registrarla por primera vez.');
+            return;
+        }
+
+        const estadoAntes = existing.status;
+
+        // Actualizar SOLO los datos — el estado NO se toca
+        existing.invoiceConfig = pdfData.invoiceConfig || existing.invoiceConfig;
+        if (pdfData.serviceCount !== undefined) existing.serviceCount = pdfData.serviceCount;
+        if (pdfData.total !== undefined && pdfData.total !== null) existing.total = pdfData.total;
+        if (pdfData.startDate) existing.startDate = pdfData.startDate;
+        if (pdfData.endDate) existing.endDate = pdfData.endDate;
+        if (pdfData._services) existing.items = this.buildInvoiceItems(pdfData._services, pdfData.client);
+        existing.updatedAt = new Date().toISOString().split('T')[0];
+
+        this.save();
+        this.renderGeneratedInvoices?.();
+        document.getElementById('pdfPreviewModal')?.remove();
+        this.closeInvoice?.();
+
+        const periodo = `${existing.startDate} → ${existing.endDate}`;
+        alert(`💾 Cambios guardados en la factura #${invoiceNumber.toString().padStart(4, '0')}\n\n` +
+              `Período: ${periodo}\n` +
+              `Total: $${parseFloat(existing.total || 0).toFixed(2)}\n` +
+              `Estado: ${estadoAntes} (sin cambios)`);
+    }
+
     saveAsEnviada() {
+        if (this._clicDuplicado('saveAsEnviada')) return;
         const pdfData = window.currentPDFData;
         if (!pdfData || !pdfData.invoiceNumber) return;
         const invoiceNumber = parseInt(pdfData.invoiceNumber);
@@ -12205,6 +12463,7 @@ Motivo de cancelación (opcional):`);
     }
 
     printPDF(pdfUrl) {
+        if (this._clicDuplicado('printPDF')) return;
         // Registrar en Enviadas al imprimir (status: enviada — se imprimió para entregar)
         this._registerInvoiceFromPDF('enviada');
         this.markPendingAsGenerated();
@@ -12315,6 +12574,7 @@ Motivo de cancelación (opcional):`);
     }
 
     async sendInvoiceByGmail(pdfBlob, client, invoiceNumber, total, startDate, endDate) {
+        if (this._clicDuplicado('sendInvoiceByGmail', 5000)) return;
         // Registrar en Enviadas con status enviada
         this._registerInvoiceFromPDF('enviada');
         this.markPendingAsGenerated();
@@ -12412,6 +12672,7 @@ Motivo de cancelación (opcional):`);
     }
     
     async savePDF(invoiceNumber, clientIdOrName, startDate) {
+        if (this._clicDuplicado('savePDF')) return;
         // Accept either clientId or clientName for backwards compatibility
         let clientName = clientIdOrName;
         if (this.clis) {
@@ -15115,6 +15376,16 @@ Motivo de cancelación (opcional):`);
 
     async driveSyncNow() {
         if (!this.driveConnected || !this.driveFolderId) return;
+        // ── CANDADO: mientras se está facturando, Drive NO se toca ──────────────
+        // Salvo que se pida explícitamente (la sincronización final de la Fase 4, que
+        // llama a esta función con el candado ya soltado). Se ignoran aquí los tres
+        // disparadores automáticos: reloj de 5 min, save() por cambio, y regreso a
+        // la pestaña. Ver _pausarSync/_reanudarSync.
+        if (this._syncPausado) {
+            this.pendingSync = true;   // queda anotado para sincronizar al reanudar
+            console.log('⏸️ Sync omitido: facturación en curso (candado activo)');
+            return;
+        }
         if (this.isSyncing) { this.pendingSync = true; return; }
         this.isSyncing = true;
         await this.refreshTokenIfNeeded();
@@ -17378,6 +17649,15 @@ document.addEventListener('click', function(e) {
                     <label style="font-size:0.82rem; font-weight:700; color:#444;">Referencia / # Check</label>
                     <input type="text" id="cobroDetallePayRef" placeholder="CHK-1042 / últimos 4..." style="width:100%; padding:9px; margin-top:5px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
                 </div>
+            </div>
+
+            <!-- Fecha estimada de depósito: el cliente YA pagó (por Zelle, Bill.com, ACH...)
+                 pero el dinero todavía no cae en el banco. Sirve para saber cuándo estará
+                 disponible el efectivo — no cambia el estado de la factura. -->
+            <div style="margin-top:12px; padding:10px; background:#eef6ff; border:1px solid #cfe3ff; border-radius:8px;">
+                <label style="font-size:0.82rem; font-weight:700; color:#1d4ed8;">🏦 Fecha estimada de depósito en banco <span style="font-weight:400;color:#666;">(opcional)</span></label>
+                <input type="date" id="cobroDetalleDepositEta" style="width:100%; padding:9px; margin-top:5px; border:1px solid #cfe3ff; border-radius:8px; box-sizing:border-box;">
+                <div style="font-size:0.72rem; color:#5b7cb5; margin-top:4px;">Para pagos en tránsito (Zelle, Bill.com, ACH). El pago ya se registra; esto solo indica cuándo se refleja el dinero.</div>
             </div>
         </div>
 
