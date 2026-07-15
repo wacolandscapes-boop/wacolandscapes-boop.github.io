@@ -7695,6 +7695,7 @@ Motivo de cancelación (opcional):`);
         const doc = new jsPDF();
         const config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
         const companyName = config.name || 'Brazos Cleaning Services';
+        const clientEmail = this.getClientEmail(client);
 
         const fmt = (f) => { if (!f) return ''; const [y,m,d] = String(f).split('-'); return `${m}/${d}/${y}`; };
         const money = (n) => '$' + parseFloat(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -7721,7 +7722,9 @@ Motivo de cancelación (opcional):`);
         doc.text('BILL TO', 20, 54);
         doc.setFont(undefined,'normal'); doc.setTextColor(50,50,50); doc.setFontSize(11);
         doc.text(clientName, 20, 61);
-        if (client.address) { doc.setFontSize(9); doc.text(String(client.address).substring(0,50), 20, 67); }
+        let byLine = 67;
+        if (client.address) { doc.setFontSize(9); doc.text(String(client.address).substring(0,50), 20, byLine); byLine += 5; }
+        if (clientEmail) { doc.setFontSize(9); doc.setTextColor(80,80,80); doc.text(clientEmail, 20, byLine); }
 
         // Tabla de facturas
         let y = 80;
