@@ -11989,30 +11989,6 @@ Motivo de cancelación (opcional):`);
         return sibling ? sibling.email : '';
     }
 
-    // Arma la dirección completa del cliente en 2 líneas a partir de los campos que ya
-    // guarda la ficha (address, city, state, zip). Devuelve un arreglo de líneas no vacías:
-    //   ["134 Dosehr Ln", "Waco, TX 76708"]
-    // Las fichas viejas sin `state` toman "TX" por defecto (todos los clientes son de Texas).
-    // Si a la ficha le falta city/zip, simplemente no se pinta esa parte.
-    getClientAddressLines(cli) {
-        if (!cli) return [];
-        // Buscar en propiedades hermanas si a esta le falta el dato
-        const src = (cli.address || cli.city || cli.zip)
-            ? cli
-            : (this.clis.find(c => c.name === cli.name && (c.address || c.city || c.zip)) || cli);
-        const lines = [];
-        if (src.address) lines.push(String(src.address).trim());
-        const estado = src.state || 'TX';
-        const cityStateZip = [
-            src.city ? String(src.city).trim() : '',
-            src.city && (estado || src.zip) ? ', ' : '',
-            estado || '',
-            src.zip ? ' ' + String(src.zip).trim() : ''
-        ].join('').replace(/^, /, '').trim();
-        if (cityStateZip && cityStateZip !== 'TX') lines.push(cityStateZip);
-        return lines;
-    }
-
     selectManualInvClient(id, label) {
         document.getElementById('manualInvClient').value = id;
         document.getElementById('manualInvClientSearch').value = label;
