@@ -6734,6 +6734,7 @@ class Scheduler {
         inv.paymentRef = null;
         inv.payments = [];
         inv.status = 'enviada';
+        inv._pagoBorradoManual = true;   // no revivir desde Drive al sincronizar
         this.save();
         this.openCobroDetalle(invId);
         this.refreshGeneratedInvoices();
@@ -6759,6 +6760,9 @@ class Scheduler {
             inv.paidAt = null;
             inv.paymentMethod = null;
             inv.paymentRef = null;
+            // Marca: este pago se quitó A PROPÓSITO. Evita que el "rescate de pagos de
+            // Stripe" al sincronizar lo reviva desde Drive (bug de Kelsey #7520).
+            inv._pagoBorradoManual = true;
         }
         inv.status = (totalPaid > 0 && totalPaid >= (inv.total||0)) ? 'pagada' : (totalPaid > 0 ? 'parcial' : 'enviada');
         this.save();
@@ -6866,6 +6870,7 @@ class Scheduler {
             inv.paidAt = paidAt;
             inv.paymentMethod = method;
             inv.paymentRef = ref;
+            inv._pagoBorradoManual = false;   // ya hay pago de nuevo: el rescate puede volver a aplicar
             // Auto-set status
             if (totalPaid >= (inv.total||0)) {
                 inv.status = 'pagada';
@@ -6887,6 +6892,7 @@ class Scheduler {
                 inv.paymentMethod = null;
                 inv.paymentRef = null;
                 inv.payments = [];
+                inv._pagoBorradoManual = true;   // no revivir desde Drive al sincronizar
             }
         }
 
@@ -15829,7 +15835,21 @@ Motivo de cancelación (opcional):`);
                         driveData.generatedInvoices.forEach(driveInv => {
                             if (driveInv.status === 'pagada' || driveInv.status === 'parcial') {
                                 const localInv = (this.generatedInvoices || []).find(i => String(i.id) === String(driveInv.id));
-                                if (localInv && localInv.status !== 'pagada' && localInv.status !== 'parcial') {
+                                // ── Solo se "rescatan" pagos de STRIPE de verdad ──────────────
+                                // Este bloque existe para no perder pagos que entran por el Worker
+                                // de Stripe en otro dispositivo. Pero antes rescataba CUALQUIER
+                                // factura que en Drive estuviera pagada y en local no — sin importar
+                                // por qué. Eso PISABA los borrados manuales: si el usuario quitaba un
+                                // pago a propósito (factura mal cobrada), al sincronizar la app la
+                                // revivía a "pagada" desde Drive. Le pasó a Kelsey #7520: se borraba
+                                // el pago, quedaba enviada, y al reabrir Enviadas volvía pagada.
+                                // Ahora solo se rescata si el pago de Drive es de Stripe Y el local
+                                // NO fue tocado para dejarlo sin pago (marca _pagoBorradoManual).
+                                const esPagoStripe = String(driveInv.paymentMethod || '').toLowerCase().includes('stripe')
+                                    || (driveInv.payments || []).some(p => String(p.method || '').toLowerCase().includes('stripe'));
+                                const borradoAProposito = localInv && localInv._pagoBorradoManual;
+                                if (esPagoStripe && !borradoAProposito
+                                    && localInv && localInv.status !== 'pagada' && localInv.status !== 'parcial') {
                                     localInv.status = driveInv.status;
                                     localInv.paidAt = driveInv.paidAt;
                                     localInv.paidAmount = driveInv.paidAmount;
