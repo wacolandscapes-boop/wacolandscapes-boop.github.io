@@ -6614,7 +6614,14 @@ class Scheduler {
         // sin poner la fecha, el pago NO se guardaba y la app no avisaba nada: se perdía
         // en silencio (probable origen de varios pagos que quedaron sin historial).
         document.getElementById('cobroDetallePaidAt').value = new Date().toISOString().split('T')[0];
-        document.getElementById('cobroDetallePaidAmount').value = balance > 0 ? balance.toFixed(2) : '';
+        // El campo del monto arranca VACÍO — NO se auto-rellena con el balance pendiente.
+        // Ese auto-relleno era una trampa peligrosa: dejaba un número escrito en el campo,
+        // así que si guardabas por cualquier razón (o borrabas un pago y el modal se
+        // reabría), la app RE-AGREGABA un pago con ese monto. Por eso al borrar el único
+        // pago de una factura, terminaba en "pagada" por el TOTAL (le pasó a Kelsey #7520:
+        // borró un pago de $113.66 y quedó en $389.70 pagada). Ahora, si no escribes un
+        // monto a propósito, no se registra ningún pago. Punto.
+        document.getElementById('cobroDetallePaidAmount').value = '';
         document.getElementById('cobroDetallePayMethod').value = '';
         document.getElementById('cobroDetallePayRef').value = '';
         document.getElementById('cobroDetalleNotes').value = '';
@@ -6767,11 +6774,10 @@ class Scheduler {
             if (paidAt && !paidAt.value) {
                 paidAt.value = new Date().toISOString().split('T')[0];
             }
-            // Auto-fill amount with invoice total if empty
-            const id = document.getElementById('cobroDetalleId').value;
-            const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(id));
-            const amtEl = document.getElementById('cobroDetallePaidAmount');
-            if (inv && amtEl && !amtEl.value) amtEl.value = inv.total.toFixed(2);
+            // NO se auto-rellena el monto con el total. Antes, cambiar el estatus a "pagada"
+            // metía el total completo en el campo del monto, y al guardar eso re-agregaba un
+            // pago del total — inflando el pagado. Si quieres marcar pagada, escribe TÚ el
+            // monto real que se pagó, o usa el historial de pagos.
         }
         // Auto-fill sentAt when marking as enviada
         if (status === 'enviada') {
@@ -6840,6 +6846,18 @@ class Scheduler {
                 inv.payments[this._editingPaymentIndex] = { date: paidAt, amount, method, ref, notes };
                 this._editingPaymentIndex = null;
             } else {
+                // Red de seguridad anti-repetición: si YA existe un pago idéntico (misma
+                // fecha, mismo monto y mismo cheque/ref), no se agrega otro. Esto evita que
+                // un guardado accidental —con el campo del monto aún lleno— duplique un pago.
+                const yaExiste = inv.payments.some(p =>
+                    p.date === paidAt &&
+                    Math.round(parseFloat(p.amount||0)*100) === Math.round(amount*100) &&
+                    String(p.ref||'') === String(ref));
+                if (yaExiste) {
+                    alert('Ese pago ya está registrado (misma fecha, monto y referencia).\nNo se agregó de nuevo.');
+                    this.renderPaymentHistory(inv);
+                    return;
+                }
                 inv.payments.push({ date: paidAt, amount, method, ref, notes });
             }
             // Calculate total paid
@@ -11969,6 +11987,30 @@ Motivo de cancelación (opcional):`);
         if (propCli.email) return propCli.email;
         const sibling = this.clis.find(c => c.name === propCli.name && c.email);
         return sibling ? sibling.email : '';
+    }
+
+    // Arma la dirección completa del cliente en 2 líneas a partir de los campos que ya
+    // guarda la ficha (address, city, state, zip). Devuelve un arreglo de líneas no vacías:
+    //   ["134 Dosehr Ln", "Waco, TX 76708"]
+    // Las fichas viejas sin `state` toman "TX" por defecto (todos los clientes son de Texas).
+    // Si a la ficha le falta city/zip, simplemente no se pinta esa parte.
+    getClientAddressLines(cli) {
+        if (!cli) return [];
+        // Buscar en propiedades hermanas si a esta le falta el dato
+        const src = (cli.address || cli.city || cli.zip)
+            ? cli
+            : (this.clis.find(c => c.name === cli.name && (c.address || c.city || c.zip)) || cli);
+        const lines = [];
+        if (src.address) lines.push(String(src.address).trim());
+        const estado = src.state || 'TX';
+        const cityStateZip = [
+            src.city ? String(src.city).trim() : '',
+            src.city && (estado || src.zip) ? ', ' : '',
+            estado || '',
+            src.zip ? ' ' + String(src.zip).trim() : ''
+        ].join('').replace(/^, /, '').trim();
+        if (cityStateZip && cityStateZip !== 'TX') lines.push(cityStateZip);
+        return lines;
     }
 
     selectManualInvClient(id, label) {
