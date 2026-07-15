@@ -7596,6 +7596,219 @@ Motivo de cancelación (opcional):`);
         }
     }
 
+    // ════════════════════════════════════════════════════════════════════════════
+    //  ESTADO DE CUENTA — junta TODAS las facturas sin pagar de un cliente
+    // ════════════════════════════════════════════════════════════════════════════
+    // NO crea facturas nuevas: solo LISTA las que ya existen con saldo pendiente (sin
+    // pagar o parciales), las suma, y arma un documento con el total a pagar. Útil para
+    // el cliente que debe varios meses y quiere pagar todo junto (ej. Frances Peck:
+    // mayo + junio + julio). Como solo lee facturas existentes, no puede duplicar nada.
+    openEstadoCuenta() {
+        // Clientes que tienen al menos una factura con saldo pendiente
+        const conSaldo = {};
+        (this.generatedInvoices || []).forEach(inv => {
+            const saldo = parseFloat(inv.total || 0) - parseFloat(inv.paidAmount || 0);
+            if (inv.status !== 'cancelada' && inv.status !== 'pagada' && saldo > 0.01) {
+                if (!conSaldo[inv.clientName]) conSaldo[inv.clientName] = { count: 0, total: 0 };
+                conSaldo[inv.clientName].count++;
+                conSaldo[inv.clientName].total += saldo;
+            }
+        });
+        const nombres = Object.keys(conSaldo).sort((a, b) => a.localeCompare(b));
+
+        if (nombres.length === 0) { alert('No hay clientes con facturas pendientes de pago.'); return; }
+
+        const modal = document.createElement('div');
+        modal.id = 'estadoCuentaModal';
+        modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10002;display:flex;align-items:center;justify-content:center;';
+        modal.innerHTML = `
+            <div style="background:white;width:90%;max-width:560px;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.5);overflow:hidden;">
+                <div style="background:#2563eb;color:white;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;">
+                    <h2 style="margin:0;font-size:1.2rem;">📄 Estado de Cuenta</h2>
+                    <button onclick="document.getElementById('estadoCuentaModal').remove();" style="background:rgba(255,255,255,0.25);color:white;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">✕</button>
+                </div>
+                <div style="padding:20px;">
+                    <p style="margin:0 0 12px;color:#555;font-size:0.9rem;">Elige el cliente. Se juntarán <b>todas sus facturas sin pagar</b> en un solo documento con el total a pagar.</p>
+                    <div style="max-height:340px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;">
+                        ${nombres.map(n => `
+                            <div onclick="app.generarEstadoCuenta('${n.replace(/'/g, "\\'")}')" style="padding:12px 14px;border-bottom:1px solid #f0f0f0;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background 0.15s;" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='white'">
+                                <span style="font-weight:600;color:#1f2937;">${n}</span>
+                                <span style="text-align:right;">
+                                    <span style="display:block;color:#dc2626;font-weight:700;">$${conSaldo[n].total.toFixed(2)}</span>
+                                    <span style="font-size:0.75rem;color:#888;">${conSaldo[n].count} factura(s)</span>
+                                </span>
+                            </div>`).join('')}
+                    </div>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+    }
+
+    generarEstadoCuenta(clientName) {
+        document.getElementById('estadoCuentaModal')?.remove();
+
+        const facturas = (this.generatedInvoices || [])
+            .filter(inv => inv.clientName === clientName
+                        && inv.status !== 'cancelada' && inv.status !== 'pagada'
+                        && (parseFloat(inv.total || 0) - parseFloat(inv.paidAmount || 0)) > 0.01)
+            .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)));
+
+        if (facturas.length === 0) { alert('Ese cliente ya no tiene facturas pendientes.'); return; }
+
+        const client = (this.clis || []).find(c => c.name === clientName) || { name: clientName };
+
+        let data;
+        try { data = this.createStatementPDFBlob(clientName, client, facturas); }
+        catch (e) { alert('Error al generar el estado de cuenta: ' + e.message); console.error(e); return; }
+
+        window.currentStatementData = { ...data, clientName, client, facturas };
+        const url = URL.createObjectURL(data.blob);
+        const email = client.email || '';
+        const modal = document.createElement('div');
+        modal.id = 'statementPreviewModal';
+        modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10003;display:flex;align-items:center;justify-content:center;';
+        modal.innerHTML = `
+            <div style="background:white;width:90%;height:92%;border-radius:12px;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                <div style="padding:16px 20px;border-bottom:2px solid #ddd;display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <h2 style="margin:0;color:#1f2937;">📄 Estado de Cuenta — ${clientName}</h2>
+                        <div style="margin-top:5px;font-size:0.9rem;color:#555;">${facturas.length} factura(s) · Total: <b style="color:#dc2626;">$${data.grandTotal.toFixed(2)}</b>${email ? ` · 📧 <span style="color:#2563eb;">${email}</span>` : ' · <span style="color:#e74c3c;">sin email</span>'}</div>
+                    </div>
+                    <button onclick="document.getElementById('statementPreviewModal').remove();" style="background:#e74c3c;color:white;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cerrar</button>
+                </div>
+                <div style="flex:1;padding:10px;background:#525659;">
+                    <iframe src="${url}" style="width:100%;height:100%;border:none;border-radius:6px;"></iframe>
+                </div>
+                <div style="padding:15px 20px;border-top:2px solid #ddd;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+                    <button onclick="app.printStatement()" style="background:#2c3e50;color:white;padding:14px 26px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">🖨️ Imprimir</button>
+                    <button onclick="app.downloadStatement()" style="background:#27ae60;color:white;padding:14px 26px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">💾 Descargar PDF</button>
+                    ${email ? `<button id="btnSendStatement" onclick="app.sendStatementByGmail()" style="background:#ea4335;color:white;padding:14px 26px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">📧 Enviar por Email</button>` : ''}
+                    <button onclick="document.getElementById('statementPreviewModal').remove();" style="background:#95a5a6;color:white;padding:14px 26px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">❌ Cancelar</button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+    }
+
+    createStatementPDFBlob(clientName, client, facturas) {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        const config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        const companyName = config.name || 'Brazos Cleaning Services';
+
+        const fmt = (f) => { if (!f) return ''; const [y,m,d] = String(f).split('-'); return `${m}/${d}/${y}`; };
+        const money = (n) => '$' + parseFloat(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        const hoy = new Date().toLocaleDateString('en-US');
+
+        // Encabezado
+        doc.setFontSize(20); doc.setFont(undefined,'bold'); doc.setTextColor(31,41,55);
+        doc.text(companyName, 20, 22);
+        doc.setFontSize(9); doc.setFont(undefined,'normal'); doc.setTextColor(100,100,100);
+        let hy = 28;
+        if (config.address) { doc.text(config.address, 20, hy); hy += 5; }
+        if (config.phone) { doc.text('Tel: ' + config.phone, 20, hy); hy += 5; }
+        if (config.email) { doc.text(config.email, 20, hy); }
+
+        doc.setFontSize(11); doc.setTextColor(37,99,235); doc.setFont(undefined,'bold');
+        doc.text('STATEMENT OF ACCOUNT', 190, 20, { align:'right' });
+        doc.setFontSize(9); doc.setFont(undefined,'normal'); doc.setTextColor(100,100,100);
+        doc.text('Date: ' + hoy, 190, 27, { align:'right' });
+
+        doc.setDrawColor(37,99,235); doc.setLineWidth(1); doc.line(20, 44, 190, 44); doc.setLineWidth(0.2);
+
+        // Cliente
+        doc.setFontSize(9); doc.setFont(undefined,'bold'); doc.setTextColor(120,120,120);
+        doc.text('BILL TO', 20, 54);
+        doc.setFont(undefined,'normal'); doc.setTextColor(50,50,50); doc.setFontSize(11);
+        doc.text(clientName, 20, 61);
+        if (client.address) { doc.setFontSize(9); doc.text(String(client.address).substring(0,50), 20, 67); }
+
+        // Tabla de facturas
+        let y = 80;
+        doc.setFillColor(31,41,55); doc.rect(20, y, 170, 9, 'F');
+        doc.setTextColor(255,255,255); doc.setFontSize(9); doc.setFont(undefined,'bold');
+        doc.text('INVOICE #', 24, y+6);
+        doc.text('PERIOD', 58, y+6);
+        doc.text('STATUS', 120, y+6);
+        doc.text('BALANCE', 186, y+6, { align:'right' });
+        y += 9;
+
+        doc.setTextColor(50,50,50); doc.setFont(undefined,'normal'); doc.setFontSize(9);
+        let grandTotal = 0;
+        facturas.forEach((inv, i) => {
+            const saldo = parseFloat(inv.total || 0) - parseFloat(inv.paidAmount || 0);
+            grandTotal += saldo;
+            if (i % 2 === 1) { doc.setFillColor(245,247,250); doc.rect(20, y, 170, 8, 'F'); }
+            doc.text('#' + String(inv.invoiceNumber).padStart(4,'0'), 24, y+5.5);
+            doc.text(fmt(inv.startDate) + ' - ' + fmt(inv.endDate), 58, y+5.5);
+            const est = inv.status === 'parcial' ? 'Partial' : 'Unpaid';
+            doc.text(est, 120, y+5.5);
+            doc.text(money(saldo), 186, y+5.5, { align:'right' });
+            // Si es parcial, mostrar cuánto pagó abajo
+            if (inv.status === 'parcial' && parseFloat(inv.paidAmount||0) > 0) {
+                y += 8;
+                doc.setFontSize(7.5); doc.setTextColor(39,174,96);
+                doc.text(`   (billed ${money(inv.total)}, paid ${money(inv.paidAmount)})`, 58, y+4);
+                doc.setFontSize(9); doc.setTextColor(50,50,50);
+            }
+            y += 8;
+        });
+
+        // Total
+        doc.setDrawColor(180,180,180); doc.line(120, y+2, 190, y+2);
+        y += 10;
+        doc.setFillColor(254,242,242); doc.rect(110, y-6, 80, 12, 'F');
+        doc.setFont(undefined,'bold'); doc.setFontSize(13); doc.setTextColor(220,38,38);
+        doc.text('TOTAL DUE:', 114, y+2);
+        doc.text(money(grandTotal), 186, y+2, { align:'right' });
+
+        // Formas de pago
+        try { this.drawPaymentOptions(doc, 20, y + 14, 170, 'STATEMENT', clientName, grandTotal); }
+        catch (e) { console.warn('No se pudo dibujar formas de pago:', e); }
+
+        // Pie
+        doc.setFont(undefined,'normal'); doc.setFontSize(9); doc.setTextColor(140,140,140);
+        doc.text('Thank you for your business! · ' + companyName, 105, 275, { align:'center' });
+        doc.text('Please remit the total balance above. Questions? Contact us anytime.', 105, 281, { align:'center' });
+
+        return { blob: doc.output('blob'), grandTotal, count: facturas.length };
+    }
+
+    printStatement() {
+        const d = window.currentStatementData; if (!d) return;
+        const w = window.open(URL.createObjectURL(d.blob), '_blank');
+        if (w) setTimeout(() => { try { w.focus(); w.print(); } catch(e){} }, 700);
+    }
+    downloadStatement() {
+        const d = window.currentStatementData; if (!d) return;
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(d.blob);
+        a.download = `EstadoCuenta_${(d.clientName||'').replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`;
+        a.click();
+    }
+    async sendStatementByGmail() {
+        const d = window.currentStatementData; if (!d) return;
+        const btn = document.getElementById('btnSendStatement');
+        if (this._clicDuplicado('sendStatement', 5000)) return;
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Enviando...'; btn.style.opacity = '0.6'; }
+        const rehab = () => { if (btn) { btn.disabled=false; btn.textContent='📧 Enviar por Email'; btn.style.opacity='1'; } };
+        try {
+            const destino = d.client.email || '';
+            if (!destino) { alert('Sin email registrado.'); rehab(); return; }
+            const buf = await d.blob.arrayBuffer();
+            const bytes = new Uint8Array(buf); let bin=''; bytes.forEach(x=>bin+=String.fromCharCode(x));
+            const base64PDF = btoa(bin);
+            const nombreArchivo = `Statement_${(d.clientName||'').replace(/[^a-zA-Z0-9]/g,'_')}.pdf`;
+            for (const em of destino.split(',').map(e=>e.trim()).filter(Boolean)) {
+                await emailjs.send('service_mamjtia', 'template_ygaa3xa', {
+                    to_email: em, client_name: d.clientName,
+                    invoice_number: 'Statement', pdf_content: base64PDF, pdf_name: nombreArchivo
+                });
+            }
+            alert(`✅ Estado de cuenta enviado a ${destino}`);
+            document.getElementById('statementPreviewModal')?.remove();
+        } catch(e) { alert('Error enviando: ' + e.message); rehab(); }
+    }
+
     printReceipt(id) {
         const inv = (this.generatedInvoices || []).find(i => (i.id && i.id == id) || i.invoiceNumber == id);
         if (!inv) return;
@@ -17325,6 +17538,7 @@ document.addEventListener('click', function(e) {
                 <button onclick="app.verClienteEnPendientes()" title="Ir a Pendientes" style="background:rgba(255,255,255,0.9); color:#f39c12; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">📋 Pendientes</button>
                 <button onclick="app.verClienteEnGenerar()" title="Ir a Generar Factura" style="background:rgba(255,255,255,0.9); color:#e67e22; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">🧾 Generar</button>
                 <button onclick="app.openCobranzaModal()" title="Ver clientes con pagos atrasados" style="background:rgba(255,255,255,0.9); color:#c0392b; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">💰 Cobranza</button>
+                <button onclick="app.openEstadoCuenta()" title="Estado de cuenta: junta todas las facturas sin pagar de un cliente en un solo documento" style="background:rgba(255,255,255,0.9); color:#2563eb; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">📄 Estado de Cuenta</button>
                 📑 Historial de Facturas Enviadas
             </span>
             <span id="genInvBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.9rem;">0 facturas</span>
