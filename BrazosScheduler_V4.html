@@ -809,6 +809,7 @@
                 <button class="btn-nav-final" onclick="app.moveDate(-1)">◀</button>
                 <button class="btn-today-final" onclick="app.goToday()">Hoy</button>
                 <button class="btn-nav-final" onclick="app.moveDate(1)">▶</button>
+                <button onclick="app.showClientPrices()" title="Ver precios por cliente (mes en curso)" style="background:transparent;border:none;color:#c9c9c9;cursor:pointer;font-size:0.8rem;opacity:0.45;padding:2px 6px;line-height:1;">💲</button>
             </div>
             
             <!-- Filtros derecha -->
@@ -3247,6 +3248,95 @@ class Scheduler {
     }
     moveDate(n) { if(this.view==='day') this.curDate.setDate(this.curDate.getDate()+n); else if(this.view==='week') this.curDate.setDate(this.curDate.getDate()+(n*7)); else this.curDate.setMonth(this.curDate.getMonth()+n); this.render(); }
     goToday() { this.curDate = new Date(); this.render(); }
+
+    // ── Precios por Cliente (mes en curso del calendario) ──
+    // Muestra, por propiedad con visitas ese mes, el precio por servicio y el total del mes.
+    // Para clientes de pago fijo mensual (invoicingType 'fixed_monthly') el precio por servicio
+    // se calcula = monto mensual ÷ visitas del mes, igual que lo reparte la factura.
+    showClientPrices() {
+        const base = this.curDate || new Date();
+        const monthStart = new Date(base.getFullYear(), base.getMonth(), 1);
+        const monthEnd   = new Date(base.getFullYear(), base.getMonth() + 1, 0);
+        const toISO = (d) => d.toLocaleDateString('en-CA');
+        const startStr = toISO(monthStart), endStr = toISO(monthEnd);
+        const monthLabel = base.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+
+        // Contar visitas por propiedad en el mes (servicios no cancelados)
+        const visitsByCli = {};
+        this.servs.forEach(s => {
+            if (s.cancelled) return;
+            if (!s.date || s.date < startStr || s.date > endStr) return;
+            const k = String(s.cliId);
+            visitsByCli[k] = (visitsByCli[k] || 0) + 1;
+        });
+
+        const money = (n) => '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const typeLabel = { fixed_monthly: 'Mensual Fijo', monthly: 'Mensual', perservice: 'Por Servicio' };
+        const typeColor = { fixed_monthly: '#8e44ad', monthly: '#27ae60', perservice: '#2980b9' };
+
+        const rows = this.clis
+            .map(c => ({ c, visits: visitsByCli[String(c.id)] || 0 }))
+            .filter(r => r.visits > 0)
+            .sort((a, b) => (a.c.name || '').localeCompare(b.c.name || ''));
+
+        let bodyRows = '', grandTotal = 0;
+        rows.forEach(({ c, visits }) => {
+            const invType = c.invoicingType || 'monthly';
+            const basePrice = parseFloat(c.price) || 0;
+            let perService, monthTotal, note = '';
+            if (invType === 'fixed_monthly') {
+                perService = visits > 0 ? basePrice / visits : basePrice;
+                monthTotal = basePrice;
+                note = `<div style="font-size:0.68rem;color:#999;">${money(basePrice)}/mes ÷ ${visits}</div>`;
+            } else {
+                perService = basePrice;
+                monthTotal = basePrice * visits;
+            }
+            grandTotal += monthTotal;
+            const label = c.name + (c.propId ? ` · ${c.propId}` : (c.city ? ` · ${c.city}` : ''));
+            bodyRows += `<tr style="border-bottom:1px solid #eee;">
+                <td style="padding:7px 8px;">${label}</td>
+                <td style="padding:7px 8px;text-align:center;"><span style="background:${typeColor[invType] || '#777'};color:#fff;border-radius:4px;padding:2px 7px;font-size:0.7rem;white-space:nowrap;">${typeLabel[invType] || invType}</span></td>
+                <td style="padding:7px 8px;text-align:center;">${visits}</td>
+                <td style="padding:7px 8px;text-align:right;">${money(perService)}${note}</td>
+                <td style="padding:7px 8px;text-align:right;font-weight:600;">${money(monthTotal)}</td>
+            </tr>`;
+        });
+        if (!rows.length) bodyRows = `<tr><td colspan="5" style="padding:20px;text-align:center;color:#999;text-transform:capitalize;">Sin servicios en ${monthLabel}.</td></tr>`;
+
+        const old = document.getElementById('clientPricesOverlay');
+        if (old) old.remove();
+        const overlay = document.createElement('div');
+        overlay.id = 'clientPricesOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:12000;display:flex;align-items:center;justify-content:center;padding:20px;';
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        overlay.innerHTML = `
+            <div style="background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+                <div style="position:sticky;top:0;background:#2c3e50;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <div style="font-weight:700;font-size:1rem;">💲 Precios por Cliente</div>
+                        <div style="font-size:0.78rem;opacity:0.85;text-transform:capitalize;">${monthLabel}</div>
+                    </div>
+                    <button onclick="document.getElementById('clientPricesOverlay').remove()" style="background:transparent;border:none;color:#fff;font-size:1.5rem;cursor:pointer;line-height:1;">×</button>
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                    <thead><tr style="background:#f5f6f8;border-bottom:2px solid #dfe3e8;">
+                        <th style="padding:8px;text-align:left;">Cliente</th>
+                        <th style="padding:8px;text-align:center;">Facturación</th>
+                        <th style="padding:8px;text-align:center;">Visitas</th>
+                        <th style="padding:8px;text-align:right;">Precio x Servicio</th>
+                        <th style="padding:8px;text-align:right;">Total del Mes</th>
+                    </tr></thead>
+                    <tbody>${bodyRows}</tbody>
+                    <tfoot><tr style="border-top:2px solid #2c3e50;background:#fafbfc;">
+                        <td colspan="4" style="padding:9px 8px;font-weight:700;">TOTAL FACTURABLE DEL MES</td>
+                        <td style="padding:9px 8px;text-align:right;font-weight:700;color:#27ae60;">${money(grandTotal)}</td>
+                    </tr></tfoot>
+                </table>
+                <div style="padding:10px 18px;font-size:0.72rem;color:#999;">Pago fijo mensual: el precio por servicio = monto mensual ÷ visitas del mes (igual que en la factura). El monto usa el precio configurado en la ficha del cliente.</div>
+            </div>`;
+        document.body.appendChild(overlay);
+    }
     
     getGrupoColors() {
         const palette = ['#0D2B8E','#27ae60','#8e44ad','#e67e22','#e74c3c','#16a085','#d35400','#2c3e50','#1abc9c','#c0392b'];
@@ -14965,6 +15055,7 @@ Motivo de cancelación (opcional):`);
             </tr></thead><tbody>`;
 
         let grandRegularMin = 0, grandOTMin = 0, grandTotalMin = 0;
+        const byDateAgg = {}; // fecha -> { grossMin, breakMin, netMin } — persona-horas, cuadra con el total por empleado
         empList.forEach(emp => {
             const empIdSafe = String(emp.empId || emp.name).replace(/[^a-zA-Z0-9]/g, '_');
             const isExcluded = !!this._hoursExcluded[excludeKey(emp.empId || emp.name)];
@@ -14974,6 +15065,14 @@ Motivo de cancelación (opcional):`);
                 grandTotalMin += emp.totalMin;
                 grandRegularMin += regularMin;
                 grandOTMin += otMin;
+                emp.days.forEach(dy => {
+                    const bMin = dy.breakApplied ? 30 : 0;
+                    const gMin = (dy.netMin || 0) + bMin;
+                    if (!byDateAgg[dy.date]) byDateAgg[dy.date] = { grossMin: 0, breakMin: 0, netMin: 0 };
+                    byDateAgg[dy.date].grossMin += gMin;
+                    byDateAgg[dy.date].breakMin += bMin;
+                    byDateAgg[dy.date].netMin  += (dy.netMin || 0);
+                });
             }
             const rowStyle = isExcluded ? 'opacity:0.45;' : '';
             html += `<tr style="border-bottom:1px solid #ffe0b2;${rowStyle}">
@@ -14994,6 +15093,38 @@ Motivo de cancelación (opcional):`);
             <td style="padding:8px;text-align:right;font-weight:700;color:#c0392b;">${grandOTMin > 0 ? fmtHrs(grandOTMin) : '—'}</td>
             <td style="padding:8px;text-align:right;font-weight:700;color:#e65100;font-size:0.95rem;">${fmtHrs(grandTotalMin)}</td>
         </tr></tfoot></table>`;
+
+        // ── Desglose por Día: Total Hrs, Break y Hrs netas (el TOTAL cuadra con la tabla de arriba) ──
+        const dailyDates = Object.keys(byDateAgg).sort();
+        if (dailyDates.length) {
+            const fmtDay = (iso) => { const dd = new Date(iso + 'T12:00:00'); return dd.toLocaleDateString('es-MX', { weekday:'short', day:'2-digit', month:'short' }); };
+            let gGross = 0, gBreak = 0, gNet = 0;
+            let dHtml = `<h3 style="margin:24px 0 6px;font-size:0.95rem;color:#e65100;">📅 Desglose por Día</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                <thead><tr style="background:#fff3e0;border-bottom:2px solid #ffcc80;">
+                    <th style="padding:8px;text-align:left;">Fecha</th>
+                    <th style="padding:8px;text-align:right;">Total Hrs</th>
+                    <th style="padding:8px;text-align:right;">Break</th>
+                    <th style="padding:8px;text-align:right;">Hrs − Break</th>
+                </tr></thead><tbody>`;
+            dailyDates.forEach(dt => {
+                const a = byDateAgg[dt];
+                gGross += a.grossMin; gBreak += a.breakMin; gNet += a.netMin;
+                dHtml += `<tr style="border-bottom:1px solid #ffe0b2;">
+                    <td style="padding:8px;text-transform:capitalize;">${fmtDay(dt)}</td>
+                    <td style="padding:8px;text-align:right;color:#444;">${fmtHrs(a.grossMin)}</td>
+                    <td style="padding:8px;text-align:right;color:#888;">${a.breakMin > 0 ? '−' + fmtHrs(a.breakMin) : '—'}</td>
+                    <td style="padding:8px;text-align:right;font-weight:600;color:#e65100;">${fmtHrs(a.netMin)}</td>
+                </tr>`;
+            });
+            dHtml += `</tbody><tfoot><tr style="border-top:2px solid #e65100;">
+                <td style="padding:8px;font-weight:700;">TOTAL</td>
+                <td style="padding:8px;text-align:right;font-weight:700;color:#444;">${fmtHrs(gGross)}</td>
+                <td style="padding:8px;text-align:right;font-weight:700;color:#888;">${gBreak > 0 ? '−' + fmtHrs(gBreak) : '—'}</td>
+                <td style="padding:8px;text-align:right;font-weight:700;color:#e65100;">${fmtHrs(gNet)}</td>
+            </tr></tfoot></table>`;
+            html += dHtml;
+        }
 
         container.innerHTML = html;
     }
