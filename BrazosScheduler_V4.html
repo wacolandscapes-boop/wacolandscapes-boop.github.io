@@ -1228,6 +1228,13 @@
                             </label>
                             <div style="font-size:0.72rem; color:#856404; margin-top:2px;">El cliente/propiedad sigue programándose normal en el calendario, pero nunca aparece en Pendientes, Urgentes ni se le genera factura desde aquí.</div>
                         </div>
+                        <div style="grid-column:span 2; background:#eff6ff; border:1px solid #3b82f6; border-radius:6px; padding:8px; margin-top:4px;">
+                            <label style="font-size:0.85rem; font-weight:700; color:#1d4ed8; display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" id="cliApplyTax" checked style="width:16px; height:16px; accent-color:#3b82f6;">
+                                🏛️ Cobrar impuesto a este cliente
+                            </label>
+                            <div style="font-size:0.72rem; color:#3b5b9a; margin-top:4px;">Activado por defecto. <b>Desmárcalo para clientes EXENTOS</b> (iglesias, etc.). Al facturar, este dato se aplica solo — ya no hay que acordarse de marcarlo cada vez.</div>
+                        </div>
                         <div style="grid-column:span 2; display:flex; align-items:center; gap:8px; margin-top:4px;">
                             <label style="font-size:0.8rem; color:#555; white-space:nowrap;">🏛️ Tax Rate:</label>
                             <input type="number" id="cliTaxRate" step="0.01" min="0" max="10" placeholder="8.25" 
@@ -7458,9 +7465,11 @@ Motivo de cancelación (opcional):`);
         doc.text('PAYMENT DETAILS', 110, y);
         doc.setFont(undefined, 'normal'); doc.setTextColor(50, 50, 50); doc.setFontSize(10);
         doc.text(inv.clientName || '', 20, y + 7);
-        if (client?.address) doc.text(String(client.address).substring(0, 42), 20, y + 13);
+        const addrLines_r = this.getClientAddressLines(client);
+        let ry_r = y + 13;
+        addrLines_r.forEach(l => { doc.text(String(l).substring(0, 46), 20, ry_r); ry_r += 5; });
         const mail = client?.email || inv.clientEmail || '';
-        if (mail) doc.text(String(mail).substring(0, 42), 20, y + 19);
+        if (mail) doc.text(String(mail).substring(0, 46), 20, ry_r);
 
         doc.text('Date paid: ' + fechaPago, 110, y + 7);
         doc.text('Period: ' + fmtFecha(inv.startDate) + ' - ' + fmtFecha(inv.endDate), 110, y + 13);
@@ -7747,8 +7756,10 @@ Motivo de cancelación (opcional):`);
         doc.setFont(undefined,'normal'); doc.setTextColor(50,50,50); doc.setFontSize(11);
         doc.text(clientName, 20, 61);
         let byLine = 67;
-        if (client.address) { doc.setFontSize(9); doc.text(String(client.address).substring(0,50), 20, byLine); byLine += 5; }
-        if (clientEmail) { doc.setFontSize(9); doc.setTextColor(80,80,80); doc.text(clientEmail, 20, byLine); }
+        doc.setFontSize(9);
+        const addrLines_s = this.getClientAddressLines(client);
+        addrLines_s.forEach(l => { doc.text(String(l).substring(0,50), 20, byLine); byLine += 5; });
+        if (clientEmail) { doc.setTextColor(80,80,80); doc.text(clientEmail, 20, byLine); }
 
         // Tabla de facturas
         let y = 80;
@@ -9741,6 +9752,7 @@ Motivo de cancelación (opcional):`);
                 const autoCharge = document.getElementById('cliAutoCharge') ? document.getElementById('cliAutoCharge').checked : (this.clis[idx].autoCharge || false);
                 const stripeCustomerId = document.getElementById('cliStripeCustomerId') ? document.getElementById('cliStripeCustomerId').value.trim() : (this.clis[idx].stripeCustomerId || '');
                 const taxRate = document.getElementById('cliTaxRate') ? parseFloat(document.getElementById('cliTaxRate').value) || 8.25 : (this.clis[idx].taxRate || 8.25);
+                const cobraImpuestos = document.getElementById('cliApplyTax') ? document.getElementById('cliApplyTax').checked : (this.clis[idx].cobraImpuestos !== false);
                 const excludeInvoicing = document.getElementById('cliExcludeInvoicing') ? document.getElementById('cliExcludeInvoicing').checked : (this.clis[idx].excludeInvoicing || false);
 
                 if(isMulti) {
@@ -9760,6 +9772,7 @@ Motivo de cancelación (opcional):`);
                         c.invoicingType = invoicingType; // billingPeriod ya NO se fuerza aquí — cada propiedad tiene el suyo
                         c.autoCharge = autoCharge;
                         c.taxRate = taxRate;
+                        c.cobraImpuestos = cobraImpuestos;
                         c.excludeInvoicing = excludeInvoicing;
                         if (stripeCustomerId) c.stripeCustomerId = stripeCustomerId;
                     };
@@ -9805,6 +9818,7 @@ Motivo de cancelación (opcional):`);
                                 price: fp.price || price, tel, address, city, zip, type,
                                 serviceType, billingPeriod: fp.billingPeriod || billingPeriod, invoicingType,
                                 taxRate: taxRate,
+                                cobraImpuestos: cobraImpuestos,
                             });
                             existingPropIdsNorm.push(fpNorm); // evitar duplicados en el mismo save
                         }
@@ -9820,10 +9834,12 @@ Motivo de cancelación (opcional):`);
 
                 } else {
                     this.clis[idx] = {
+                        ...this.clis[idx],
                         id: this.clis[idx].id,
                         name, propId, price, tel, email, address, city, zip,
                         type, serviceType, billingPeriod, invoicingType,
-                        excludeInvoicing
+                        excludeInvoicing,
+                        taxRate, cobraImpuestos
                     };
                 }
                 if (oldType !== type) {
@@ -9898,7 +9914,9 @@ Motivo de cancelación (opcional):`);
                 this.clis.push({
                     id: String(Date.now() + i * 100),
                     name, propId: fp.propId, price: fp.price || price, tel, address, city, zip,
-                    type, serviceType, billingPeriod, invoicingType: invTypeProp
+                    type, serviceType, billingPeriod, invoicingType: invTypeProp,
+                    taxRate: (document.getElementById('cliTaxRate') ? parseFloat(document.getElementById('cliTaxRate').value) || 8.25 : 8.25),
+                    cobraImpuestos: (document.getElementById('cliApplyTax') ? document.getElementById('cliApplyTax').checked : true)
                 });
                 added++;
             });
@@ -9909,6 +9927,7 @@ Motivo de cancelación (opcional):`);
             const autoCharge = document.getElementById('cliAutoCharge') ? document.getElementById('cliAutoCharge').checked : false;
             const stripeCustomerId = document.getElementById('cliStripeCustomerId') ? document.getElementById('cliStripeCustomerId').value.trim() : '';
             const taxRate = document.getElementById('cliTaxRate') ? parseFloat(document.getElementById('cliTaxRate').value) || 8.25 : 8.25;
+            const cobraImpuestos = document.getElementById('cliApplyTax') ? document.getElementById('cliApplyTax').checked : true;
             const excludeInvoicingNew = document.getElementById('cliExcludeInvoicing') ? document.getElementById('cliExcludeInvoicing').checked : false;
             const newCli = {
                 id: Date.now(),
@@ -9927,6 +9946,7 @@ Motivo de cancelación (opcional):`);
                 autoCharge: autoCharge,
                 stripeCustomerId: stripeCustomerId,
                 taxRate: taxRate,
+                cobraImpuestos: cobraImpuestos,
                 excludeInvoicing: excludeInvoicingNew,
             };
             this.clis.push(newCli);
@@ -9979,6 +9999,9 @@ Motivo de cancelación (opcional):`);
             }
             if (document.getElementById('cliTaxRate')) {
                 document.getElementById('cliTaxRate').value = cli.taxRate !== undefined ? cli.taxRate : 8.25;
+            }
+            if (document.getElementById('cliApplyTax')) {
+                document.getElementById('cliApplyTax').checked = (cli.cobraImpuestos !== false);
             }
             document.getElementById('editCliId').value = cli.id;
             // Bloque de regeneración
@@ -11768,17 +11791,19 @@ Motivo de cancelación (opcional):`);
             offsetSel.value = String(cli.paymentTerms);
             this.updatePaymentDueDate();
         }
-        // Auto-llenar la tasa de tax del cliente si tiene una configurada
-        if (cli.taxRate !== undefined && cli.taxRate > 0) {
-            const applyTaxCheckbox = document.getElementById('invoiceApplyTax');
-            const taxRateInput = document.getElementById('invoiceTaxRate');
-            if (applyTaxCheckbox && taxRateInput) {
-                applyTaxCheckbox.checked = true;
-                taxRateInput.value = cli.taxRate;
-                this.toggleTaxField && this.toggleTaxField();
-                const container = document.getElementById('taxFieldContainer');
-                if (container) container.style.display = 'block';
+        // Auto-aplicar impuestos según el perfil del cliente.
+        // Por defecto el cliente SÍ cobra impuestos; solo los EXENTOS (iglesias, Hospitaller,
+        // Sorrells, etc.) tienen cobraImpuestos === false. Así ya no hay que acordarse de marcarlo.
+        const applyTaxCheckbox = document.getElementById('invoiceApplyTax');
+        const taxRateInput = document.getElementById('invoiceTaxRate');
+        if (applyTaxCheckbox && taxRateInput) {
+            const cobra = (cli.cobraImpuestos !== false);
+            applyTaxCheckbox.checked = cobra;
+            if (cobra) {
+                taxRateInput.value = (cli.taxRate !== undefined && cli.taxRate > 0) ? cli.taxRate : 8.25;
             }
+            const container = document.getElementById('taxFieldContainer');
+            if (container) container.style.display = cobra ? 'block' : 'none';
         }
     }
 
@@ -11995,6 +12020,24 @@ Motivo de cancelación (opcional):`);
         return sibling ? sibling.email : '';
     }
 
+    // Devuelve la dirección del cliente lista para imprimir, en hasta 2 líneas:
+    //   ['388 Downsville Rd.', 'Woodway, TX 76712']
+    // El estado por defecto es 'TX' (todos los clientes de Brazos son de Texas) cuando
+    // hay ciudad o zip pero el registro no trae 'state'. Omite las partes vacías.
+    getClientAddressLines(client) {
+        if (!client) return [];
+        const street = String(client.address || '').trim();
+        const city   = String(client.city || '').trim();
+        const zip    = String(client.zip || '').trim();
+        let state    = String(client.state || '').trim();
+        if (!state && (city || zip)) state = 'TX';
+        const lines = [];
+        if (street) lines.push(street);
+        const cityLine = [city, [state, zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+        if (cityLine) lines.push(cityLine);
+        return lines;
+    }
+
     selectManualInvClient(id, label) {
         document.getElementById('manualInvClient').value = id;
         document.getElementById('manualInvClientSearch').value = label;
@@ -12004,6 +12047,19 @@ Motivo de cancelación (opcional):`);
         if (emailField) {
             const cli = this.clis.find(c => String(c.id) === String(id));
             emailField.value = this.getClientEmail(cli);
+        }
+        // Auto-aplicar impuestos según el perfil del cliente (mismo criterio que la pestaña Generar)
+        const cliM = this.clis.find(c => String(c.id) === String(id));
+        if (cliM) {
+            const mCb = document.getElementById('manualInvApplyTax');
+            const mRate = document.getElementById('manualInvTaxRate');
+            if (mCb && mRate) {
+                const cobra = (cliM.cobraImpuestos !== false);
+                mCb.checked = cobra;
+                if (cobra) mRate.value = (cliM.taxRate !== undefined && cliM.taxRate > 0) ? cliM.taxRate : 8.25;
+                const mc = document.getElementById('manualTaxFieldContainer');
+                if (mc) mc.style.display = cobra ? 'block' : 'none';
+            }
         }
         // Actualizar preview si ya hay items
         if (document.getElementById('manualInvItemsList').children.length > 0) {
@@ -13486,15 +13542,14 @@ Motivo de cancelación (opcional):`);
             // BILL TO box
             doc.setFont(undefined, 'bold');
             doc.setFontSize(9);
-            doc.rect(15, 65, 58, 18);
+            doc.rect(15, 65, 92, 22);
             doc.text('BILL TO:', 17, 71);
             doc.setFont(undefined, 'normal');
             doc.setFontSize(8);
             doc.text(client.name || '', 17, 77);
-            if (client.address) {
-                const fullAddr = [client.address, client.city, client.zip].filter(Boolean).join(', ');
-                doc.text(fullAddr, 17, 81);
-            }
+            const addrLines_a = this.getClientAddressLines(client);
+            let ay_a = 81;
+            addrLines_a.forEach(l => { doc.text(String(l), 17, ay_a); ay_a += 4; });
 
             // Datos empresa - lado derecho
             doc.setFont(undefined, 'bold');
@@ -13516,7 +13571,7 @@ Motivo de cancelación (opcional):`);
             }
 
             // TABLA de servicios - encabezado
-            const tTop = 86;           doc.setFillColor(240,240,240);
+            const tTop = 89;           doc.setFillColor(240,240,240);
             doc.rect(18, tTop, 174, 8, 'F');
             doc.setDrawColor(120,120,120);
             doc.setLineWidth(0.3);
