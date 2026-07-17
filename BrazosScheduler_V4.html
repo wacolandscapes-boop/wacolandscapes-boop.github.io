@@ -3648,7 +3648,7 @@ class Scheduler {
                     <td style="padding:8px;color:#666;white-space:nowrap;">${dateStr} ${timeStr}</td>
                     <td style="padding:8px;"><span style="background:${color};color:white;padding:2px 8px;border-radius:10px;font-size:0.75rem;font-weight:700;">${icon} ${entry.action.toUpperCase()}</span></td>
                     <td style="padding:8px;font-weight:600;">${entry.client}</td>
-                    <td style="padding:8px;">${entry.date}</td>
+                    <td style="padding:8px;">${this.formatDateUS(entry.date)}</td>
                     <td style="padding:8px;color:#666;">${entry.emp||'—'}</td>
                     <td style="padding:8px;color:#888;font-size:0.8rem;">${entry.extra||'—'}</td>
                 </tr>`;
@@ -4904,8 +4904,8 @@ class Scheduler {
                     const isPast = svc.date < todayStr;
                     const urgency = isToday ? 'high' : (isPast ? 'overdue' : 'normal');
                     const reason = isToday ? '📧 Servicio hoy — Enviar factura' :
-                            isPast ? `⚠️ Servicio del ${svc.date} — Pendiente de enviar` :
-                            `📅 Servicio el ${svc.date} — Preparar factura`;
+                            isPast ? `⚠️ Servicio del ${this.formatDateUS(svc.date)} — Pendiente de enviar` :
+                            `📅 Servicio el ${this.formatDateUS(svc.date)} — Preparar factura`;
 
                     const existing = this.pendingInvoices.find(p => p.periodKey === svcKey);
                     if (existing) { existing.urgency = urgency; existing.reason = reason; existing.column = 'mensuales'; return; }
@@ -5802,7 +5802,7 @@ class Scheduler {
                     const rowsHist = hist.map(h => {
                         const d = new Date(h.date);
                         const fecha = d.toLocaleDateString('es-MX', {day:'2-digit', month:'short', year:'numeric'});
-                        const hora = d.toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
+                        const hora = d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
                         return `<tr><td style="padding:4px 8px;color:#cbd5e1;">${fecha} · ${hora}</td><td style="padding:4px 8px;color:#94a3b8;">${methodLabels[h.method] || h.method}</td></tr>`;
                     }).join('');
                     return `
@@ -6010,7 +6010,7 @@ class Scheduler {
                 @media print{.no-print{display:none}}
             </style></head><body>
             <h1>Facturas — Brazos Cleaning Services</h1>
-            <p>${list.length} factura(s) — generado el ${new Date().toLocaleDateString('es-MX')}</p>
+            <p>${list.length} factura(s) — generado el ${new Date().toLocaleDateString('en-US', {month:'2-digit',day:'2-digit',year:'numeric'})}</p>
             <table>
                 <thead><tr><th>#</th><th>Cliente</th><th>Periodo</th><th>Estatus</th><th>Total</th><th>Saldo</th></tr></thead>
                 <tbody>${rows}</tbody>
@@ -6723,7 +6723,7 @@ class Scheduler {
             <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
                 ${payments.map((p,i) => `
                 <tr style="border-bottom:1px solid #f0f0f0;${this._editingPaymentIndex === i ? 'background:#fff7e6;' : ''}">
-                    <td style="padding:4px 6px;color:#666;">${p.date}</td>
+                    <td style="padding:4px 6px;color:#666;">${this.formatDateUS(p.date)}</td>
                     <td style="padding:4px 6px;font-weight:700;color:#27ae60;">$${parseFloat(p.amount).toFixed(2)}</td>
                     <td style="padding:4px 6px;">${methodIcons[p.method]||''} ${p.method||''}</td>
                     <td style="padding:4px 6px;color:#888;">${p.ref||''}</td>
@@ -7326,15 +7326,11 @@ Motivo de cancelación (opcional):`);
         // Actualizar título con período
         let periodoTexto = 'Todo el período';
         if (start && end) {
-            const startD = new Date(start + 'T00:00:00');
-            const endD = new Date(end + 'T00:00:00');
-            const startStr = startD.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
-            const endStr = endD.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
-            periodoTexto = `${startStr} - ${endStr}`;
+            periodoTexto = `${this.formatDateUS(start)} - ${this.formatDateUS(end)}`;
         } else if (start) {
-            periodoTexto = `Desde ${new Date(start + 'T00:00:00').toLocaleDateString('es-ES')}`;
+            periodoTexto = `Desde ${this.formatDateUS(start)}`;
         } else if (end) {
-            periodoTexto = `Hasta ${new Date(end + 'T00:00:00').toLocaleDateString('es-ES')}`;
+            periodoTexto = `Hasta ${this.formatDateUS(end)}`;
         }
         document.getElementById('historyTitle').innerHTML = `📜 Historial de Servicios <small style="color: #f8f9fa; font-size: 0.8rem;">(${periodoTexto})</small>`;
         
@@ -10370,15 +10366,11 @@ Motivo de cancelación (opcional):`);
 	// Actualizar título con período
         let periodoTexto = 'Todo el período';
         if (start && end) {
-            const startD = new Date(start + 'T00:00:00');
-            const endD = new Date(end + 'T00:00:00');
-            const startStr = startD.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
-            const endStr = endD.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
-            periodoTexto = `${startStr} - ${endStr}`;
+            periodoTexto = `${this.formatDateUS(start)} - ${this.formatDateUS(end)}`;
         } else if (start) {
-            periodoTexto = `Desde ${new Date(start + 'T00:00:00').toLocaleDateString('es-ES')}`;
+            periodoTexto = `Desde ${this.formatDateUS(start)}`;
         } else if (end) {
-            periodoTexto = `Hasta ${new Date(end + 'T00:00:00').toLocaleDateString('es-ES')}`;
+            periodoTexto = `Hasta ${this.formatDateUS(end)}`;
         }
         document.getElementById('financeTitle').innerHTML = `📊 Reporte Financiero <small style="color: #666; font-size: 0.8rem;">(${periodoTexto})</small>`;
         const cliFilter = document.getElementById('finCli').value;
@@ -12560,11 +12552,13 @@ Motivo de cancelación (opcional):`);
 
     // Función helper para formato MM/DD/YYYY
     formatDateUS(dateStr) {
+        if (!dateStr) return '';
+        // YYYY-MM-DD → MM/DD/YYYY (sin desfase de zona horaria)
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr));
+        if (m) return `${m[2]}/${m[3]}/${m[1]}`;
         const d = new Date(dateStr);
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        const year = d.getFullYear();
-        return `${month}/${day}/${year}`;
+        if (isNaN(d)) return String(dateStr);
+        return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
     }
 
 	showPDFPreview() {
@@ -14883,7 +14877,7 @@ Motivo de cancelación (opcional):`);
         }
         const startStr = document.getElementById('hoursRangeStart')?.value || '';
         const endStr = document.getElementById('hoursRangeEnd')?.value || '';
-        const fmtDate = (s) => { if(!s) return ''; const [y,m,d] = s.split('-'); return `${d}/${m}/${y}`; };
+        const fmtDate = (s) => { if(!s) return ''; const [y,m,d] = s.split('-'); return `${m}/${d}/${y}`; };
         const win = window.open('', '_blank');
         win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Resumen de Horas</title>
         <style>
@@ -14896,7 +14890,7 @@ Motivo de cancelación (opcional):`);
         </style></head><body>
         <div class="no-print" style="margin-bottom:16px"><button onclick="window.print()" style="background:#e65100;color:white;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-size:1rem">🖨️ Imprimir</button></div>
         <h1>⏱️ Resumen de Horas Trabajadas (Shop → Shop)</h1>
-        <p style="color:#666;margin:0 0 20px">Período: ${fmtDate(startStr)} – ${fmtDate(endStr)} &nbsp;·&nbsp; Generado: ${new Date().toLocaleString('es-MX')}</p>
+        <p style="color:#666;margin:0 0 20px">Período: ${fmtDate(startStr)} – ${fmtDate(endStr)} &nbsp;·&nbsp; Generado: ${new Date().toLocaleString('en-US', {month:'2-digit',day:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit'})}</p>
         ${summaryHTML}
         </body></html>`);
         win.document.close();
@@ -15255,7 +15249,7 @@ Motivo de cancelación (opcional):`);
         const fmt=n=>n.toFixed(2);
         const fmtT=t=>{if(!t)return'';const[h24,m]=t.split(':').map(Number),ap=h24>=12?'PM':'AM',h=h24%12||12;return h+':'+(m+'').padStart(2,'0')+' '+ap;};
         const fmtH=h=>h>=1?`${Math.floor(h)}h ${Math.round((h%1)*60)}min`:`${Math.round(h*60)}min`;
-        const fmtDate=d=>{const[y,mo,da]=d.split('-');return `${da}/${mo}/${y}`;};
+        const fmtDate=d=>{const[y,mo,da]=d.split('-');return `${mo}/${da}/${y}`;};
         const nominaEmps=JSON.parse(localStorage.getItem('brazos_employees')||'[]');
         const getRateForEmp=emp=>{if(!emp)return 15;if(parseFloat(emp.rate)>0)return parseFloat(emp.rate);const ne=nominaEmps.find(n=>n.name&&emp.name&&n.name.trim().toLowerCase()===emp.name.trim().toLowerCase());return parseFloat(ne?.rate||ne?.payRate||ne?.hourlyRate||15);};
 
@@ -15480,7 +15474,7 @@ Motivo de cancelación (opcional):`);
                     if (view === 'week' && days.length > 1) {
                         const items = days.map(d => {
                             const [y,mo,da] = d.split('-');
-                            return `<span style="white-space:nowrap;">📅 ${da}/${mo}: 🏠${sbd[d].shopOut||'—'} → 🏁${sbd[d].shopBack||'—'}</span>`;
+                            return `<span style="white-space:nowrap;">📅 ${mo}/${da}: 🏠${sbd[d].shopOut?fmtT(sbd[d].shopOut):'—'} → 🏁${sbd[d].shopBack?fmtT(sbd[d].shopBack):'—'}</span>`;
                         }).join(' &nbsp;|&nbsp; ');
                         return `<div style="margin-bottom:8px;font-size:0.75rem;background:rgba(255,255,255,0.15);border-radius:6px;padding:4px 8px;line-height:1.6;">${items}</div>`;
                     }
@@ -15553,7 +15547,7 @@ Motivo de cancelación (opcional):`);
         const rows=[['Grupo','Fecha','Cliente','Dirección','Llegada','Salida','Horas','Facturado','Costo MO','Neto','Estado']];
         Object.keys(groupRows).sort().forEach(grp=>{
             groupRows[grp].services.forEach(s=>{
-                rows.push([esc(grp),esc(s.date),esc(s.clientName),esc(s.address),esc(s.checkin?fmtT(s.checkin):''),esc(s.checkout?fmtT(s.checkout):''),esc(s.hrs>0?fmtH(s.hrs):''),s.price>0?s.price.toFixed(2):'0.00',s.cost>0?s.cost.toFixed(2):'0.00',(s.price-s.cost).toFixed(2),esc(s.status)]);
+                rows.push([esc(grp),esc(this.formatDateUS(s.date)),esc(s.clientName),esc(s.address),esc(s.checkin?fmtT(s.checkin):''),esc(s.checkout?fmtT(s.checkout):''),esc(s.hrs>0?fmtH(s.hrs):''),s.price>0?s.price.toFixed(2):'0.00',s.cost>0?s.cost.toFixed(2):'0.00',(s.price-s.cost).toFixed(2),esc(s.status)]);
             });
             // employee breakdown rows
             Object.values(groupRows[grp].empHrs).filter(e=>e.hrs>0).forEach(e=>{
@@ -15576,7 +15570,7 @@ Motivo de cancelación (opcional):`);
         const fmt=n=>n.toFixed(2);
         const fmtT=t=>{if(!t)return'';const[h24,m]=t.split(':').map(Number),ap=h24>=12?'PM':'AM',h=h24%12||12;return h+':'+(m+'').padStart(2,'0')+' '+ap;};
         const fmtH=h=>h>=1?`${Math.floor(h)}h ${Math.round((h%1)*60)}min`:`${Math.round(h*60)}min`;
-        const fmtDate=d=>{const[y,mo,da]=d.split('-');return `${da}/${mo}/${y}`;};
+        const fmtDate=d=>{const[y,mo,da]=d.split('-');return `${mo}/${da}/${y}`;};
         const grandNet=grandBilled-grandCost;
         const periodo=dates.length===1?fmtDate(dates[0]):`${fmtDate(dates[0])} – ${fmtDate(dates[dates.length-1])}`;
         const dayNames=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
@@ -15630,7 +15624,7 @@ Motivo de cancelación (opcional):`);
                 if (view === 'week' && days.length > 1) {
                     const items = days.map(d => {
                         const [y,mo,da] = d.split('-');
-                        return `📅 ${da}/${mo}: 🏠${sbd[d].shopOut||'—'} → 🏁${sbd[d].shopBack||'—'}`;
+                        return `📅 ${mo}/${da}: 🏠${sbd[d].shopOut?fmtT(sbd[d].shopOut):'—'} → 🏁${sbd[d].shopBack?fmtT(sbd[d].shopBack):'—'}`;
                     }).join(' &nbsp;|&nbsp; ');
                     return `<div style="padding:4px 12px;font-size:10px;background:rgba(255,255,255,0.15);">${items}</div>`;
                 }
@@ -15683,7 +15677,7 @@ Motivo de cancelación (opcional):`);
         <style>body{font-family:Arial,sans-serif;margin:30px;color:#333}h1{color:#0e7490;margin-bottom:4px}@media print{.no-print{display:none}}</style></head><body>
         <div class="no-print" style="margin-bottom:16px"><button onclick="window.print()" style="background:#0e7490;color:white;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-size:1rem">🖨️ Imprimir</button></div>
         <h1>📊 Reporte de Producción — Brazos Cleaning</h1>
-        <p style="color:#666;margin:0 0 16px">Período: ${periodo} &nbsp;·&nbsp; Generado: ${new Date().toLocaleString('es-MX')}</p>
+        <p style="color:#666;margin:0 0 16px">Período: ${periodo} &nbsp;·&nbsp; Generado: ${new Date().toLocaleString('en-US', {month:'2-digit',day:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit'})}</p>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
           <div style="background:#e8f8f5;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#27ae60;font-weight:700;text-transform:uppercase">Servicios</div><div style="font-size:1.5rem;font-weight:700">${grandSvcs}</div></div>
           <div style="background:#eaf4fb;border-radius:8px;padding:10px;text-align:center"><div style="font-size:10px;color:#2980b9;font-weight:700;text-transform:uppercase">Horas</div><div style="font-size:1.5rem;font-weight:700">${fmtH(grandHrs)}</div></div>
