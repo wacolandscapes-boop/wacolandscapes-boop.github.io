@@ -6126,6 +6126,103 @@ class Scheduler {
         win.document.close();
     }
 
+    // Abre una lista previa para elegir a QUIÉNES imprimirles la carta (todos marcados por defecto).
+    openCobranzaPrintPreview() {
+        const list = this._cobranzaList || [];
+        if (!list.length) { alert('No hay clientes atrasados para imprimir.'); return; }
+        const money = n => '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const old = document.getElementById('cobranzaPrintModal');
+        if (old) old.remove();
+        const overlay = document.createElement('div');
+        overlay.id = 'cobranzaPrintModal';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:12050;display:flex;align-items:center;justify-content:center;padding:20px;';
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        const rows = list.map(c => {
+            const client = (this.clis || []).find(x => x.name === c.clientName) || {};
+            const hasAddr = this.getClientAddressLines(client).length > 0;
+            const warn = !hasAddr
+                ? '<span style="color:#e67e22;font-size:0.72rem;">⚠️ sin dirección — la carta saldrá sin domicilio</span>'
+                : (!c.email ? '<span style="color:#999;font-size:0.72rem;">sin email (por eso el correo físico)</span>' : '');
+            const nm = String(c.clientName).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+            return `<label class="cpz-row" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #f0f0f0;cursor:pointer;">
+                <input type="checkbox" class="cpz-chk" data-name="${nm}" checked onchange="app._updateCobranzaPrintCount()" style="width:17px;height:17px;flex:0 0 auto;">
+                <span style="flex:1;min-width:0;">
+                    <span style="font-weight:600;color:#1f2937;">${c.clientName}</span>
+                    ${warn ? '<br>' + warn : ''}
+                </span>
+                <span style="text-align:right;white-space:nowrap;">
+                    <span style="display:block;color:#c0392b;font-weight:700;">${money(c.totalDebt)}</span>
+                    <span style="font-size:0.72rem;color:#888;">${c.invoices.length} fact · ${c.maxDaysLate} días</span>
+                </span>
+            </label>`;
+        }).join('');
+        overlay.innerHTML = `
+            <div style="background:white;border-radius:12px;max-width:640px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.4);overflow:hidden;">
+                <div style="background:#c0392b;color:white;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <div style="font-weight:700;font-size:1rem;">🖨️ Imprimir Estados de Cuenta</div>
+                        <div style="font-size:0.78rem;opacity:0.9;">Desmarca a quién NO quieras imprimirle la carta</div>
+                    </div>
+                    <button onclick="document.getElementById('cobranzaPrintModal').remove()" style="background:rgba(255,255,255,0.25);color:white;border:none;font-size:1.3rem;cursor:pointer;border-radius:6px;width:34px;height:34px;line-height:1;">×</button>
+                </div>
+                <div style="padding:10px 16px;border-bottom:1px solid #eee;display:flex;gap:16px;align-items:center;font-size:0.85rem;">
+                    <span onclick="app._toggleAllCobranzaPrint(true)" style="color:#2563eb;cursor:pointer;">Seleccionar todos</span>
+                    <span onclick="app._toggleAllCobranzaPrint(false)" style="color:#2563eb;cursor:pointer;">Ninguno</span>
+                </div>
+                <div style="overflow-y:auto;flex:1;">${rows}</div>
+                <div style="padding:14px 18px;border-top:1px solid #eee;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+                    <button onclick="document.getElementById('cobranzaPrintModal').remove()" style="background:#95a5a6;color:white;border:none;padding:11px 18px;border-radius:8px;cursor:pointer;font-weight:bold;">Cancelar</button>
+                    <button onclick="app.doPrintCobranzaStatements()" style="background:#c0392b;color:white;border:none;padding:11px 20px;border-radius:8px;cursor:pointer;font-weight:bold;">🖨️ Imprimir seleccionados (<span id="cpzCount">${list.length}</span>)</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+    }
+
+    _updateCobranzaPrintCount() {
+        const modal = document.getElementById('cobranzaPrintModal');
+        if (!modal) return;
+        const n = modal.querySelectorAll('.cpz-chk:checked').length;
+        const el = modal.querySelector('#cpzCount');
+        if (el) el.textContent = n;
+    }
+
+    _toggleAllCobranzaPrint(on) {
+        const modal = document.getElementById('cobranzaPrintModal');
+        if (!modal) return;
+        modal.querySelectorAll('.cpz-chk').forEach(chk => { chk.checked = on; });
+        this._updateCobranzaPrintCount();
+    }
+
+    // Imprime en UN solo PDF el estado de cuenta de los clientes SELECCIONADOS en la lista previa,
+    // una hoja por cliente, con la nota de cobranza al pie. Ideal para mandar por correo físico.
+    doPrintCobranzaStatements() {
+        const modal = document.getElementById('cobranzaPrintModal');
+        const selectedNames = modal ? [...modal.querySelectorAll('.cpz-chk:checked')].map(chk => chk.getAttribute('data-name')) : null;
+        if (selectedNames && selectedNames.length === 0) { alert('Selecciona al menos un cliente.'); return; }
+        const list = (this._cobranzaList || []).filter(c => !selectedNames || selectedNames.includes(c.clientName));
+        if (!list.length) { alert('No hay clientes seleccionados.'); return; }
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        let pages = 0;
+        list.forEach(c => {
+            const facturas = (this.generatedInvoices || [])
+                .filter(inv => inv.clientName === c.clientName
+                    && inv.status !== 'cancelada' && inv.status !== 'pagada'
+                    && (parseFloat(inv.total || 0) - parseFloat(inv.paidAmount || 0)) > 0.01)
+                .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)));
+            if (!facturas.length) return;
+            const client = (this.clis || []).find(x => x.name === c.clientName) || { name: c.clientName };
+            if (pages > 0) doc.addPage();
+            try { this._drawStatementPage(doc, c.clientName, client, facturas, true); pages++; }
+            catch (e) { console.error('Error en estado de cuenta de ' + c.clientName, e); }
+        });
+        if (pages === 0) { alert('No hay estados de cuenta para imprimir.'); return; }
+        if (modal) modal.remove();
+        const url = URL.createObjectURL(doc.output('blob'));
+        const w = window.open(url, '_blank');
+        if (w) setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 800);
+    }
+
     closeCobranzaModal() {
         document.getElementById('cobranzaModal').style.display = 'none';
     }
@@ -7690,16 +7787,17 @@ Motivo de cancelación (opcional):`);
         modal.id = 'estadoCuentaModal';
         modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10002;display:flex;align-items:center;justify-content:center;';
         modal.innerHTML = `
-            <div style="background:white;width:90%;max-width:560px;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.5);overflow:hidden;">
+            <div style="background:white;width:92%;max-width:720px;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.5);overflow:hidden;display:flex;flex-direction:column;max-height:88vh;">
                 <div style="background:#2563eb;color:white;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;">
                     <h2 style="margin:0;font-size:1.2rem;">📄 Estado de Cuenta</h2>
                     <button onclick="document.getElementById('estadoCuentaModal').remove();" style="background:rgba(255,255,255,0.25);color:white;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">✕</button>
                 </div>
                 <div style="padding:20px;">
                     <p style="margin:0 0 12px;color:#555;font-size:0.9rem;">Elige el cliente. Se juntarán <b>todas sus facturas sin pagar</b> en un solo documento con el total a pagar.</p>
-                    <div style="max-height:340px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;">
+                    <input id="ecSearch" type="text" placeholder="🔍 Buscar cliente..." oninput="app._filterEstadoCuenta(this.value)" autocomplete="off" style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.95rem;margin-bottom:12px;box-sizing:border-box;outline:none;">
+                    <div style="max-height:60vh;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;">
                         ${nombres.map(n => `
-                            <div onclick="app.generarEstadoCuenta('${n.replace(/'/g, "\\'")}')" style="padding:12px 14px;border-bottom:1px solid #f0f0f0;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background 0.15s;" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='white'">
+                            <div class="ec-row" data-ecname="${n.toLowerCase().replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" onclick="app.generarEstadoCuenta('${n.replace(/'/g, "\\'")}')" style="padding:12px 14px;border-bottom:1px solid #f0f0f0;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background 0.15s;" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='white'">
                                 <span style="font-weight:600;color:#1f2937;">${n}</span>
                                 <span style="text-align:right;">
                                     <span style="display:block;color:#dc2626;font-weight:700;">$${conSaldo[n].total.toFixed(2)}</span>
@@ -7710,6 +7808,31 @@ Motivo de cancelación (opcional):`);
                 </div>
             </div>`;
         document.body.appendChild(modal);
+        setTimeout(() => { const si = document.getElementById('ecSearch'); if (si) si.focus(); }, 50);
+    }
+
+    // Filtro dinámico del buscador de Estado de Cuenta
+    _filterEstadoCuenta(q) {
+        const term = (q || '').trim().toLowerCase();
+        const modal = document.getElementById('estadoCuentaModal');
+        if (!modal) return;
+        const rows = modal.querySelectorAll('.ec-row');
+        let visible = 0;
+        rows.forEach(row => {
+            const name = row.getAttribute('data-ecname') || '';
+            const show = !term || name.includes(term);
+            row.style.display = show ? 'flex' : 'none';
+            if (show) visible++;
+        });
+        let empty = modal.querySelector('#ecEmpty');
+        if (!empty && rows.length) {
+            empty = document.createElement('div');
+            empty.id = 'ecEmpty';
+            empty.style.cssText = 'padding:16px;text-align:center;color:#999;';
+            empty.textContent = 'Sin resultados';
+            rows[0].parentNode.appendChild(empty);
+        }
+        if (empty) empty.style.display = visible === 0 ? 'block' : 'none';
     }
 
     generarEstadoCuenta(clientName) {
@@ -7761,6 +7884,13 @@ Motivo de cancelación (opcional):`);
     createStatementPDFBlob(clientName, client, facturas) {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
+        const grandTotal = this._drawStatementPage(doc, clientName, client, facturas, false);
+        return { blob: doc.output('blob'), grandTotal, count: facturas.length };
+    }
+
+    // Dibuja UNA hoja de estado de cuenta en el doc dado (reutilizable para impresión por lotes).
+    // includeNote = true agrega la nota de cobranza al pie (para las cartas por correo físico).
+    _drawStatementPage(doc, clientName, client, facturas, includeNote) {
         const config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
         const companyName = config.name || 'Brazos Cleaning Services';
         const clientEmail = this.getClientEmail(client);
@@ -7839,12 +7969,42 @@ Motivo de cancelación (opcional):`);
         try { this.drawPaymentOptions(doc, 20, y + 14, 170, 'STATEMENT', clientName, grandTotal); }
         catch (e) { console.warn('No se pudo dibujar formas de pago:', e); }
 
+        // Nota de cobranza — solo en las cartas para correo físico (impresión por lotes)
+        if (includeNote) {
+            const BRAZOS_EMAIL = 'brazoscleaningservices@gmail.com';
+            const hasEmail = !!clientEmail;
+            const emailLine = hasEmail
+                ? `We have been sending your invoices by email from ${BRAZOS_EMAIL} to the email address shown above. If you have not been receiving them, please check your spam or junk folder, as our messages may be filtered there.`
+                : `We do not currently have an email address on file for you, so you may not have been receiving your invoices. Please share your email with us so we can send them to you going forward (we email from ${BRAZOS_EMAIL}).`;
+            const paras = [
+                'Please disregard this letter if your payment has already been sent \u2014 and thank you.',
+                'If a balance is still outstanding and you plan to make a payment, please write the invoice number(s) you are covering on your check so we can apply it correctly to your account.',
+                emailLine,
+                'To make sure you receive future invoices, please contact us with your current email, mailing address, and phone number so we can update your account.',
+                "If you have any questions or would like an invoice resent, we're glad to help."
+            ];
+            doc.setFont(undefined,'normal'); doc.setFontSize(8.5);
+            const lineH = 4.2;
+            const wrapped = paras.map(p => doc.splitTextToSize(p, 162));
+            let totalLines = 0; wrapped.forEach(w => totalLines += w.length);
+            const boxH = 9 + totalLines * lineH + (paras.length - 1) * 2 + 4;
+            let noteY = y + 52;
+            if (noteY + boxH > 270) { doc.addPage(); noteY = 22; }
+            doc.setDrawColor(200,200,200); doc.setFillColor(250,250,250);
+            doc.roundedRect(20, noteY, 170, boxH, 2, 2, 'FD');
+            let ty = noteY + 7;
+            doc.setFont(undefined,'bold'); doc.setTextColor(90,90,90); doc.setFontSize(8.5);
+            doc.text('IMPORTANT \u2014 PLEASE READ', 24, ty); ty += 5.5;
+            doc.setFont(undefined,'normal'); doc.setTextColor(60,60,60);
+            wrapped.forEach(w => { w.forEach(line => { doc.text(line, 24, ty); ty += lineH; }); ty += 2; });
+        }
+
         // Pie
         doc.setFont(undefined,'normal'); doc.setFontSize(9); doc.setTextColor(140,140,140);
         doc.text('Thank you for your business! · ' + companyName, 105, 275, { align:'center' });
         doc.text('Please remit the total balance above. Questions? Contact us anytime.', 105, 281, { align:'center' });
 
-        return { blob: doc.output('blob'), grandTotal, count: facturas.length };
+        return grandTotal;
     }
 
     printStatement() {
@@ -17870,6 +18030,9 @@ document.addEventListener('click', function(e) {
             </button>
             <button onclick="app.showCollectionEmailTemplate()" class="btn" style="background:#6c757d; color:white; padding:10px 18px; font-weight:bold;">
                 📧 Ver Plantilla de Correo Sugerida
+            </button>
+            <button onclick="app.openCobranzaPrintPreview()" class="btn" style="background:#c0392b; color:white; padding:10px 18px; font-weight:bold;">
+                🖨️ Imprimir Estados de Cuenta (correo)
             </button>
             <button onclick="app.closeCobranzaModal()" class="btn" style="background:#95a5a6; color:white; padding:10px 18px; margin-left:auto;">
                 Cerrar
