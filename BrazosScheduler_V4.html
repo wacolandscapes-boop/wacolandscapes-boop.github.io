@@ -4620,6 +4620,16 @@ class Scheduler {
             !p.periodKey || _porLlave.get(p.periodKey) === p
         );
 
+        // Tarjetas que quedaron GUARDADAS antes de marcar "🚫 No facturar por Brazos"
+        // (ej. Hospitaller, ahora facturado por Victor). Las rutas de generación ya no
+        // crean nuevas, pero las viejas seguían apareciendo: aquí se retiran.
+        const _noFacturar = new Set(
+            (this.clis || []).filter(c => c.excludeInvoicing).map(c => c.name)
+        );
+        if (_noFacturar.size) {
+            this.pendingInvoices = this.pendingInvoices.filter(p => !_noFacturar.has(p.clientName));
+        }
+
         // Helper: verificar si ya existe factura generada/enviada para un cliente y período específico
         // (esta versión de coincidencia EXACTA la sigue usando tal cual la regla de
         // Fin de Mes más abajo — no se toca a propósito).
@@ -6033,27 +6043,37 @@ class Scheduler {
             const cli = this.clis.find(c => c.name === inv.clientName) || {};
             const terms = (cli.paymentTerms !== undefined) ? parseInt(cli.paymentTerms) : 15;
             const hist = inv.sentHistory || [];
-            const baseDateStr = hist.length > 0 ? hist[hist.length - 1].date.split('T')[0] : (inv.sentAt || inv.generatedDate);
+            // Reenviar un recordatorio NO reinicia el reloj del atraso.
+            const firstSentStr = hist.length > 0 ? hist[0].date.split('T')[0] : (inv.sentAt || inv.generatedDate);
+            const lastSentStr  = hist.length > 0 ? hist[hist.length - 1].date.split('T')[0] : (inv.sentAt || inv.generatedDate);
+            // El plazo cuenta desde el FIN DEL PERIODO DE SERVICIO (el trabajo ya se hizo),
+            // no desde que se envió la factura. Así una factura de mayo enviada en julio
+            // aparece con el atraso REAL. Si la factura no trae periodo (manuales viejas),
+            // se cae al primer envío / generación como antes.
+            const baseDateStr = inv.endDate || inv.startDate || firstSentStr;
+            if (!baseDateStr) return;
             const baseDate = new Date(baseDateStr + 'T00:00:00');
             const dueDate = new Date(baseDate);
             dueDate.setDate(dueDate.getDate() + terms);
-            if (today <= dueDate) return; // todavía no vence, no es "atrasada"
+            const yaVencio = today > dueDate;
+            // Por defecto solo las vencidas; con "incluir no vencidas" se muestran todas las no pagadas
+            if (!yaVencio && !this._cobranzaIncludeAll) return;
 
-            const daysLate = Math.floor((today - dueDate) / (1000 * 60 * 60 * 24));
+            const daysLate = yaVencio ? Math.floor((today - dueDate) / (1000 * 60 * 60 * 24)) : 0;
             const saldo = inv.status === 'parcial' ? (parseFloat(inv.total||0) - parseFloat(inv.paidAmount||0)) : parseFloat(inv.total||0);
 
             if (!byClient[inv.clientName]) {
                 byClient[inv.clientName] = {
                     clientName: inv.clientName,
                     email: this.getClientEmail(cli) || inv.clientEmail || '',
-                    invoices: [], totalDebt: 0, oldestDueDate: dueDate, lastSentDate: baseDateStr, maxDaysLate: 0
+                    invoices: [], totalDebt: 0, oldestDueDate: dueDate, lastSentDate: lastSentStr, maxDaysLate: 0
                 };
             }
             const c = byClient[inv.clientName];
             c.invoices.push({ num: inv.invoiceNumber, saldo, daysLate });
             c.totalDebt += saldo;
             if (dueDate < c.oldestDueDate) c.oldestDueDate = dueDate;
-            if (baseDateStr > c.lastSentDate) c.lastSentDate = baseDateStr;
+            if (lastSentStr > c.lastSentDate) c.lastSentDate = lastSentStr;
             if (daysLate > c.maxDaysLate) c.maxDaysLate = daysLate;
         });
 
@@ -6071,19 +6091,37 @@ class Scheduler {
             document.getElementById('cobranzaCount').textContent = '0 clientes atrasados';
             return;
         }
-        document.getElementById('cobranzaCount').textContent = `${list.length} cliente(s) atrasado(s)`;
+        document.getElementById('cobranzaCount').textContent = this._cobranzaIncludeAll
+            ? `${list.length} cliente(s) con saldo pendiente`
+            : `${list.length} cliente(s) atrasado(s)`;
         tbody.innerHTML = list.map((c, i) => `
             <tr>
-                <td style="text-align:center;"><input type="checkbox" class="cobranzaCheck" data-idx="${i}" ${c.email ? 'checked' : ''} ${!c.email ? 'disabled title=\"Sin email registrado\"' : ''}></td>
+                <td style="text-align:center;"><input type="checkbox" class="cobranzaCheck" data-idx="${i}" data-name="${String(c.clientName).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" checked ${!c.email ? 'title="Sin email — sirve para imprimir la carta por correo"' : ''}></td>
                 <td>${c.clientName}</td>
                 <td style="font-size:0.8rem;color:#666;">${c.email || '⚠️ sin email'}</td>
                 <td style="text-align:center;">${c.invoices.length}</td>
                 <td style="text-align:right;font-weight:bold;color:#c0392b;">$${c.totalDebt.toFixed(2)}</td>
-                <td style="text-align:center;">${c.maxDaysLate} días</td>
+                <td style="text-align:center;">${c.maxDaysLate > 0 ? c.maxDaysLate + ' días' : '<span style="color:#888;font-size:0.8rem;">aún no vence</span>'}</td>
                 <td style="text-align:center;font-size:0.8rem;">${c.lastSentDate}</td>
                 <td><input type="text" value="${(this.collectionNotes[c.clientName]||'').replace(/"/g,'&quot;')}" placeholder="¿Por qué está atrasado?" onchange="app.saveCollectionNote('${c.clientName.replace(/'/g,"\\'")}', this.value)" style="width:100%;padding:4px 6px;font-size:0.8rem;border:1px solid #ccc;border-radius:4px;"></td>
             </tr>
         `).join('');
+    }
+
+    // Alterna si la lista incluye también lo no pagado que todavía no vence
+    setCobranzaIncludeAll(on) {
+        this._cobranzaIncludeAll = !!on;
+        const chk = document.getElementById('cobranzaIncludeAll');
+        this.openCobranzaModal();
+        if (chk) chk.checked = !!on;
+    }
+
+    // Marca o desmarca TODOS los checkboxes de la lista de Cobranza (alterna según el estado actual)
+    toggleAllCobranzaChecks() {
+        const chks = [...document.querySelectorAll('.cobranzaCheck')];
+        if (!chks.length) return;
+        const allChecked = chks.every(c => c.checked);
+        chks.forEach(c => { c.checked = !allChecked; });
     }
 
     saveCollectionNote(clientName, note) {
@@ -6131,12 +6169,16 @@ class Scheduler {
         const list = this._cobranzaList || [];
         if (!list.length) { alert('No hay clientes atrasados para imprimir.'); return; }
         const money = n => '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        // Hereda lo que ya venías marcando/desmarcando en la lista de Cobranza
         const old = document.getElementById('cobranzaPrintModal');
         if (old) old.remove();
         const overlay = document.createElement('div');
         overlay.id = 'cobranzaPrintModal';
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:12050;display:flex;align-items:center;justify-content:center;padding:20px;';
         overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        // Respeta lo que ya marcaste/desmarcaste en la lista de Cobranza
+        const preSel = [...document.querySelectorAll('.cobranzaCheck')];
+        const selNames = preSel.length ? preSel.filter(k => k.checked).map(k => k.getAttribute('data-name')) : null;
         const rows = list.map(c => {
             const client = (this.clis || []).find(x => x.name === c.clientName) || {};
             const hasAddr = this.getClientAddressLines(client).length > 0;
@@ -6145,7 +6187,7 @@ class Scheduler {
                 : (!c.email ? '<span style="color:#999;font-size:0.72rem;">sin email (por eso el correo físico)</span>' : '');
             const nm = String(c.clientName).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
             return `<label class="cpz-row" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #f0f0f0;cursor:pointer;">
-                <input type="checkbox" class="cpz-chk" data-name="${nm}" checked onchange="app._updateCobranzaPrintCount()" style="width:17px;height:17px;flex:0 0 auto;">
+                <input type="checkbox" class="cpz-chk" data-name="${nm}" ${(!selNames || selNames.includes(c.clientName)) ? 'checked' : ''} onchange="app._updateCobranzaPrintCount()" style="width:17px;height:17px;flex:0 0 auto;">
                 <span style="flex:1;min-width:0;">
                     <span style="font-weight:600;color:#1f2937;">${c.clientName}</span>
                     ${warn ? '<br>' + warn : ''}
@@ -6165,9 +6207,10 @@ class Scheduler {
                     </div>
                     <button onclick="document.getElementById('cobranzaPrintModal').remove()" style="background:rgba(255,255,255,0.25);color:white;border:none;font-size:1.3rem;cursor:pointer;border-radius:6px;width:34px;height:34px;line-height:1;">×</button>
                 </div>
-                <div style="padding:10px 16px;border-bottom:1px solid #eee;display:flex;gap:16px;align-items:center;font-size:0.85rem;">
-                    <span onclick="app._toggleAllCobranzaPrint(true)" style="color:#2563eb;cursor:pointer;">Seleccionar todos</span>
-                    <span onclick="app._toggleAllCobranzaPrint(false)" style="color:#2563eb;cursor:pointer;">Ninguno</span>
+                <div style="padding:10px 16px;border-bottom:1px solid #eee;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                    <button onclick="app._toggleAllCobranzaPrint(true)" style="background:#2c3e50;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:0.82rem;font-weight:bold;">☑️ Marcar todos</button>
+                    <button onclick="app._toggleAllCobranzaPrint(false)" style="background:#7f8c8d;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:0.82rem;font-weight:bold;">⬜ Desmarcar todos</button>
+                    <span style="font-size:0.78rem;color:#888;">Hereda lo que marcaste en Cobranza</span>
                 </div>
                 <div style="overflow-y:auto;flex:1;">${rows}</div>
                 <div style="padding:14px 18px;border-top:1px solid #eee;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
@@ -6176,6 +6219,7 @@ class Scheduler {
                 </div>
             </div>`;
         document.body.appendChild(overlay);
+        this._updateCobranzaPrintCount();
     }
 
     _updateCobranzaPrintCount() {
@@ -18007,6 +18051,10 @@ document.addEventListener('click', function(e) {
             "Atrasado" = factura enviada o con pago parcial cuyo plazo (Términos de Pago del cliente) ya venció.
             Selecciona a quién avisar, escribe una nota si el cliente te explica la razón, y usa los botones de abajo para armar el correo.
         </p>
+        <label style="display:inline-flex; align-items:center; gap:8px; margin:0 0 12px; font-size:0.88rem; color:#444; cursor:pointer;">
+            <input type="checkbox" id="cobranzaIncludeAll" onchange="app.setCobranzaIncludeAll(this.checked)" style="width:16px;height:16px;">
+            Incluir también las facturas <b>sin pagar que aún no vencen</b> (para ver TODO lo pendiente)
+        </label>
         <div style="max-height: 450px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px;">
             <table class="finance-table" style="width:100%;">
                 <thead>
@@ -18025,6 +18073,9 @@ document.addEventListener('click', function(e) {
             </table>
         </div>
         <div style="display:flex; gap:10px; margin-top:15px; flex-wrap:wrap;">
+            <button onclick="app.toggleAllCobranzaChecks()" class="btn" style="background:#34495e; color:white; padding:10px 18px; font-weight:bold;">
+                ☑️ Marcar / Desmarcar Todos
+            </button>
             <button onclick="app.copyCollectionEmails()" class="btn" style="background:#1a56a0; color:white; padding:10px 18px; font-weight:bold;">
                 📋 Copiar Correos Seleccionados
             </button>
