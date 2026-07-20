@@ -1229,6 +1229,17 @@
                             </label>
                             <div style="font-size:0.72rem; color:#856404; margin-top:2px;">El cliente/propiedad sigue programándose normal en el calendario, pero nunca aparece en Pendientes, Urgentes ni se le genera factura desde aquí.</div>
                         </div>
+                        <div style="grid-column:span 2; background:#f3e8ff; border:1px solid #9333ea; border-radius:6px; padding:8px; margin-top:4px;">
+                            <label style="display:flex; align-items:center; gap:6px; font-size:0.82rem; font-weight:700; color:#6b21a8; cursor:pointer;">
+                                <input type="checkbox" id="cliServicePaused" style="width:auto;">
+                                ⏸️ Servicio suspendido / pausado
+                            </label>
+                            <div style="display:flex; align-items:center; gap:6px; margin-top:6px;">
+                                <label style="font-size:0.75rem; color:#6b21a8; white-space:nowrap;">Suspendido desde:</label>
+                                <input type="date" id="cliPausedSince" style="flex:1; padding:4px 6px; border:1px solid #c4b5fd; border-radius:4px; font-size:0.8rem;">
+                            </div>
+                            <div style="font-size:0.72rem; color:#6b21a8; margin-top:4px;">El cliente deja de aparecer en el calendario a partir de esa fecha y ya no se le generan Pendientes ni facturas. <b>Nada se borra</b>: el historial anterior se conserva y al desmarcarlo todo vuelve como estaba.</div>
+                        </div>
                         <div style="grid-column:span 2; background:#eff6ff; border:1px solid #3b82f6; border-radius:6px; padding:8px; margin-top:4px;">
                             <label style="font-size:0.85rem; font-weight:700; color:#1d4ed8; display:flex; align-items:center; gap:8px; cursor:pointer;">
                                 <input type="checkbox" id="cliApplyTax" checked style="width:16px; height:16px; accent-color:#3b82f6;">
@@ -1712,6 +1723,11 @@ class Scheduler {
         // Pendientes que el usuario descartó a propósito (botón ❌) — para que NO se
         // vuelvan a recrear la próxima vez que se recalculen las pendientes.
         this.dismissedPendingKeys = JSON.parse(localStorage.getItem('v35_dismissedPending')) || [];
+        // LÁPIDAS (tombstones): IDs de registros BORRADOS a propósito, en formato "tipo:id"
+        // (ej. "clis:cli_123"). La fusión con Drive es por UNIÓN, así que sin esta lista un
+        // registro borrado aquí volvía a entrar desde la copia de Drive. Con la lápida, el
+        // borrado se propaga y es DEFINITIVO en todos los dispositivos.
+        this.deletedIds = JSON.parse(localStorage.getItem('v35_deletedIds')) || [];
         // Descartes por SERVICIO real (no por la clave de cada regla) — para que borrar
         // una pendiente no reaparezca por otra regla (ej. la red de seguridad) usando una
         // clave distinta para el mismo servicio.
@@ -2040,6 +2056,7 @@ class Scheduler {
         localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices || []));
         localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices || []));
         localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys || []));
+        localStorage.setItem('v35_deletedIds', JSON.stringify(this.deletedIds || []));
         localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds || []));
         localStorage.setItem('v35_collectionNotes', JSON.stringify(this.collectionNotes || {}));
         localStorage.setItem('v35_estimates', JSON.stringify(this.estimates || []));
@@ -2521,11 +2538,29 @@ class Scheduler {
         } catch(e) { return null; }
     }
 
+    // ¿Este cliente está suspendido en esa fecha? (⏸️ Servicio suspendido / pausado)
+    _cliPausado(cli, dateStr) {
+        if (!cli || !cli.servicePaused) return false;
+        if (!cli.pausedSince) return true;            // sin fecha → suspendido siempre
+        return String(dateStr || '') >= String(cli.pausedSince);
+    }
+
+    // ¿No se le debe generar Pendiente/factura? (por facturarse por fuera o por estar pausado)
+    _cliSinFacturar(cli) {
+        return !!(cli && (cli.excludeInvoicing || cli.servicePaused));
+    }
+
     _fillCell(cell, dStr, nombreGrupo, fCli, fRecurrence='all') {
         let daily = this.servs.filter(s => {
             if(s.date !== dStr) return false;
             if(s.empId === nombreGrupo) return true;
             return this.grupos[nombreGrupo].includes(s.empId.toString());
+        });
+        // Clientes con el servicio SUSPENDIDO: se ocultan del calendario a partir de la
+        // fecha de suspensión. No se borra nada — al reactivarlos vuelven a aparecer.
+        daily = daily.filter(s => {
+            const _c = this.clis.find(c => String(c.id) === String(s.cliId));
+            return !this._cliPausado(_c, s.date);
         });
         if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
                         if(fRecurrence !== 'all'){daily=daily.filter(s=>{const _c=this.clis.find(c=>c.id==s.cliId);return _c && _c.type===fRecurrence;});}
@@ -4624,7 +4659,7 @@ class Scheduler {
         // (ej. Hospitaller, ahora facturado por Victor). Las rutas de generación ya no
         // crean nuevas, pero las viejas seguían apareciendo: aquí se retiran.
         const _noFacturar = new Set(
-            (this.clis || []).filter(c => c.excludeInvoicing).map(c => c.name)
+            (this.clis || []).filter(c => this._cliSinFacturar(c)).map(c => c.name)
         );
         if (_noFacturar.size) {
             this.pendingInvoices = this.pendingInvoices.filter(p => !_noFacturar.has(p.clientName));
@@ -4741,7 +4776,7 @@ class Scheduler {
             // Clientes/propiedades marcados "No facturar por Brazos" (ej. Hospitaller
             // atendido por Victor) se excluyen aquí — siguen programándose normal en el
             // calendario, pero nunca generan pendiente/urgente/factura desde el Scheduler.
-            const clientsActivos = clientsAll.filter(c => !c.excludeInvoicing);
+            const clientsActivos = clientsAll.filter(c => !this._cliSinFacturar(c));
             if (clientsActivos.length === 0) return;
 
             // ── Separar CONSTRUCCIÓN del resto ──────────────────────────────────────
@@ -5034,7 +5069,7 @@ class Scheduler {
             const weeklyPropsByName = {};
             this.clis.forEach(c => {
                 if (c.type === 'construccion') return;
-                if (c.excludeInvoicing) return;
+                if (this._cliSinFacturar(c)) return;
                 if (c.billingPeriod !== 'weekly') return;
                 (weeklyPropsByName[c.name] = weeklyPropsByName[c.name] || []).push(c);
             });
@@ -5115,7 +5150,7 @@ class Scheduler {
                 // Construcción ya tiene su propio manejo completo arriba (se expande solo,
                 // sin cortes por fecha) — no hace falta que la red de seguridad la repita.
                 if (propCli.type === 'construccion') return;
-                if (propCli.excludeInvoicing) return; // "No facturar por Brazos"
+                if (this._cliSinFacturar(propCli)) return; // "No facturar por Brazos" o servicio pausado
                 if (propCli.billingPeriod === 'weekly') return; // ya cubierto arriba en (A1)
                 const oldServs = this.servs.filter(s =>
                     String(s.cliId) === String(propCli.id) && !s.cancelled &&
@@ -5143,7 +5178,13 @@ class Scheduler {
 
                 const dates = unhandled.map(s => s.date).sort();
                 const propLabel = (propCli.propId && propCli.propId !== propCli.name) ? propCli.propId : propCli.name;
-                const total = unhandled.reduce((sum) => sum + parseFloat(propCli.price || 0), 0);
+                // Precio FIJO MENSUAL: el monto del mes se cobra UNA vez, no una por servicio.
+                // Antes se multiplicaba (Bob Mills $1,300 salía $2,600; Home Abstract $3,574
+                // salía $7,148), con riesgo de facturar el doble desde esta tarjeta.
+                const esFijoMensual = (propCli.billingPeriod === 'fixed_monthly' || propCli.invoicingType === 'fixed_monthly');
+                const total = esFijoMensual
+                    ? parseFloat(propCli.price || 0)
+                    : unhandled.reduce((sum) => sum + parseFloat(propCli.price || 0), 0);
 
                 // Si la tarjeta YA EXISTE, se ACTUALIZA con los servicios que hay hoy — antes
                 // aquí había un `if (existe) return;` que la saltaba por completo, así que la
@@ -5205,7 +5246,7 @@ class Scheduler {
                 const gClients = (g.clientIds && g.clientIds.length > 0)
                     ? this.clis.filter(c => g.clientIds.map(String).includes(String(c.id)))
                     : this.clis.filter(c => c.name === g.clientName);
-                if (gClients.length > 0 && gClients.every(c => c.excludeInvoicing)) return;
+                if (gClients.length > 0 && gClients.every(c => this._cliSinFacturar(c))) return;
                 const isConstruccionInv = gClients.some(c => c.type === 'construccion');
                 const invColumn = columnFor(gClients[0]?.billingPeriod, isConstruccionInv);
 
@@ -5259,6 +5300,27 @@ class Scheduler {
                     reason: `📤 Factura #${g.invoiceNumber} generada el ${g.generatedDate} — nunca se envió`,
                     createdAt: today.toISOString()
                 });
+            });
+        })();
+
+        // ── Absorber tarjetas de RED DE SEGURIDAD ya cubiertas por la del MES COMPLETO ──
+        // Las dos reglas conviven a propósito, pero la del mes completo solo nace después
+        // del día 15: antes de esa fecha la red de seguridad ya había creado su tarjeta con
+        // días del mismo mes, y pasando el 15 quedaban las dos (se veía como duplicado).
+        // Si TODOS los días de la tarjeta de red de seguridad ya caen dentro del periodo de
+        // la tarjeta del mes, sobra y se retira. Las que traen días de meses anteriores
+        // (atrasos reales de mayo/junio) NO se tocan.
+        (() => {
+            const recurrentes = this.pendingInvoices.filter(p =>
+                p.periodKey && String(p.periodKey).endsWith('-recurrente'));
+            if (!recurrentes.length) return;
+            this.pendingInvoices = this.pendingInvoices.filter(p => {
+                if (!p.periodKey || !String(p.periodKey).includes('-backlog-redseguridad')) return true;
+                const cubierta = recurrentes.some(r =>
+                    r.clientName === p.clientName &&
+                    p.startDate >= r.startDate && p.endDate <= r.endDate
+                );
+                return !cubierta;
             });
         })();
 
@@ -9993,6 +10055,8 @@ Motivo de cancelación (opcional):`);
                 const taxRate = document.getElementById('cliTaxRate') ? parseFloat(document.getElementById('cliTaxRate').value) || 8.25 : (this.clis[idx].taxRate || 8.25);
                 const cobraImpuestos = document.getElementById('cliApplyTax') ? document.getElementById('cliApplyTax').checked : (this.clis[idx].cobraImpuestos !== false);
                 const excludeInvoicing = document.getElementById('cliExcludeInvoicing') ? document.getElementById('cliExcludeInvoicing').checked : (this.clis[idx].excludeInvoicing || false);
+                const servicePaused = document.getElementById('cliServicePaused') ? document.getElementById('cliServicePaused').checked : (this.clis[idx].servicePaused || false);
+                const pausedSince = document.getElementById('cliPausedSince') ? (document.getElementById('cliPausedSince').value || '') : (this.clis[idx].pausedSince || '');
 
                 if(isMulti) {
                     // Para multi-propiedad: actualizar datos base y agregar/quitar propiedades
@@ -10013,6 +10077,8 @@ Motivo de cancelación (opcional):`);
                         c.taxRate = taxRate;
                         c.cobraImpuestos = cobraImpuestos;
                         c.excludeInvoicing = excludeInvoicing;
+                        c.servicePaused = servicePaused;
+                        c.pausedSince = pausedSince;
                         if (stripeCustomerId) c.stripeCustomerId = stripeCustomerId;
                     };
 
@@ -10058,6 +10124,8 @@ Motivo de cancelación (opcional):`);
                                 serviceType, billingPeriod: fp.billingPeriod || billingPeriod, invoicingType,
                                 taxRate: taxRate,
                                 cobraImpuestos: cobraImpuestos,
+                                servicePaused: servicePaused,
+                                pausedSince: pausedSince,
                             });
                             existingPropIdsNorm.push(fpNorm); // evitar duplicados en el mismo save
                         }
@@ -10078,7 +10146,8 @@ Motivo de cancelación (opcional):`);
                         name, propId, price, tel, email, address, city, zip,
                         type, serviceType, billingPeriod, invoicingType,
                         excludeInvoicing,
-                        taxRate, cobraImpuestos
+                        taxRate, cobraImpuestos,
+                        servicePaused, pausedSince
                     };
                 }
                 if (oldType !== type) {
@@ -10168,6 +10237,8 @@ Motivo de cancelación (opcional):`);
             const taxRate = document.getElementById('cliTaxRate') ? parseFloat(document.getElementById('cliTaxRate').value) || 8.25 : 8.25;
             const cobraImpuestos = document.getElementById('cliApplyTax') ? document.getElementById('cliApplyTax').checked : true;
             const excludeInvoicingNew = document.getElementById('cliExcludeInvoicing') ? document.getElementById('cliExcludeInvoicing').checked : false;
+            const servicePausedNew = document.getElementById('cliServicePaused') ? document.getElementById('cliServicePaused').checked : false;
+            const pausedSinceNew = document.getElementById('cliPausedSince') ? (document.getElementById('cliPausedSince').value || '') : '';
             const newCli = {
                 id: Date.now(),
                 name: name,
@@ -10187,6 +10258,8 @@ Motivo de cancelación (opcional):`);
                 taxRate: taxRate,
                 cobraImpuestos: cobraImpuestos,
                 excludeInvoicing: excludeInvoicingNew,
+                servicePaused: servicePausedNew,
+                pausedSince: pausedSinceNew,
             };
             this.clis.push(newCli);
         }
@@ -10230,6 +10303,11 @@ Motivo de cancelación (opcional):`);
             if (document.getElementById('cliExcludeInvoicing')) {
                 document.getElementById('cliExcludeInvoicing').checked = cli.excludeInvoicing || false;
             }
+            if (document.getElementById('cliServicePaused')) {
+                document.getElementById('cliServicePaused').checked = cli.servicePaused || false;
+                const ps = document.getElementById('cliPausedSince');
+                if (ps) ps.value = cli.pausedSince || '';
+            }
             if (document.getElementById('cliAutoCharge')) {
                 document.getElementById('cliAutoCharge').checked = cli.autoCharge || false;
             }
@@ -10269,6 +10347,23 @@ Motivo de cancelación (opcional):`);
         btn.textContent = '💾 ACTUALIZAR CLIENTE';
         btn.style.background = '#f39c12';
     }
+    // Marca un registro como BORRADO DEFINITIVO para que la fusión con Drive no lo reviva.
+    _tombstone(type, id) {
+        if (id === undefined || id === null || id === '') return;
+        this.deletedIds = this.deletedIds || [];
+        const key = type + ':' + String(id);
+        if (!this.deletedIds.includes(key)) this.deletedIds.push(key);
+    }
+
+    // Retira de las listas cualquier registro que tenga lápida (se usa tras fusionar con Drive).
+    _applyTombstones() {
+        const dead = new Set(this.deletedIds || []);
+        if (!dead.size) return;
+        this.clis  = (this.clis  || []).filter(c => !dead.has('clis:'  + String(c.id)));
+        this.servs = (this.servs || []).filter(s => !dead.has('servs:' + String(s.id)));
+        this.emps  = (this.emps  || []).filter(e => !dead.has('emps:'  + String(e.id)));
+    }
+
     delCli(id) {
         const cli = this.clis.find(c => c.id == id);
         if (!cli) return;
@@ -10282,6 +10377,7 @@ Motivo de cancelación (opcional):`);
         if (allServs.length === 0) {
             // Sin servicios — borrar directo
             if (!confirm(`¿Eliminar cliente "${cli.name}"?\nNo tiene servicios registrados.`)) return;
+            this._tombstone('clis', id);
             this.clis = this.clis.filter(c => c.id != id);
             this.save(); this.renderCat(); this.refreshSels(); this.render();
             return;
@@ -10335,17 +10431,20 @@ Motivo de cancelación (opcional):`);
 
         if (mode === 'future') {
             // Borrar solo servicios futuros (hoy en adelante)
-            const removed = this.servs.filter(s => s.cliId == id && s.date >= today).length;
+            const doomed = this.servs.filter(s => s.cliId == id && s.date >= today);
+            doomed.forEach(s => this._tombstone('servs', s.id));
             this.servs = this.servs.filter(s => !(s.cliId == id && s.date >= today));
-            console.log(`🗑️ ${removed} servicios futuros eliminados`);
+            console.log(`🗑️ ${doomed.length} servicios futuros eliminados`);
         } else if (mode === 'all') {
             // Borrar todo el historial
-            const removed = this.servs.filter(s => s.cliId == id).length;
+            const doomed = this.servs.filter(s => s.cliId == id);
+            doomed.forEach(s => this._tombstone('servs', s.id));
             this.servs = this.servs.filter(s => s.cliId != id);
-            console.log(`🗑️ ${removed} servicios eliminados`);
+            console.log(`🗑️ ${doomed.length} servicios eliminados`);
         }
         // mode === 'none' → conservar servicios, solo borrar cliente
 
+        this._tombstone('clis', id);
         this.clis = this.clis.filter(c => c.id != id);
         this.save(); this.renderCat(); this.refreshSels(); this.render();
     }
@@ -10456,7 +10555,7 @@ Motivo de cancelación (opcional):`);
             return `<div class="list-item" style="flex-direction:column;align-items:stretch;padding:8px 10px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <span style="cursor:${hasMultiple?'pointer':'default'}" onclick="event.stopPropagation();${hasMultiple?`var e=document.getElementById('${expandId}');e.style.display=e.style.display==='none'?'block':'none';`:''}" >
-                        <b>${name}</b>${hasMultiple ? ` <span style="background:#0e7490;color:white;font-size:0.65rem;padding:1px 6px;border-radius:10px;margin-left:4px;">${props.length} ▼</span>` : ''}
+                        <b>${name}</b>${hasMultiple ? ` <span style="background:#0e7490;color:white;font-size:0.65rem;padding:1px 6px;border-radius:10px;margin-left:4px;">${props.length} ▼</span>` : ''}${props.every(p => p.servicePaused) ? ` <span style="background:#9333ea;color:white;font-size:0.65rem;padding:1px 6px;border-radius:10px;margin-left:4px;" title="Servicio suspendido${first.pausedSince ? ' desde ' + this.formatDateUS(first.pausedSince) : ''}">⏸️ PAUSADO</span>` : ''}${(!props.every(p => p.servicePaused) && props.every(p => p.excludeInvoicing)) ? ` <span style="background:#f39c12;color:white;font-size:0.65rem;padding:1px 6px;border-radius:10px;margin-left:4px;" title="No se factura por Brazos">🚫 NO FACTURAR</span>` : ''}
                         <br><small style="color:#666">${first.tel||'Sin tel'} · ${first.address||'Sin dirección'} · ${first.type||''}</small>
                         <br><small style="${first.email ? 'color:#2563eb;' : 'color:#e74c3c;font-weight:600;'}">📧 ${first.email || '⚠ Sin email'}</small>
                     </span>
@@ -16217,6 +16316,7 @@ Motivo de cancelación (opcional):`);
                 pendingInvoices: this.pendingInvoices || [],
                 dismissedPendingKeys: this.dismissedPendingKeys || [],
                 dismissedServiceIds: this.dismissedServiceIds || [],
+                deletedIds: this.deletedIds || [],
                 collectionNotes: this.collectionNotes || {},
                 nominaTotales: this.nominaTotales || [],
                 companyConfig: localStorage.getItem('companyConfig'),
@@ -16397,6 +16497,7 @@ Motivo de cancelación (opcional):`);
                 if (data.generatedInvoices){ this.generatedInvoices = data.generatedInvoices; localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices)); }
                 if (data.pendingInvoices)  { this.pendingInvoices = data.pendingInvoices; localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices)); }
                 if (data.dismissedPendingKeys) { this.dismissedPendingKeys = data.dismissedPendingKeys; localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys)); }
+                if (data.deletedIds)       { this.deletedIds = [...new Set([...(this.deletedIds||[]), ...data.deletedIds])]; localStorage.setItem('v35_deletedIds', JSON.stringify(this.deletedIds)); this._applyTombstones(); }
                 if (data.dismissedServiceIds) { this.dismissedServiceIds = data.dismissedServiceIds; localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds)); }
                 if (data.collectionNotes) { this.collectionNotes = data.collectionNotes; localStorage.setItem('v35_collectionNotes', JSON.stringify(this.collectionNotes)); }
                 if (data.nominaTotales)    { this.nominaTotales = data.nominaTotales; localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales)); }
@@ -16432,6 +16533,7 @@ Motivo de cancelación (opcional):`);
                 pendingInvoices: this.pendingInvoices || [],
                 dismissedPendingKeys: this.dismissedPendingKeys || [],
                 dismissedServiceIds: this.dismissedServiceIds || [],
+                deletedIds: this.deletedIds || [],
                 collectionNotes: this.collectionNotes || {},
             };
             const driveSide = {
@@ -16440,6 +16542,7 @@ Motivo de cancelación (opcional):`);
                 pendingInvoices: data.pendingInvoices || [],
                 dismissedPendingKeys: data.dismissedPendingKeys || [],
                 dismissedServiceIds: data.dismissedServiceIds || [],
+                deletedIds: data.deletedIds || [],
                 collectionNotes: data.collectionNotes || {},
             };
             const winner = localWins ? localSide : driveSide;
@@ -16480,6 +16583,10 @@ Motivo de cancelación (opcional):`);
             // para que una pendiente ya descartada no reaparezca por venir del otro lado.
             this.dismissedPendingKeys = [...new Set([...(winner.dismissedPendingKeys||[]), ...(loser.dismissedPendingKeys||[])])];
             this.dismissedServiceIds = [...new Set([...(winner.dismissedServiceIds||[]), ...(loser.dismissedServiceIds||[])])];
+            // Lápidas: unión de ambos lados (un borrado hecho en CUALQUIER dispositivo manda)
+            // y se aplican al resultado fusionado, para que lo borrado no reviva desde Drive.
+            this.deletedIds = [...new Set([...(winner.deletedIds||[]), ...(loser.deletedIds||[])])];
+            this._applyTombstones();
             this.collectionNotes = Object.assign({}, loser.collectionNotes || {}, winner.collectionNotes || {});
             this.pendingInvoices = this.pendingInvoices.filter(p => !this.dismissedPendingKeys.includes(p.periodKey));
             this.pendingInvoices = this.pendingInvoices.filter(p =>
@@ -16514,6 +16621,7 @@ Motivo de cancelación (opcional):`);
             this.detectPendingInvoices();
 
             // Guardar todo lo fusionado en localStorage
+            localStorage.setItem('v35_deletedIds', JSON.stringify(this.deletedIds || []));
             localStorage.setItem('v35_emps', JSON.stringify(this.emps));
             localStorage.setItem('v35_clis', JSON.stringify(this.clis));
             localStorage.setItem('v35_servs', JSON.stringify(this.servs));
