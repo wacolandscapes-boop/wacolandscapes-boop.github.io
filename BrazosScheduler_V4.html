@@ -1728,6 +1728,20 @@ class Scheduler {
         // registro borrado aquí volvía a entrar desde la copia de Drive. Con la lápida, el
         // borrado se propaga y es DEFINITIVO en todos los dispositivos.
         this.deletedIds = JSON.parse(localStorage.getItem('v35_deletedIds')) || [];
+        // Red de seguridad: aplicar las lápidas AL ARRANCAR. Si por cualquier camino
+        // (una fusión parcial, un guardado a destiempo) un registro borrado alcanzó a
+        // quedarse en localStorage, aquí se retira y se vuelve a guardar limpio.
+        (() => {
+            const _antes = (this.clis || []).length + (this.servs || []).length + (this.emps || []).length;
+            this._applyTombstones();
+            const _despues = (this.clis || []).length + (this.servs || []).length + (this.emps || []).length;
+            if (_despues !== _antes) {
+                localStorage.setItem('v35_clis', JSON.stringify(this.clis || []));
+                localStorage.setItem('v35_servs', JSON.stringify(this.servs || []));
+                localStorage.setItem('v35_emps', JSON.stringify(this.emps || []));
+                console.log('🪦 Lápidas aplicadas al arrancar: se retiraron', _antes - _despues, 'registro(s) borrado(s) que habían revivido.');
+            }
+        })();
         // Descartes por SERVICIO real (no por la clave de cada regla) — para que borrar
         // una pendiente no reaparezca por otra regla (ej. la red de seguridad) usando una
         // clave distinta para el mismo servicio.
@@ -16638,7 +16652,14 @@ Motivo de cancelación (opcional):`);
                 if (data.generatedInvoices){ this.generatedInvoices = data.generatedInvoices; localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices)); }
                 if (data.pendingInvoices)  { this.pendingInvoices = data.pendingInvoices; localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices)); }
                 if (data.dismissedPendingKeys) { this.dismissedPendingKeys = data.dismissedPendingKeys; localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys)); }
-                if (data.deletedIds)       { this.deletedIds = [...new Set([...(this.deletedIds||[]), ...data.deletedIds])]; localStorage.setItem('v35_deletedIds', JSON.stringify(this.deletedIds)); this._applyTombstones(); }
+                if (data.deletedIds)       { this.deletedIds = [...new Set([...(this.deletedIds||[]), ...data.deletedIds])]; localStorage.setItem('v35_deletedIds', JSON.stringify(this.deletedIds)); }
+                // Las lápidas se aplican DESPUÉS de bajar todo, y se vuelve a guardar:
+                // antes se guardaban los clientes/servicios en localStorage sin filtrar y
+                // un registro borrado revivía en la siguiente recarga.
+                this._applyTombstones();
+                localStorage.setItem('v35_clis', JSON.stringify(this.clis || []));
+                localStorage.setItem('v35_servs', JSON.stringify(this.servs || []));
+                localStorage.setItem('v35_emps', JSON.stringify(this.emps || []));
                 if (data.dismissedServiceIds) { this.dismissedServiceIds = data.dismissedServiceIds; localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds)); }
                 if (data.collectionNotes) { this.collectionNotes = data.collectionNotes; localStorage.setItem('v35_collectionNotes', JSON.stringify(this.collectionNotes)); }
                 if (data.nominaTotales)    { this.nominaTotales = data.nominaTotales; localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales)); }
