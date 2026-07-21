@@ -10172,13 +10172,16 @@ Motivo de cancelación (opcional):`);
                     // Se conserva la propiedad si su REGISTRO sigue presente en el formulario
                     // (por ID) o, para filas sin ID, si su nombre sigue estando.
                     const idsEnForm = new Set(fieldProps.filter(p => p.cliId).map(p => String(p.cliId)));
-                    const nombresEnForm = fieldProps.map(p => (p.propId || '').trim().toLowerCase());
+                    // El respaldo por NOMBRE solo aplica a filas que no traen ID (recién
+                    // agregadas). Si se usara para todas, dos propiedades con el MISMO texto
+                    // se salvarían entre sí y el duplicado nunca se podría quitar.
+                    const nombresSinId = fieldProps.filter(p => !p.cliId).map(p => (p.propId || '').trim().toLowerCase());
                     this.clis = this.clis.filter(c => {
                         if(c.id === mainCli.id) return true;
                         if(c.name !== name) return true;
                         if(c.type!=='airbnb'&&c.type!=='construccion') return true;
                         const sigue = idsEnForm.has(String(c.id))
-                            || nombresEnForm.includes((c.propId || '').trim().toLowerCase());
+                            || nombresSinId.includes((c.propId || '').trim().toLowerCase());
                         // Si de verdad se quitó, dejar lápida para que no reviva desde Drive
                         if (!sigue) this._tombstone('clis', c.id);
                         return sigue;
