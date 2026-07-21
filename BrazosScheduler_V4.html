@@ -4996,14 +4996,21 @@ class Scheduler {
                 if (monthServs.length === 0) return;
 
                 let total = 0;
-                if (billingPeriod === 'fixed_monthly' || cli.invoicingType === 'fixed_monthly') {
-                    total = parseFloat(cli.price || 0);
-                } else {
-                    total = monthServs.reduce((sum, s) => {
-                        const c = this.clis.find(c => String(c.id) === String(s.cliId));
-                        return sum + parseFloat(c?.price || cli.price || 0);
-                    }, 0);
-                }
+                // Cada PROPIEDAD aporta su propio precio (multipropiedad con precios mixtos):
+                //   · propiedad de MONTO FIJO  → su precio una sola vez (si tuvo servicios el mes)
+                //   · propiedad por VISITA     → su precio × sus visitas del mes
+                // Para un cliente de una sola propiedad el resultado es idéntico al anterior.
+                const visitasPorProp = {};
+                monthServs.forEach(s => {
+                    const k = String(s.cliId);
+                    visitasPorProp[k] = (visitasPorProp[k] || 0) + 1;
+                });
+                Object.keys(visitasPorProp).forEach(cid => {
+                    const cProp = this.clis.find(x => String(x.id) === String(cid)) || cli;
+                    const propFija = (cProp.invoicingType === 'fixed_monthly' || cProp.billingPeriod === 'fixed_monthly');
+                    const precio = parseFloat(cProp.price !== undefined && cProp.price !== '' ? cProp.price : (cli.price || 0)) || 0;
+                    total += propFija ? precio : precio * visitasPorProp[cid];
+                });
 
                 const lastDay = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
 
@@ -9956,10 +9963,14 @@ Motivo de cancelación (opcional):`);
         this.save(); this.renderCat(); this.refreshSels();
     }
 
-    addPropField(value='', price='', billing='weekly') {
+    addPropField(value='', price='', billing='weekly', cliId='') {
         const list = document.getElementById('propFieldsList');
         if (!list) return;
         const row = document.createElement('div');
+        // La fila recuerda a QUÉ REGISTRO pertenece. Antes las propiedades se emparejaban
+        // por el TEXTO del nombre, así que al editarle el nombre a una propiedad la app ya
+        // no la reconocía y creaba otra en vez de actualizarla (caso Hyacinth).
+        if (cliId) row.dataset.cliId = String(cliId);
         row.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;align-items:center;';
         row.innerHTML = `
             <input type="text" placeholder="Nombre/ID propiedad" value="${value}"
@@ -9994,7 +10005,8 @@ Motivo de cancelación (opcional):`);
             const propId = inputs[0]?.value.trim() || '';
             const price = inputs[1]?.value.trim() || '';
             const billingPeriod = select?.value || 'weekly';
-            return propId ? { propId, price, billingPeriod } : null;
+            const cliId = row.dataset.cliId || '';
+            return propId ? { propId, price, billingPeriod, cliId } : null;
         }).filter(Boolean);
     }
 
@@ -10084,9 +10096,14 @@ Motivo de cancelación (opcional):`);
 
                     // Actualizar datos base en todos los registros que YA eran multipropiedad
                     existingProps.forEach(c => {
-                        // Precio y periodo individual por propiedad
-                        const fp = fieldProps.find(p => p.propId === c.propId);
+                        // Precio, periodo y NOMBRE individual por propiedad.
+                        // Se busca primero por ID de registro (así se puede RENOMBRAR una
+                        // propiedad sin que se cree otra); el texto es solo respaldo para
+                        // filas viejas que todavía no traen ID.
+                        const fp = fieldProps.find(p => p.cliId && String(p.cliId) === String(c.id))
+                                || fieldProps.find(p => !p.cliId && p.propId === c.propId);
                         if (fp) {
+                            if (fp.propId && fp.propId !== c.propId) c.propId = fp.propId;
                             c.price = fp.price || price;
                             c.billingPeriod = fp.billingPeriod || c.billingPeriod || billingPeriod;
                         } else {
@@ -10112,10 +10129,16 @@ Motivo de cancelación (opcional):`);
                     }
 
                     // Agregar propiedades genuinamente nuevas (que no correspondan a ningún registro existente)
-                    const fieldPropIds = fieldProps.map(p => p.propId.trim().toLowerCase());
-                    const existingPropIdsNorm = existingPropIds.map(p => (p || '').trim().toLowerCase());
+                    const existingPropIdsNorm = this.clis
+                        .filter(c => c.name === name)
+                        .map(c => (c.propId || '').trim().toLowerCase());
+                    const idsYaUsados = new Set(this.clis.filter(c => c.name === name).map(c => String(c.id)));
                     fieldProps.forEach((fp, i) => {
                         const fpNorm = (fp.propId || '').trim().toLowerCase();
+                        // Si la fila trae el ID de un registro existente, YA se actualizó arriba:
+                        // nunca debe crear una propiedad nueva (esto causaba el duplicado al
+                        // renombrar). Solo se crean las filas sin ID y con nombre no repetido.
+                        if (fp.cliId && idsYaUsados.has(String(fp.cliId))) return;
                         if(!existingPropIdsNorm.includes(fpNorm) && fp.propId.trim()) {
                             this.clis.push({
                                 id: String(Date.now() + i * 100 + Math.floor(Math.random() * 1000)), 
@@ -10131,12 +10154,20 @@ Motivo de cancelación (opcional):`);
                         }
                     });
 
-                    // Eliminar propiedades removidas en el formulario, pero nunca el registro principal
+                    // Eliminar propiedades removidas en el formulario, pero nunca el registro principal.
+                    // Se conserva la propiedad si su REGISTRO sigue presente en el formulario
+                    // (por ID) o, para filas sin ID, si su nombre sigue estando.
+                    const idsEnForm = new Set(fieldProps.filter(p => p.cliId).map(p => String(p.cliId)));
+                    const nombresEnForm = fieldProps.map(p => (p.propId || '').trim().toLowerCase());
                     this.clis = this.clis.filter(c => {
                         if(c.id === mainCli.id) return true;
                         if(c.name !== name) return true;
                         if(c.type!=='airbnb'&&c.type!=='construccion') return true;
-                        return fieldPropIds.includes((c.propId || '').trim().toLowerCase());
+                        const sigue = idsEnForm.has(String(c.id))
+                            || nombresEnForm.includes((c.propId || '').trim().toLowerCase());
+                        // Si de verdad se quitó, dejar lápida para que no reviva desde Drive
+                        if (!sigue) this._tombstone('clis', c.id);
+                        return sigue;
                     });
 
                 } else {
@@ -10335,9 +10366,9 @@ Motivo de cancelación (opcional):`);
                 if(isMulti) {
                     const allProps = this.clis.filter(c => c.name.trim().toLowerCase() === cli.name.trim().toLowerCase() && (c.type==='airbnb'||c.type==='unico'||c.type==='construccion'));
                     if(allProps.length > 0) {
-                        allProps.forEach(p => this.addPropField(p.propId || '', p.price || '', p.billingPeriod || 'weekly'));
+                        allProps.forEach(p => this.addPropField(p.propId || '', p.price || '', p.billingPeriod || 'weekly', p.id));
                     } else if(cli.propId) {
-                        this.addPropField(cli.propId, '', cli.billingPeriod || 'weekly');
+                        this.addPropField(cli.propId, '', cli.billingPeriod || 'weekly', cli.id);
                     }
                 }
             }
@@ -13302,6 +13333,86 @@ Motivo de cancelación (opcional):`);
         return next;
     }
 
+    // Revisa si el cliente YA tiene facturas activas cuyo periodo se cruza con el que se
+    // va a facturar. No bloquea (a veces es legítimo: trabajo extra en el mismo mes),
+    // pero obliga a confirmar para no cobrar dos veces el mismo servicio.
+    // Auditoría de posibles DOBLES COBROS: busca facturas activas del mismo cliente cuyo
+    // periodo de servicio se cruza. Es el mismo criterio del aviso al generar, pero
+    // aplicado a TODO el historial, para revisar lo que se facturó antes de ese aviso.
+    auditarDuplicados() {
+        const activas = (this.generatedInvoices || []).filter(g =>
+            g.status !== 'cancelada' && g.startDate && g.endDate);
+        const porCliente = {};
+        activas.forEach(g => {
+            const k = g.clientName || '(sin nombre)';
+            (porCliente[k] = porCliente[k] || []).push(g);
+        });
+        const pares = [];
+        Object.keys(porCliente).forEach(nom => {
+            const l = porCliente[nom];
+            for (let a = 0; a < l.length; a++) {
+                for (let b = a + 1; b < l.length; b++) {
+                    const A = l[a], B = l[b];
+                    const seCruzan = !(String(A.endDate) < String(B.startDate) || String(B.endDate) < String(A.startDate));
+                    if (seCruzan) pares.push({ nom, A, B });
+                }
+            }
+        });
+        const money = n => '$' + (parseFloat(n) || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+        const old = document.getElementById('auditDupModal');
+        if (old) old.remove();
+        const ov = document.createElement('div');
+        ov.id = 'auditDupModal';
+        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:12100;display:flex;align-items:center;justify-content:center;padding:20px;';
+        ov.onclick = e => { if (e.target === ov) ov.remove(); };
+        let cuerpo;
+        if (!pares.length) {
+            cuerpo = `<div style="padding:28px;text-align:center;color:#1e7e34;font-size:0.95rem;">
+                ✅ <b>Sin duplicados.</b><br><br>
+                <span style="color:#555;">Se revisaron ${activas.length} facturas activas y ninguna se cruza de periodo con otra del mismo cliente.</span></div>`;
+        } else {
+            cuerpo = `<div style="padding:12px 16px;">
+                <p style="margin:0 0 10px;font-size:0.85rem;color:#555;">Se encontraron <b>${pares.length}</b> par(es) de facturas del mismo cliente que cubren fechas que se cruzan. Revisa cada par: si son el mismo trabajo, <b>cancela una</b> (no la borres).</p>`
+                + pares.map(p => `
+                <div style="border:1px solid #f5c6cb;background:#fff5f5;border-radius:8px;padding:10px;margin-bottom:8px;">
+                    <div style="font-weight:700;color:#c0392b;margin-bottom:6px;">${p.nom}</div>
+                    ${[p.A, p.B].map(g => `<div style="font-size:0.83rem;padding:3px 0;">
+                        <b>#${g.invoiceNumber}</b> · ${this.formatDateUS(g.startDate)} a ${this.formatDateUS(g.endDate)}
+                        · <b>${money(g.total)}</b>
+                        · <span style="color:#666;">${g.status}${g.sentAt ? '' : ' · nunca enviada'}</span>
+                        ${(parseFloat(g.paidAmount)||0) > 0 ? ' · <span style="color:#1e7e34;font-weight:600;">PAGADA ' + money(g.paidAmount) + '</span>' : ''}
+                    </div>`).join('')}
+                </div>`).join('') + `</div>`;
+        }
+        ov.innerHTML = `<div style="background:#fff;border-radius:12px;max-width:700px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,0.35);">
+            <div style="position:sticky;top:0;background:#c0392b;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;">
+                <div><div style="font-weight:700;">🔍 Revisión de Duplicados</div>
+                <div style="font-size:0.76rem;opacity:0.9;">Facturas del mismo cliente con periodos que se cruzan</div></div>
+                <button onclick="document.getElementById('auditDupModal').remove()" style="background:rgba(255,255,255,0.25);border:none;color:#fff;font-size:1.3rem;cursor:pointer;border-radius:6px;width:34px;height:34px;line-height:1;">×</button>
+            </div>${cuerpo}</div>`;
+        document.body.appendChild(ov);
+    }
+
+    _avisoPeriodoYaFacturado(clientName, startDate, endDate) {
+        if (!clientName || !startDate || !endDate) return true;
+        const solapan = (this.generatedInvoices || []).filter(g =>
+            g.status !== 'cancelada' &&
+            g.clientName === clientName &&
+            g.startDate && g.endDate &&
+            !(String(g.endDate) < String(startDate) || String(endDate) < String(g.startDate))
+        );
+        if (!solapan.length) return true;
+        const lista = solapan.slice(0, 6).map(g =>
+            `   \u2022 #${g.invoiceNumber} \u2014 ${this.formatDateUS(g.startDate)} a ${this.formatDateUS(g.endDate)} \u2014 $${(parseFloat(g.total)||0).toFixed(2)} (${g.status})`
+        ).join('\n');
+        const sinEnviar = solapan.some(g => g.status === 'pendiente' || !g.sentAt);
+        return confirm(
+            `\u26a0\ufe0f ESTE PERIODO YA TIENE FACTURA\n\n${clientName} ya tiene:\n\n${lista}\n\n` +
+            (sinEnviar ? 'Una de ellas se gener\u00f3 pero NO se ha enviado. Es mejor ENVIAR esa (bot\u00f3n morado \ud83d\udce4 Enviar en Pendientes) que crear otra.\n\n' : '') +
+            `\u00bfAun as\u00ed quieres generar una factura NUEVA para ${this.formatDateUS(startDate)} a ${this.formatDateUS(endDate)}?`
+        );
+    }
+
     _registerInvoiceFromPDF(status) {
         const pdfData = window.currentPDFData;
         if (!pdfData || !pdfData.invoiceNumber) return;
@@ -13610,6 +13721,10 @@ Motivo de cancelación (opcional):`);
             alert('Cliente no encontrado');
             return;
         }
+
+        // Aviso de PERIODO YA FACTURADO (esto es lo que faltaba: por eso Owens terminó
+        // con la #7549 y la #7603 cubriendo el mismo servicio del 25 de junio).
+        if (!this._avisoPeriodoYaFacturado(client.name, startDate, endDate)) return;
         
         // Para AirBnb/Único, agrupar TODAS las propiedades del mismo cliente
         let allClients = [client];
@@ -14162,7 +14277,24 @@ Motivo de cancelación (opcional):`);
             const rawPrice = parseFloat(client.price) || 0;
             const isFixedMonthly = client.invoicingType === 'fixed_monthly';
             const unitPrice = isFixedMonthly ? this.pricePerService(client) : rawPrice;
-            total = isFixedMonthly ? rawPrice : unitPrice * services.length;
+            // Total por PROPIEDAD (igual que el modo detallado): las de monto fijo suman su
+            // precio una vez; las de por visita, precio × sus visitas. En un cliente de una
+            // sola propiedad da exactamente lo mismo que antes.
+            {
+                const _pf = (c) => ((c.invoicingType || 'monthly') === 'fixed_monthly');
+                const _cobradas = new Set();
+                total = 0;
+                services.forEach(s => {
+                    const cp = this.clis.find(c => String(c.id) === String(s.cliId)) || client;
+                    if (_pf(cp)) {
+                        if (!_cobradas.has(String(cp.id))) { _cobradas.add(String(cp.id)); total += parseFloat(cp.price) || 0; }
+                    } else {
+                        total += (s.price !== undefined && s.price !== null && s.price !== '' && !isNaN(s.price))
+                            ? parseFloat(s.price)
+                            : (parseFloat(cp.price !== undefined && cp.price !== '' ? cp.price : client.price) || 0);
+                    }
+                });
+            }
             
             // Obtener nombre del mes
             const [startYear, startMonth, startDay] = startDate.split('-');
@@ -14595,18 +14727,27 @@ Motivo de cancelación (opcional):`);
         let y = tableStart + 15;
         let total = 0;
         
-        // For fixed_monthly: total = client.price (not × visits)
-        const isFixedMonthly = (client.invoicingType || 'monthly') === 'fixed_monthly';
-        if (isFixedMonthly) {
-            total = parseFloat(client.price) || 0;
-        }
+        // Cada servicio se cobra con el precio de SU PROPIA propiedad (multipropiedad con
+        // precios mixtos). Las propiedades de monto fijo aportan su precio una sola vez.
+        const _propDe = (s) => this.clis.find(c => String(c.id) === String(s.cliId)) || client;
+        const _esFija = (c) => ((c.invoicingType || 'monthly') === 'fixed_monthly');
+        const _fijasCobradas = new Set();
+        services.forEach(s => {
+            const cp = _propDe(s);
+            if (_esFija(cp) && !_fijasCobradas.has(String(cp.id))) {
+                _fijasCobradas.add(String(cp.id));
+                total += parseFloat(cp.price) || 0;
+            }
+        });
 
         services.forEach((s, index) => {
             // Corregir zona horaria
             const [year, month, day] = s.date.split('-');
             const dateFormatted = `${month}/${day}/${year}`;
-            const price = isFixedMonthly ? 0 : ((s.price !== undefined && s.price !== null && s.price !== '' && !isNaN(s.price)) ? parseFloat(s.price) : (parseFloat(client.price) || 0));
-            if (!isFixedMonthly) total += price;
+            const _cp = _propDe(s);
+            const _cpFija = _esFija(_cp);
+            const price = _cpFija ? 0 : ((s.price !== undefined && s.price !== null && s.price !== '' && !isNaN(s.price)) ? parseFloat(s.price) : (parseFloat(_cp.price !== undefined && _cp.price !== '' ? _cp.price : client.price) || 0));
+            if (!_cpFija) total += price;
             
             if (index % 2 === 0) {
                 doc.setFillColor(250, 250, 250);
@@ -18093,6 +18234,9 @@ document.addEventListener('click', function(e) {
                 </select>
                 <button onclick="app.exportInvoicesToExcel()" title="Exporta a Excel/CSV exactamente lo que se ve filtrado ahora" class="btn" style="padding:8px 14px; background:#1e7e34; color:white; font-size:0.85rem; font-weight:bold; white-space:nowrap;">
                     📊 Exportar a Excel
+                </button>
+                <button onclick="app.auditarDuplicados()" title="Busca facturas del mismo cliente cuyo periodo se cruza (posible doble cobro)" class="btn" style="padding:8px 14px; background:#c0392b; color:white; font-size:0.85rem; font-weight:bold; white-space:nowrap;">
+                    🔍 Revisar Duplicados
                 </button>
                 <button onclick="app.printInvoicesList()" title="Imprime la lista filtrada actual" class="btn" style="padding:8px 14px; background:#495057; color:white; font-size:0.85rem; font-weight:bold; white-space:nowrap;">
                     🖨️ Imprimir
