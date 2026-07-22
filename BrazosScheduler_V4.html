@@ -5649,6 +5649,10 @@ class Scheduler {
         
         // Precargar datos DESPUÉS de que el modal esté completamente abierto
         setTimeout(() => {
+            // FIX: forzar la pestaña Generar. openInvoice() no cambia de pestaña, así que
+            // sin esto el modal se queda en la última usada (p.ej. Manual, de una factura de
+            // construcción anterior) y un cliente mensual como Barbra Smith abría en Manual.
+            this.switchInvoiceTab('generar');
             document.getElementById('invoiceClient').value = pending.clientIds[0];
             document.getElementById('invoiceStart').value = pending.startDate;
             document.getElementById('invoiceEnd').value = pending.endDate;
@@ -8200,8 +8204,13 @@ Motivo de cancelación (opcional):`);
         if (!inv) return;
 
         const client = this.clis.find(c => c.name === inv.clientName);
-        const companyConfig = JSON.parse(localStorage.getItem('companyConfig') || '{}');
-        const companyLogo = localStorage.getItem('companyLogo') || '';
+        let companyConfig = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        if (typeof companyConfig === 'string') { try { companyConfig = JSON.parse(companyConfig); } catch(e) { companyConfig = {}; } }
+        // FIX: el logo puede estar SOLO dentro de companyConfig.logo (así llega en el sync/import),
+        // mientras el PDF históricamente lo leía de la clave suelta 'companyLogo'. Si esa está
+        // vacía, se usa el de companyConfig. Además se re-siembra la clave suelta para futuras lecturas.
+        let companyLogo = localStorage.getItem('companyLogo') || '';
+        if (!companyLogo && companyConfig.logo) { companyLogo = companyConfig.logo; try { localStorage.setItem('companyLogo', companyLogo); } catch(e){} }
         const paidDate = inv.paidAt ? new Date(inv.paidAt + 'T12:00:00').toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'}) : new Date().toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
         const paidAmount = inv.paidAmount ? parseFloat(inv.paidAmount).toFixed(2) : inv.total.toFixed(2);
 
@@ -13927,7 +13936,11 @@ Motivo de cancelación (opcional):`);
         const doc = new jsPDF();
         
         // Cargar configuración de empresa
-        const config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        // FIX: companyConfig puede quedar como STRING JSON doble-escapado tras importar el sync;
+        // un solo parse deja un string y config.name/logo salen undefined (PDF con "Tu Empresa"
+        // y sin logo). Segundo parse si sigue siendo string.
+        let config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        if (typeof config === 'string') { try { config = JSON.parse(config); } catch(e) { config = {}; } }
         const companyName = config.name || 'Tu Empresa';
         const companyAddress = config.address || '123 Calle Principal';
         const companyPhone = config.phone || '(555) 123-4567';
@@ -14486,7 +14499,11 @@ Motivo de cancelación (opcional):`);
         const doc = new jsPDF();
         
         // Cargar configuración de empresa
-        const config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        // FIX: companyConfig puede quedar como STRING JSON doble-escapado tras importar el sync;
+        // un solo parse deja un string y config.name/logo salen undefined (PDF con "Tu Empresa"
+        // y sin logo). Segundo parse si sigue siendo string.
+        let config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        if (typeof config === 'string') { try { config = JSON.parse(config); } catch(e) { config = {}; } }
         const companyName = config.name || 'Tu Empresa';
         const companyAddress = config.address || '123 Calle Principal';
         const companyPhone = config.phone || '(555) 123-4567';
