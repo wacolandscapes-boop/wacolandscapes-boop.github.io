@@ -5639,7 +5639,7 @@ class Scheduler {
                     // y la app tenía que adivinar por fecha qué servicio ya se facturó).
                     svcDates.forEach((date, i) => {
                         const price = (i === svcDates.length - 1) ? defaultPrice : 0;
-                        this.addManualInvoiceItem(date, 'Limpieza', price, svcIds[i] || '', propCli ? propCli.id : '');
+                        this.addManualInvoiceItem(date, 'Cleaning Service', price, svcIds[i] || '', propCli ? propCli.id : '');
                     });
                 }
                 document.getElementById('btnBackToPending').style.display = 'block';
@@ -12704,7 +12704,7 @@ Motivo de cancelación (opcional):`);
             servicios.forEach(s => {
                 const cliDelServicio = this.clis.find(c => String(c.id) === String(s.cliId)) || client;
                 const precio = parseFloat(cliDelServicio.price || client.price || 0);
-                let desc = s.name || 'Limpieza';
+                let desc = s.name || 'Cleaning Service';
                 // Si es una propiedad con nombre propio, se pone en la descripción para que
                 // en la factura se vea a cuál corresponde cada línea.
                 if (cliDelServicio.propId && cliDelServicio.propId !== cliDelServicio.name) {
