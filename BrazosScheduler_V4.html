@@ -7463,7 +7463,18 @@ Motivo de cancelación (opcional):`);
         if (!invoice) { alert('No se encontró la factura'); return; }
 
         // Buscar el cliente
-        const client = this.clis.find(c => c.name === invoice.clientName) ||
+        // FIX: en clientes multi-propiedad (varias fichas con el MISMO name), buscar solo
+        // por nombre devuelve la PRIMERA ficha del grupo — casi nunca la que se facturó.
+        // Eso hacía que el PDF saliera con la dirección de otra propiedad.
+        // La factura ya guarda el cliId real de la propiedad en sus items: se usa ese primero.
+        // CANDADO: solo se acepta la ficha de los items si pertenece AL MISMO cliente que
+        // la factura. Sin esto, una factura con items mal amarrados a otro cliente (pasa en
+        // facturas manuales) tomaría la dirección de ese otro cliente.
+        const _cliIdItems = (invoice.items || []).map(it => it && it.cliId).find(v => v);
+        const _fichaItems = _cliIdItems ? this.clis.find(c => String(c.id) === String(_cliIdItems)) : null;
+        const _fichaOk = (_fichaItems && _fichaItems.name === invoice.clientName) ? _fichaItems : null;
+        const client = _fichaOk ||
+                       this.clis.find(c => c.name === invoice.clientName) ||
                        this.clis.find(c => invoice.clientName && invoice.clientName.startsWith(c.name));
         if (!client) { alert('Cliente no encontrado'); return; }
 
@@ -12424,6 +12435,14 @@ Motivo de cancelación (opcional):`);
         document.getElementById('manualInvClient').value = id;
         document.getElementById('manualInvClientSearch').value = label;
         document.getElementById('manualInvClientDropdown').style.display = 'none';
+        // FIX: las filas de la factura ANTERIOR se quedan en el DOM (switchInvoiceTab solo
+        // agrega una línea si la lista está vacía, nunca la limpia) y traen pegados
+        // dataset.svcId / dataset.svcCliId INVISIBLES. Si se reusa una fila para otro
+        // cliente, la factura queda amarrada al servicio de un tercero (le pasó a la #7660,
+        // que quedó atada a un servicio de JGM Hyacinth). Aquí se sueltan esos vínculos —
+        // SOLO los que pertenecen a OTRO cliente. Los del mismo cliente (aunque sean de otra
+        // propiedad del grupo) se conservan: eso es válido y lo usa "Editar montos".
+        this._limpiarVinculosAjenos(id);
         // Precargar el correo de la propiedad seleccionada (editable si hace falta corregirlo)
         const emailField = document.getElementById('manualInvEmail');
         if (emailField) {
@@ -12478,9 +12497,41 @@ Motivo de cancelación (opcional):`);
         list.appendChild(row);
     }
 
+    // Suelta el vínculo al calendario de las líneas manuales que quedaron pegadas a un
+    // servicio de OTRO cliente. No borra nada visible: fecha, descripción y precio se
+    // conservan tal cual; solo se quitan los dataset ocultos. Devuelve cuántas soltó.
+    _limpiarVinculosAjenos(selectedId, silencioso = false) {
+        const list = document.getElementById('manualInvItemsList');
+        if (!list) return 0;
+        const sel = this.clis.find(c => String(c.id) === String(selectedId));
+        if (!sel) return 0;
+        let sueltas = 0;
+        [...list.children].forEach(row => {
+            const rid = row.dataset.svcCliId;
+            if (!rid) return;
+            const dueno = this.clis.find(c => String(c.id) === String(rid));
+            // Se conserva si es del MISMO cliente (mismo name), aunque sea otra propiedad.
+            if (dueno && dueno.name === sel.name) return;
+            delete row.dataset.svcId;
+            delete row.dataset.svcCliId;
+            sueltas++;
+        });
+        if (sueltas > 0 && !silencioso) {
+            alert(`⚠️ ${sueltas} línea(s) venían amarradas a servicios de otro cliente ` +
+                  `(sobraron de la factura anterior). Se soltó ese vínculo.\n\n` +
+                  `Lo que escribiste NO se borró. Revisa que las fechas, descripciones y ` +
+                  `precios sean los de ESTA factura antes de generarla.`);
+        }
+        return sueltas;
+    }
+
     getManualInvoiceItems() {
         const list = document.getElementById('manualInvItemsList');
         if (!list) return [];
+        // Red de seguridad: aunque se haya llegado aquí por otro camino, nunca se guarda
+        // un vínculo a un servicio de otro cliente.
+        const selId = document.getElementById('manualInvClient')?.value;
+        if (selId) this._limpiarVinculosAjenos(selId, true);
         return [...list.children].map(row => ({
             date: row.querySelector('.manualInvDate').value,
             name: row.querySelector('.manualInvDesc').value.trim(),
@@ -12690,7 +12741,14 @@ Motivo de cancelación (opcional):`);
         
         // Obtener todos los IDs del cliente (incluyendo otras propiedades del mismo nombre)
         const allClientsForName = this.clis.filter(c => c.name === client.name);
-        const hasMultiType = allClientsForName.some(c => c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion');
+        // FIX fan-out: el agrupamiento SOLO aplica a airbnb/único, donde varias propiedades
+        // se facturan juntas (p.ej. Hospitaller = Washington + Lorraine). En CONSTRUCCIÓN
+        // cada propiedad se factura por separado, así que el preview debe mostrar SOLO la
+        // ficha seleccionada — si no, junta las 3 fichas de JGM y muestra otra propiedad.
+        // Esto iguala el criterio que ya usa la generación real del PDF.
+        const selEsConstruccion = client.type === 'construccion';
+        const hasMultiType = !selEsConstruccion &&
+            allClientsForName.some(c => c.type === 'airbnb' || c.type === 'unico');
         
         if (hasMultiType) {
             allClientsForName.forEach(c => {
@@ -12712,6 +12770,7 @@ Motivo de cancelación (opcional):`);
                 return true;
             }).map(s => ({
                 ...s,
+                propId: client.propId || client.name,
                 price: parseFloat(client.price) || 0
             }));
         }
@@ -13584,6 +13643,7 @@ Motivo de cancelación (opcional):`);
                     total: total || 0,
                     serviceCount: window.currentPDFData?.serviceCount || 0,
                     items: this.buildInvoiceItems(window.currentPDFData?._services, client),
+                    clientIds: client?.id ? [client.id] : [],
                     type: client.type || 'mensual',
                     status: 'enviada',
                     sentAt: new Date().toLocaleDateString('en-CA'),
@@ -13618,9 +13678,13 @@ Motivo de cancelación (opcional):`);
         if (this._clicDuplicado('savePDF')) return;
         // Accept either clientId or clientName for backwards compatibility
         let clientName = clientIdOrName;
+        // FIX: se guarda la ficha REAL que se resolvió por id. Antes solo se le sacaba el
+        // nombre y se descartaba; más abajo se volvía a buscar por nombre, lo que en
+        // clientes multi-propiedad devuelve la PRIMERA ficha del grupo y no la facturada.
+        let _cliReal = null;
         if (this.clis) {
             const cli = this.clis.find(c => String(c.id) === String(clientIdOrName));
-            if (cli) clientName = cli.name;
+            if (cli) { clientName = cli.name; _cliReal = cli; }
         }
         const pdfData = window.currentPDFData;
 
@@ -13674,7 +13738,11 @@ Motivo de cancelación (opcional):`);
 
         // Registrar en historial de Generadas
         if (!this.generatedInvoices) this.generatedInvoices = [];
-        const cli = this.clis ? this.clis.find(c => c.name === clientName) : null;
+        const cli = _cliReal
+                 || (window.currentPDFData?.client && this.clis
+                        ? this.clis.find(c => String(c.id) === String(window.currentPDFData.client.id))
+                        : null)
+                 || (this.clis ? this.clis.find(c => c.name === clientName) : null);
         const pdfInvConfig = window.currentPDFData?.invoiceConfig || null;
         const endDate = window.currentPDFData?.endDate || startDate;
         const alreadyExists = this.generatedInvoices.find(i => i.invoiceNumber === invoiceNumber);
@@ -13684,6 +13752,9 @@ Motivo de cancelación (opcional):`);
                 invoiceNumber: invoiceNumber,
                 generatedDate: new Date().toISOString().split('T')[0],
                 clientName: clientName,
+                // FIX: sin clientIds, la comprobación de "ya facturado" asume que la factura
+                // cubre TODAS las propiedades del cliente (ver alreadyInvoiced en Pendientes).
+                clientIds: cli ? [cli.id] : [],
                 clientEmail: cli?.email || '',
                 type: cli?.type || 'mensual',
                 startDate: startDate || '',
