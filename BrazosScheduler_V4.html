@@ -5934,7 +5934,8 @@ class Scheduler {
         }
         
         // Obtener siguiente número de factura (cruza contador local con lo ya sincronizado)
-        const config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        let config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        if (typeof config === 'string') { try { config = JSON.parse(config); } catch(e) { config = {}; } }
         let nextInvoiceNumber = this.getNextInvoiceNumber();
         const startNumber = config.invoiceStartNumber || 1;
         if (nextInvoiceNumber < startNumber) nextInvoiceNumber = startNumber;
@@ -7700,7 +7701,8 @@ Motivo de cancelación (opcional):`);
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
 
-        const config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        let config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        if (typeof config === 'string') { try { config = JSON.parse(config); } catch(e) { config = {}; } }
         const companyName = config.name || 'Brazos Cleaning Services';
         const companyAddress = config.address || '';
         const companyPhone = config.phone || '';
@@ -8047,7 +8049,8 @@ Motivo de cancelación (opcional):`);
     // Dibuja UNA hoja de estado de cuenta en el doc dado (reutilizable para impresión por lotes).
     // includeNote = true agrega la nota de cobranza al pie (para las cartas por correo físico).
     _drawStatementPage(doc, clientName, client, facturas, includeNote) {
-        const config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        let config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        if (typeof config === 'string') { try { config = JSON.parse(config); } catch(e) { config = {}; } }
         const companyName = config.name || 'Brazos Cleaning Services';
         const clientEmail = this.getClientEmail(client);
 
@@ -8311,7 +8314,8 @@ Motivo de cancelación (opcional):`);
         const emailInput = prompt(`Enviar recibo de pago a:`, email);
         if (!emailInput) return;
 
-        const companyConfig = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        let companyConfig = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        if (typeof companyConfig === 'string') { try { companyConfig = JSON.parse(companyConfig); } catch(e) { companyConfig = {}; } }
         const paidDate = inv.paidAt ? new Date(inv.paidAt + 'T12:00:00').toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'}) : new Date().toLocaleDateString('en-US');
         const paidAmount = inv.paidAmount ? parseFloat(inv.paidAmount).toFixed(2) : inv.total.toFixed(2);
 
@@ -12013,7 +12017,8 @@ Motivo de cancelación (opcional):`);
 
     /** Genera y abre el documento del Estimado — usado tanto por Vista Previa (datos sin guardar) como por Imprimir (datos guardados). */
     renderEstimateDocument(est, isPreview) {
-        const companyConfig = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        let companyConfig = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        if (typeof companyConfig === 'string') { try { companyConfig = JSON.parse(companyConfig); } catch(e) { companyConfig = {}; } }
         const companyLogo = localStorage.getItem('companyLogo') || '';
         const companyName = companyConfig.name || (typeof this.getCompanyName === 'function' ? this.getCompanyName() : '{{company_name}}');
         const fmtDate = (d) => { if (!d) return ''; const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }); };
@@ -12230,7 +12235,8 @@ Motivo de cancelación (opcional):`);
         
         // Cargar porcentaje de impuestos de la configuración
         if (checkbox.checked) {
-            const config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+            let config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        if (typeof config === 'string') { try { config = JSON.parse(config); } catch(e) { config = {}; } }
             const taxRate = config.taxPercentage || 16;
             document.getElementById('invoiceTaxRate').value = taxRate;
         }
@@ -12613,7 +12619,8 @@ Motivo de cancelación (opcional):`);
     }
     
     loadCompanyConfig() {
-        const config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        let config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
+        if (typeof config === 'string') { try { config = JSON.parse(config); } catch(e) { config = {}; } }
         document.getElementById('companyName').value = config.name || '';
         document.getElementById('companyRFC').value = config.rfc || '';
         document.getElementById('companyPhone').value = config.phone || '';
