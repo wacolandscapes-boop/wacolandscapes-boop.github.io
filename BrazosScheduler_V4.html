@@ -14177,7 +14177,9 @@ Motivo de cancelación (opcional):`);
                     doc.text(svcName.substring(0,38), 29, y_a+5.5);
                     doc.text('', 119, y_a+5.5);
                     doc.text(dateFmt, 130, y_a+5.5);
-                    doc.text('$'+price.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), 157, y_a+5.5);
+                    // Precio 0 se deja EN BLANCO (no "$0.00") para no confundir al cliente
+                    // cuando una línea va incluida en el monto de otra. El total NO cambia.
+                    doc.text(price ? '$'+price.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '', 157, y_a+5.5);
 
                     y_a += rowH;
                     if (y_a > 230) { doc.addPage(); y_a = 20; }
@@ -14356,7 +14358,8 @@ Motivo de cancelación (opcional):`);
                 }
                 
                 doc.text(serviceName, 60, y);
-                doc.text('$' + price.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), 160, y);
+                // Precio 0 en blanco (no "$0.00"), el total no cambia
+                doc.text(price ? '$' + price.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '', 160, y);
                 
                 y += 8;
                 
@@ -14865,7 +14868,8 @@ Motivo de cancelación (opcional):`);
             }
             
             doc.text(serviceName, 60, y);
-             doc.text('$' + price.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), 160, y);
+             // Precio 0 en blanco (no "$0.00"), el total no cambia
+             doc.text(price ? '$' + price.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '', 160, y);
             
             y += 8;
             
