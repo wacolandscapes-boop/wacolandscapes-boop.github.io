@@ -6109,8 +6109,8 @@ class Scheduler {
                 <td style="text-align:right;">$${saldo.toFixed(2)}</td>
             </tr>`;
         }).join('');
-        const totalGeneral = list.reduce((s, i) => s + parseFloat(i.total || 0), 0);
-        const saldoGeneral = list.reduce((s, i) => s + (i.status === 'pagada' ? 0 : (parseFloat(i.total||0) - parseFloat(i.paidAmount||0))), 0);
+        const totalGeneral = list.reduce((s, i) => s + (i.status === 'cancelada' ? 0 : parseFloat(i.total || 0)), 0);
+        const saldoGeneral = list.reduce((s, i) => s + ((i.status === 'pagada' || i.status === 'cancelada') ? 0 : (parseFloat(i.total||0) - parseFloat(i.paidAmount||0))), 0);
         const win = window.open('', '_blank');
         win.document.write(`
             <html><head><title>Facturas — Brazos Cleaning</title>
@@ -6438,7 +6438,10 @@ class Scheduler {
         let paidCount = 0;
         
         filtered.forEach((inv, index) => {
-            total += inv.total;
+            // FIX contabilidad: las facturas CANCELADAS no deben sumar al TOTAL — inflaban
+            // el monto (p.ej. la #7607 cancelada sumaba $395 a JGM). Se siguen mostrando en
+            // la lista, pero no cuentan en el total.
+            if (inv.status !== 'cancelada') total += inv.total;
             if (inv.status === 'enviada') sentCount++;
             if (inv.status === 'pagada') paidCount++;
             
