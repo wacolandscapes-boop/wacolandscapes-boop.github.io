@@ -1403,6 +1403,20 @@
             <div style="font-size:0.75rem; color:#888; margin-top:6px;">
                 Guarda o restaura todos tus datos localmente (clientes, empleados, servicios, grupos).
             </div>
+            <div style="display:flex; gap:8px; margin-top:10px;">
+                <button class="btn" onclick="app.importar()"
+                    style="flex:1; background:#27ae60; color:white; font-weight:600;">
+                    📥 Importar JSON
+                </button>
+                <button class="btn" onclick="app.exportar()"
+                    style="flex:1; background:#1a6b9a; color:white; font-weight:600;">
+                    📤 Exportar JSON
+                </button>
+            </div>
+            <div style="font-size:0.75rem; color:#888; margin-top:6px;">
+                Importa un archivo de sincronización (brazosCS_sync.json). Al importar elige
+                ACEPTAR = Reemplazar todo.
+            </div>
         </div>
         <button class="btn" onclick="app.closeCatalog()" style="width:100%; margin-top:16px; background:#2c3e50; color:white">CERRAR</button>
     </div>
