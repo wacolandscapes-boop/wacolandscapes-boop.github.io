@@ -14093,6 +14093,7 @@ Motivo de cancelación (opcional):`);
             doc.setTextColor(80, 80, 80);
             doc.text(companyAddress, 20, companyLogo ? 37 : 20);
             doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
+            if (companyRFC) doc.text(companyRFC, 20, companyLogo ? 45 : 30);
             if (companyWebsite) doc.text(companyWebsite, 20, companyLogo ? 48 : 35);
             
             doc.setFontSize(24);
@@ -14133,6 +14134,7 @@ Motivo de cancelación (opcional):`);
             doc.setFontSize(8);
             doc.text(companyAddress, 20, companyLogo ? 37 : 20);
             doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
+            if (companyRFC) doc.text(companyRFC, 20, companyLogo ? 45 : 30);
             if (companyWebsite) doc.text(companyWebsite, 20, companyLogo ? 48 : 35);
             
             doc.setFontSize(26);
@@ -14649,6 +14651,7 @@ Motivo de cancelación (opcional):`);
             doc.setTextColor(80, 80, 80);
             doc.text(companyAddress, 20, companyLogo ? 37 : 20);
             doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
+            if (companyRFC) doc.text(companyRFC, 20, companyLogo ? 45 : 30);
             if (companyWebsite) doc.text(companyWebsite, 20, companyLogo ? 46 : 35);
             
             doc.setFontSize(24);
@@ -14688,6 +14691,7 @@ Motivo de cancelación (opcional):`);
             doc.setFontSize(8);
             doc.text(companyAddress, 20, companyLogo ? 37 : 20);
             doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
+            if (companyRFC) doc.text(companyRFC, 20, companyLogo ? 45 : 30);
             if (companyWebsite) doc.text(companyWebsite, 20, companyLogo ? 46 : 35);
             
             // FACTURA centro (blanco, redondeado)
@@ -18170,8 +18174,8 @@ document.addEventListener('click', function(e) {
                             onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
                     </div>
                     <div>
-                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">RFC / Tax ID</label>
-                        <input type="text" id="companyRFC" placeholder="ABC123456789"
+                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">Email (sale en la factura)</label>
+                        <input type="text" id="companyRFC" placeholder="brazoscleaningservices@gmail.com"
                             style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
                             onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
                     </div>
