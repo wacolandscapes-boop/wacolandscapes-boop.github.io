@@ -6906,14 +6906,22 @@ class Scheduler {
         // sin poner la fecha, el pago NO se guardaba y la app no avisaba nada: se perdía
         // en silencio (probable origen de varios pagos que quedaron sin historial).
         document.getElementById('cobroDetallePaidAt').value = new Date().toISOString().split('T')[0];
-        // El campo del monto arranca VACÍO — NO se auto-rellena con el balance pendiente.
-        // Ese auto-relleno era una trampa peligrosa: dejaba un número escrito en el campo,
-        // así que si guardabas por cualquier razón (o borrabas un pago y el modal se
-        // reabría), la app RE-AGREGABA un pago con ese monto. Por eso al borrar el único
-        // pago de una factura, terminaba en "pagada" por el TOTAL (le pasó a Kelsey #7520:
-        // borró un pago de $113.66 y quedó en $389.70 pagada). Ahora, si no escribes un
-        // monto a propósito, no se registra ningún pago. Punto.
-        document.getElementById('cobroDetallePaidAmount').value = '';
+        // El campo del monto se PRECARGA con el SALDO PENDIENTE (no con el total), para no
+        // teclearlo cada vez. Si es un pago parcial, se edita y ya.
+        // OJO — histórico: este auto-relleno se había QUITADO porque causó un bug real
+        // (Kelsey #7520): al borrar un pago el modal se reabría con el monto ya escrito y,
+        // si se guardaba por cualquier motivo, la app RE-AGREGABA un pago por ese monto.
+        // Ahora vuelve, pero con tres protecciones: (1) tras borrar un pago NO se precarga
+        // (bandera _skipAutofill); (2) si la factura ya está cubierta el formulario viene
+        // colapsado; (3) hay aviso de sobrepago antes de guardar.
+        const _saldo = Math.max(0, parseFloat(inv.total || 0) - totalPaid);
+        const _amtEl = document.getElementById('cobroDetallePaidAmount');
+        if (this._skipAutofill) {
+            _amtEl.value = '';
+            this._skipAutofill = false;
+        } else {
+            _amtEl.value = _saldo > 0 ? _saldo.toFixed(2) : '';
+        }
         document.getElementById('cobroDetallePayMethod').value = '';
         document.getElementById('cobroDetallePayRef').value = '';
         document.getElementById('cobroDetalleNotes').value = '';
@@ -7091,6 +7099,10 @@ class Scheduler {
         }
         inv.status = (totalPaid > 0 && this._cubreTotal(totalPaid, inv.total)) ? 'pagada' : (totalPaid > 0 ? 'parcial' : 'enviada');
         this.save();
+        // Al reabrir tras BORRAR un pago, el campo del monto debe quedar VACÍO: si se
+        // precargara, un guardado accidental volvería a agregar el pago que se acaba de
+        // quitar (bug de Kelsey #7520).
+        this._skipAutofill = true;
         this.openCobroDetalle(invId);
         this.refreshGeneratedInvoices();
     }
@@ -14081,7 +14093,6 @@ Motivo de cancelación (opcional):`);
             doc.setTextColor(80, 80, 80);
             doc.text(companyAddress, 20, companyLogo ? 37 : 20);
             doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
-            if (companyRFC) doc.text('RFC: ' + companyRFC, 20, companyLogo ? 45 : 30);
             if (companyWebsite) doc.text(companyWebsite, 20, companyLogo ? 48 : 35);
             
             doc.setFontSize(24);
@@ -14122,7 +14133,6 @@ Motivo de cancelación (opcional):`);
             doc.setFontSize(8);
             doc.text(companyAddress, 20, companyLogo ? 37 : 20);
             doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
-            if (companyRFC) doc.text('RFC: ' + companyRFC, 20, companyLogo ? 45 : 30);
             if (companyWebsite) doc.text(companyWebsite, 20, companyLogo ? 48 : 35);
             
             doc.setFontSize(26);
@@ -14639,7 +14649,6 @@ Motivo de cancelación (opcional):`);
             doc.setTextColor(80, 80, 80);
             doc.text(companyAddress, 20, companyLogo ? 37 : 20);
             doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
-            if (companyRFC) doc.text('RFC: ' + companyRFC, 20, companyLogo ? 45 : 30);
             if (companyWebsite) doc.text(companyWebsite, 20, companyLogo ? 46 : 35);
             
             doc.setFontSize(24);
@@ -14679,7 +14688,6 @@ Motivo de cancelación (opcional):`);
             doc.setFontSize(8);
             doc.text(companyAddress, 20, companyLogo ? 37 : 20);
             doc.text('Tel: ' + companyPhone, 20, companyLogo ? 41 : 25);
-            if (companyRFC) doc.text('RFC: ' + companyRFC, 20, companyLogo ? 45 : 30);
             if (companyWebsite) doc.text(companyWebsite, 20, companyLogo ? 46 : 35);
             
             // FACTURA centro (blanco, redondeado)
