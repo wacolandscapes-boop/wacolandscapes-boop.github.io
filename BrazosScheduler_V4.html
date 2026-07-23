@@ -4866,8 +4866,15 @@ class Scheduler {
 
                     const dates = uninvoiced.map(s => s.date).sort();
                     const propLabel = (propCli.propId && propCli.propId !== clientName) ? propCli.propId : clientName;
-                    // El precio de la propiedad es un monto FIJO por periodo, no por visita.
-                    const total = parseFloat(propCli.price || 0);
+                    // Precio de la propiedad. Por defecto es un monto FIJO por periodo
+                    // (una obra se cotiza completa, no por visita). Pero si la propiedad
+                    // está marcada como "Por Servicio (factura cada visita)" en su ficha
+                    // (invoicingType = 'perservice'), entonces el precio es POR VISITA y el
+                    // total se multiplica por el número de fechas — es el caso de la
+                    // oficina de 254 Lawns, a $85 cada limpieza.
+                    const _porVisita = propCli.invoicingType === 'perservice';
+                    const _precioProp = parseFloat(propCli.price || 0);
+                    const total = _porVisita ? _precioProp * dates.length : _precioProp;
 
                     this.pendingInvoices.push({
                         id: Date.now() + Math.random(),
@@ -5638,7 +5645,15 @@ class Scheduler {
                     // construcción también queda atada al calendario (antes no lo estaba,
                     // y la app tenía que adivinar por fecha qué servicio ya se facturó).
                     svcDates.forEach((date, i) => {
-                        const price = (i === svcDates.length - 1) ? defaultPrice : 0;
+                        // Si la propiedad cobra POR VISITA (invoicingType = 'perservice'),
+                        // cada fecha lleva su propio precio del perfil — así una oficina a
+                        // $85 con 4 limpiezas suma $340 sola, sin teclear nada.
+                        // Si el precio es FIJO por periodo, va sólo en la última fecha y las
+                        // anteriores quedan EN BLANCO (no en "0.00"), para poder escribirlas
+                        // directo si hace falta. En blanco cuenta como 0.
+                        const price = propCli && propCli.invoicingType === 'perservice'
+                            ? defaultPrice
+                            : ((i === svcDates.length - 1) ? defaultPrice : '');
                         this.addManualInvoiceItem(date, 'Cleaning Service', price, svcIds[i] || '', propCli ? propCli.id : '');
                     });
                 }
@@ -7415,7 +7430,18 @@ class Scheduler {
             // Construcción siempre abre en Manual (precio editable) — el precio varía por
             // trabajo, igual que cuando se generan desde Pendientes. No depender de si
             // técnicamente hay un servicio de calendario detrás.
-            const isManual = invoice.type === 'construccion' || (invoice.items && invoice.items.length > 0 &&
+            // Además: una factura hecha a mano DEBE seguir abriendo en Manual aunque su
+            // período coincida con servicios del calendario. Pasó con la #7660 (oficinas de
+            // 254 Lawns): al corregirle el período a junio, sus fechas empezaron a coincidir
+            // con las 4 visitas reales y la detección la mandó a "Generar", donde ya no se
+            // puede editar la descripción. Por eso se revisa primero la marca `isManual` y,
+            // para facturas viejas que no la tienen, si NINGUNA línea está ligada a un
+            // servicio del calendario (sin `id`), se trata como manual.
+            const itemsSinVinculo = (invoice.items && invoice.items.length > 0)
+                && !invoice.items.some(it => it && it.id);
+            const isManual = invoice.isManual === true
+                || itemsSinVinculo
+                || invoice.type === 'construccion' || (invoice.items && invoice.items.length > 0 &&
                 !this.servs.some(s => invClientIds.includes(String(s.cliId)) &&
                     s.date >= invoice.startDate && s.date <= invoice.endDate));
 
@@ -7453,6 +7479,11 @@ class Scheduler {
                 if (document.getElementById('manualInvPaymentDue')) {
                     document.getElementById('manualInvPaymentDue').value = invoice.invoiceConfig?.paymentDue || '';
                 }
+                // Impuesto: se toma del PERFIL DEL CLIENTE (cobraImpuestos / taxRate). Antes
+                // no se cargaba nada aquí, así que al editar una factura el checkbox quedaba
+                // como estuviera de la vez anterior y la factura salía SIN impuestos aunque
+                // el cliente sí los cobre.
+                this._cargarImpuestoDelCliente(cli, 'manualInvApplyTax', 'manualInvTaxRate', 'toggleManualTaxField');
                 const hiddenNum = document.getElementById('editingInvoiceNumber');
                 if (hiddenNum) hiddenNum.value = invoice.invoiceNumber;
                 this._updateEditingInvoiceBadge();
@@ -7474,11 +7505,27 @@ class Scheduler {
                 }
                 if (document.getElementById('invoiceStart')) document.getElementById('invoiceStart').value = invoice.startDate;
                 if (document.getElementById('invoiceEnd')) document.getElementById('invoiceEnd').value = invoice.endDate;
+                const _cliGen = (invoice.clientIds && invoice.clientIds.length > 0)
+                    ? this.clis.find(c => String(c.id) === String(invoice.clientIds[0]))
+                    : this.clis.find(c => c.name === invoice.clientName);
+                this._cargarImpuestoDelCliente(_cliGen, 'invoiceApplyTax', 'invoiceTaxRate', 'toggleTaxField');
                 const hiddenNum = document.getElementById('editingInvoiceNumber');
                 if (hiddenNum) hiddenNum.value = invoice.invoiceNumber;
                 this._updateEditingInvoiceBadge();
             }
         }, 300);
+    }
+
+    // Pone el checkbox y la tasa de impuesto según el PERFIL del cliente (campos
+    // `cobraImpuestos` y `taxRate` de su ficha). Se usa al abrir una factura para editar,
+    // en las dos pestañas. Si el cliente no trae tasa, se usa 8.25 %.
+    _cargarImpuestoDelCliente(cli, idCheckbox, idTasa, nombreToggle) {
+        const chk = document.getElementById(idCheckbox);
+        const rate = document.getElementById(idTasa);
+        if (!chk || !cli) return;
+        chk.checked = cli.cobraImpuestos !== false;
+        if (rate) rate.value = parseFloat(cli.taxRate) || 8.25;
+        if (typeof this[nombreToggle] === 'function') this[nombreToggle]();
     }
 
     // Muestra/oculta el indicador de "Editando factura #XXXX" en el encabezado, según si
@@ -12643,15 +12690,23 @@ Motivo de cancelación (opcional):`);
         // un vínculo a un servicio de otro cliente.
         const selId = document.getElementById('manualInvClient')?.value;
         if (selId) this._limpiarVinculosAjenos(selId, true);
-        return [...list.children].map(row => ({
-            date: row.querySelector('.manualInvDate').value,
-            name: row.querySelector('.manualInvDesc').value.trim(),
-            price: parseFloat(row.querySelector('.manualInvPrice').value),
-            // Si la línea vino de un servicio real, se lleva su vínculo — así la factura
-            // manual queda igual de bien atada al calendario que la automática.
-            id: row.dataset.svcId || undefined,
-            cliId: row.dataset.svcCliId || undefined
-        }));
+        return [...list.children].map(row => {
+            // Un campo de precio VACÍO vale 0 — antes `parseFloat('')` daba NaN y la
+            // validación rechazaba la factura con "precio válido", así que no había forma
+            // de dejar una línea en blanco. Ahora en blanco = sin cobro en esa línea (y el
+            // PDF la imprime vacía, no "$0.00"). Un texto inválido sigue dando NaN y sí se
+            // rechaza, como debe ser.
+            const rawPrice = row.querySelector('.manualInvPrice').value.trim();
+            return {
+                date: row.querySelector('.manualInvDate').value,
+                name: row.querySelector('.manualInvDesc').value.trim(),
+                price: rawPrice === '' ? 0 : parseFloat(rawPrice),
+                // Si la línea vino de un servicio real, se lleva su vínculo — así la factura
+                // manual queda igual de bien atada al calendario que la automática.
+                id: row.dataset.svcId || undefined,
+                cliId: row.dataset.svcCliId || undefined
+            };
+        });
     }
 
     showManualInvoicePreview() {
@@ -13639,6 +13694,9 @@ Motivo de cancelación (opcional):`);
             if (pdfData._services) {
                 alreadyExists.items = this.buildInvoiceItems(pdfData._services, pdfData.client);
             }
+            // Marca de factura MANUAL, para que al reabrirla siempre vuelva a la pestaña
+            // Manual aunque su período coincida con servicios del calendario.
+            if (pdfData._isManual) alreadyExists.isManual = true;
             if (pdfData.startDate) alreadyExists.startDate = pdfData.startDate;
             if (pdfData.endDate) alreadyExists.endDate = pdfData.endDate;
             if (pdfData.total !== undefined && pdfData.total !== null) alreadyExists.total = pdfData.total;
@@ -13655,6 +13713,7 @@ Motivo de cancelación (opcional):`);
             clientIds: cli ? [cli.id] : [],
             clientEmail: cli?.email || '',
             type: cli?.type || 'mensual',
+            isManual: pdfData._isManual === true,
             startDate: pdfData.startDate || '',
             endDate: pdfData.endDate || '',
             serviceCount: pdfData.serviceCount || 0,
