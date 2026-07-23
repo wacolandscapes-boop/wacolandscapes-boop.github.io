@@ -6839,7 +6839,7 @@ class Scheduler {
             });
             const totalPaidNow = inv.payments.reduce((s,p) => s + parseFloat(p.amount||0), 0);
             inv.paidAmount = totalPaidNow;
-            inv.status = totalPaidNow >= parseFloat(inv.total||0) ? 'pagada' : 'parcial';
+            inv.status = this._cubreTotal(totalPaidNow, inv.total) ? 'pagada' : 'parcial';
             inv.paidAt = new Date().toISOString();
             inv.paymentMethod = 'Tarjeta Guardada (Stripe)';
 
@@ -6890,7 +6890,7 @@ class Scheduler {
             if (Math.round(suma * 100) !== Math.round(parseFloat(inv.paidAmount || 0) * 100)) {
                 console.warn(`🔧 Resumen de la #${inv.invoiceNumber} desfasado: decía $${inv.paidAmount}, el historial suma $${suma.toFixed(2)}. Corregido.`);
                 inv.paidAmount = suma.toFixed(2);
-                inv.status = suma >= parseFloat(inv.total || 0) ? 'pagada' : (suma > 0 ? 'parcial' : 'enviada');
+                inv.status = this._cubreTotal(suma, inv.total) ? 'pagada' : (suma > 0 ? 'parcial' : 'enviada');
                 this.save();
             }
         }
@@ -6929,7 +6929,29 @@ class Scheduler {
             const paidStr = totalPaid > 0 ? `Pagado: <b style="color:#27ae60">$${totalPaid.toFixed(2)}</b> | ` : '';
             balanceEl.innerHTML = `Total: <b>$${(inv.total||0).toFixed(2)}</b> | ${paidStr}Balance: <b style="color:${balance>0?'#e74c3c':'#27ae60'}">$${balance.toFixed(2)}</b>`;
         }
+        // ── Modo CONSULTA vs modo CAPTURA ─────────────────────────────────────────
+        // Si la factura YA está cubierta, el formulario de captura arranca COLAPSADO:
+        // al abrir sólo se consulta el historial. Agregar otro pago exige un clic
+        // deliberado en "Mostrar". Si aún debe algo, el formulario se abre normal.
+        const _campos = document.getElementById('cobroPagoCampos');
+        const _toggle = document.getElementById('cobroPagoToggle');
+        const _cubierta = totalPaid > 0 && this._cubreTotal(totalPaid, inv.total);
+        if (_campos && _toggle) {
+            _campos.style.display = _cubierta ? 'none' : 'block';
+            _toggle.style.display = _cubierta ? 'inline-block' : 'none';
+            _toggle.textContent = 'Mostrar';
+        }
         document.getElementById('cobroDetalleModal').style.display = 'flex';
+    }
+
+    // Despliega/oculta el formulario de captura de pago dentro del modal de cobro.
+    toggleCobroPagoForm() {
+        const campos = document.getElementById('cobroPagoCampos');
+        const btn = document.getElementById('cobroPagoToggle');
+        if (!campos || !btn) return;
+        const oculto = campos.style.display === 'none';
+        campos.style.display = oculto ? 'block' : 'none';
+        btn.textContent = oculto ? 'Ocultar' : 'Mostrar';
     }
 
     renderPaymentHistory(inv) {
@@ -7032,6 +7054,17 @@ class Scheduler {
         this.refreshGeneratedInvoices();
     }
 
+    // ── ¿Los pagos cubren el total de la factura? ──────────────────────────────
+    // Se compara EN CENTAVOS REDONDEADOS, no con los floats crudos. Los totales se
+    // guardan con más de 2 decimales (el tax 8.25% produce 325×1.0825 = 351.8125),
+    // pero el cliente paga centavos exactos ($351.81). Comparando crudo, 351.81 es
+    // MENOR que 351.8125 y la factura quedaba marcada "parcial" por un cuarto de
+    // centavo — pasaba en 66 de 152 facturas, siempre que el 3er decimal redondeaba
+    // hacia abajo. Redondeando ambos lados a centavos, cuadra.
+    _cubreTotal(pagado, total) {
+        return Math.round(parseFloat(pagado || 0) * 100) >= Math.round(parseFloat(total || 0) * 100);
+    }
+
     removePayment(invId, index) {
         const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(invId));
         if (!inv || !inv.payments) return;
@@ -7056,7 +7089,7 @@ class Scheduler {
             // Stripe" al sincronizar lo reviva desde Drive (bug de Kelsey #7520).
             inv._pagoBorradoManual = true;
         }
-        inv.status = (totalPaid > 0 && totalPaid >= (inv.total||0)) ? 'pagada' : (totalPaid > 0 ? 'parcial' : 'enviada');
+        inv.status = (totalPaid > 0 && this._cubreTotal(totalPaid, inv.total)) ? 'pagada' : (totalPaid > 0 ? 'parcial' : 'enviada');
         this.save();
         this.openCobroDetalle(invId);
         this.refreshGeneratedInvoices();
@@ -7154,6 +7187,40 @@ class Scheduler {
                     this.renderPaymentHistory(inv);
                     return;
                 }
+                // ── Candado CRUZADO: ¿esa misma referencia ya está en OTRA factura? ─────
+                // El de arriba solo mira dentro de ESTA factura. Pero una referencia de
+                // Stripe (pi_...) o un número de cheque identifican UN pago único: si ya
+                // está acreditado en otra factura, registrarlo aquí lo cobra dos veces en
+                // los libros. Pasó con el #7550: dos pagos del mismo link quedaron en la
+                // misma factura cuando uno era de la #7548.
+                const refLimpia = String(ref || '').trim();
+                if (refLimpia) {
+                    const otra = (this.generatedInvoices || []).find(o =>
+                        String(o.id) !== String(inv.id) &&
+                        (o.payments || []).some(p => String(p.ref || '').trim() === refLimpia));
+                    if (otra) {
+                        const seguir = confirm(
+                            `⚠️ La referencia "${refLimpia}" YA está registrada en la factura #${otra.invoiceNumber} (${otra.clientName}).\n\n` +
+                            `Si es el mismo pago, cancela aquí y quítalo de esa factura primero.\n\n` +
+                            `¿Registrarlo de todas formas?`);
+                        if (!seguir) { this.renderPaymentHistory(inv); return; }
+                    }
+                }
+                // ── Aviso de SOBREPAGO ────────────────────────────────────────────────
+                // Si con este pago la factura queda cobrada de más, se pregunta antes de
+                // guardar. Sin esto, un pago que en realidad era de otra factura entraba
+                // en silencio y sólo se notaba después, al ver el total inflado.
+                const yaPagado = inv.payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+                const totalFactura = parseFloat(inv.total || 0);
+                if (Math.round((yaPagado + amount) * 100) > Math.round(totalFactura * 100)) {
+                    const exceso = (yaPagado + amount) - totalFactura;
+                    const seguir2 = confirm(
+                        `⚠️ Esta factura es de $${totalFactura.toFixed(2)} y ya tiene $${yaPagado.toFixed(2)} pagados.\n` +
+                        `Con este pago de $${amount.toFixed(2)} quedaría en $${(yaPagado + amount).toFixed(2)} — ` +
+                        `$${exceso.toFixed(2)} de más.\n\n` +
+                        `¿Es correcto?`);
+                    if (!seguir2) { this.renderPaymentHistory(inv); return; }
+                }
                 inv.payments.push({ date: paidAt, amount, method, ref, notes });
             }
             // Calculate total paid
@@ -7164,7 +7231,7 @@ class Scheduler {
             inv.paymentRef = ref;
             inv._pagoBorradoManual = false;   // ya hay pago de nuevo: el rescate puede volver a aplicar
             // Auto-set status
-            if (totalPaid >= (inv.total||0)) {
+            if (this._cubreTotal(totalPaid, inv.total)) {
                 inv.status = 'pagada';
             } else {
                 inv.status = 'parcial';
@@ -16576,7 +16643,7 @@ Motivo de cancelación (opcional):`);
             } catch(e) { console.warn('No se pudo verificar pagos de Stripe en Drive:', e); }
 
             const data = {
-                exportType: 'anaCS_sync',
+                exportType: 'brazosCS_sync',
                 exportDate: new Date().toISOString(),
                 lastSavedAt: new Date().toISOString(),
                 deviceId: localStorage.getItem('anaCS_deviceId') || 'unknown',
@@ -18811,6 +18878,14 @@ document.addEventListener('click', function(e) {
 
         <!-- Sección pago - visible cuando pagada -->
         <div id="cobroPagoSection">
+            <!-- Encabezado explícito: deja claro que lo de abajo AGREGA un pago nuevo,
+                 no muestra el que ya existe. Antes sólo lo decía un texto gris chiquito
+                 y se confundía "consultar" con "registrar". -->
+            <div id="cobroPagoHeader" style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin:4px 0 10px; padding:8px 10px; background:#e8f8f5; border:1px solid #a3e4d7; border-left:4px solid #16a085; border-radius:8px;">
+                <span style="font-size:0.85rem; font-weight:700; color:#0e6655;">➕ Registrar un pago NUEVO</span>
+                <button id="cobroPagoToggle" onclick="app.toggleCobroPagoForm()" style="display:none; background:#16a085; color:white; border:none; border-radius:6px; padding:4px 10px; font-size:0.76rem; font-weight:700; cursor:pointer;">Mostrar</button>
+            </div>
+            <div id="cobroPagoCampos">
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
                 <div>
                     <label style="font-size:0.82rem; font-weight:700; color:#444;">Fecha de pago</label>
@@ -18846,6 +18921,7 @@ document.addEventListener('click', function(e) {
                 <label style="font-size:0.82rem; font-weight:700; color:#1d4ed8;">🏦 Fecha estimada de depósito en banco <span style="font-weight:400;color:#666;">(opcional)</span></label>
                 <input type="date" id="cobroDetalleDepositEta" style="width:100%; padding:9px; margin-top:5px; border:1px solid #cfe3ff; border-radius:8px; box-sizing:border-box;">
                 <div style="font-size:0.72rem; color:#5b7cb5; margin-top:4px;">Para pagos en tránsito (Zelle, Bill.com, ACH). El pago ya se registra; esto solo indica cuándo se refleja el dinero.</div>
+            </div>
             </div>
         </div>
 
