@@ -5635,9 +5635,14 @@ class Scheduler {
                 if (listEl) {
                     listEl.innerHTML = '';
                     const defaultPrice = propCli ? (propCli.price || 0) : 0;
-                    const svcDates = pending.serviceDates || [pending.startDate];
-                    const svcIds = pending.serviceIds || [];
-                    // Todas las fechas quedan visibles en la factura (para que quede
+                    // Fechas y sus ids ORDENADOS por fecha: el monto fijo va en la última
+                    // línea, y si las fechas vinieran desordenadas esa "última" no sería la
+                    // más reciente (el PDF sí ordena por fecha antes de imprimir).
+                    const _paresOrdenados = (pending.serviceDates || [pending.startDate])
+                        .map((d, idx) => ({ d, id: (pending.serviceIds || [])[idx] || '' }))
+                        .sort((a, b) => String(a.d).localeCompare(String(b.d)));
+                    const svcDates = _paresOrdenados.map(x => x.d);
+                    const svcIds = _paresOrdenados.map(x => x.id);                    // Todas las fechas quedan visibles en la factura (para que quede
                     // documentado cuándo se limpió), pero el monto fijo del periodo solo
                     // se pone en la ÚLTIMA fecha — las anteriores en $0, para no inflar el
                     // cobro si el precio es un monto fijo que cubre varias visitas.
@@ -7464,7 +7469,17 @@ class Scheduler {
                 if (listEl) {
                     listEl.innerHTML = '';
                     const propPrefix = cli && cli.propId && cli.propId !== cli.name ? cli.propId + ' - ' : null;
-                    (invoice.items || []).forEach(item => {
+                    // Las líneas se cargan ORDENADAS POR FECHA. Los items guardados pueden
+                    // venir desordenados (la #7546 tenía 06/06, 06/12, 06/26, 06/19), y como
+                    // el PDF SÍ los ordena por fecha antes de imprimir, la "última línea" del
+                    // formulario no era la última del PDF: el monto fijo escrito al final
+                    // terminaba apareciendo a media factura.
+                    const itemsOrdenados = [...(invoice.items || [])].sort((a, b) => {
+                        const fa = a.fecha || a.date || '';
+                        const fb = b.fecha || b.date || '';
+                        return String(fa).localeCompare(String(fb));
+                    });
+                    itemsOrdenados.forEach(item => {
                         let desc = item.descripcion || item.name || '';
                         if (propPrefix && desc.startsWith(propPrefix)) desc = desc.slice(propPrefix.length);
                         this.addManualInvoiceItem(item.fecha || item.date || invoice.startDate, desc, item.precio || item.price || 0);
@@ -12881,6 +12896,65 @@ Motivo de cancelación (opcional):`);
         }, 200);
     }
 
+    // Pasa la factura que está armada en la pestaña GENERAR a la pestaña MANUAL, con sus
+    // líneas ya calculadas (fecha, descripción y precio de cada servicio) para poder editar
+    // cualquier dato antes de enviarla. El vínculo al servicio real de cada línea se
+    // conserva, así que editar montos no rompe el "ya facturado".
+    convertGenerarToManual() {
+        const clientId = document.getElementById('invoiceClient').value;
+        const startDate = document.getElementById('invoiceStart').value;
+        const endDate = document.getElementById('invoiceEnd').value;
+        if (!clientId) { alert('Primero selecciona un cliente.'); return; }
+        if (!startDate || !endDate) { alert('Primero selecciona las fechas.'); return; }
+        const client = this.clis.find(c => c.id == clientId);
+        if (!client) { alert('Cliente no encontrado.'); return; }
+
+        // Reunir los servicios del período tal como lo hace previewInvoice (misma regla).
+        const selEsConstruccion = client.type === 'construccion';
+        const allClientsForName = this.clis.filter(c => c.name === client.name);
+        const hasMultiType = !selEsConstruccion && allClientsForName.some(c => c.type === 'airbnb' || c.type === 'unico');
+        let allServices = [];
+        const fuentes = hasMultiType ? allClientsForName : [client];
+        fuentes.forEach(c => {
+            this.servs.filter(s => String(s.cliId) === String(c.id) && s.date >= startDate && s.date <= endDate && !s.cancelled)
+                .forEach(s => allServices.push({ ...s, propId: c.propId || c.name, price: parseFloat(c.price) || 0, _cliId: c.id }));
+        });
+        if (allServices.length === 0) { alert('No hay servicios en ese período para pasar a Manual.'); return; }
+        allServices.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+        // Cambiar a Manual, fijar cliente e impuesto, y limpiar filas viejas.
+        this.switchInvoiceTab('manual');
+        const manualClientSel = document.getElementById('manualInvClient');
+        if (manualClientSel) {
+            manualClientSel.value = clientId;
+            const label = client.name + (client.propId && client.propId !== client.name ? ' — ' + client.propId : '');
+            const searchEl = document.getElementById('manualInvClientSearch');
+            if (searchEl) searchEl.value = label;
+        }
+        const list = document.getElementById('manualInvItemsList');
+        if (list) list.innerHTML = '';
+
+        // Volcar una línea por servicio, conservando el vínculo (svcId + cliId).
+        const propPrefix = client.propId && client.propId !== client.name ? client.propId + ' - ' : '';
+        allServices.forEach(s => {
+            const precio = selEsConstruccion
+                ? (client.invoicingType === 'perservice' ? (parseFloat(client.price) || 0) : '')
+                : (parseFloat(s.price) || 0);
+            this.addManualInvoiceItem(s.date, (propPrefix ? propPrefix : '') + 'Cleaning Service', precio, s.id || '', s._cliId || '');
+        });
+        // Para construcción con monto fijo, poner el precio en la última línea.
+        if (selEsConstruccion && client.invoicingType !== 'perservice') {
+            const rows = list ? [...list.children] : [];
+            const lastPrice = rows.length ? rows[rows.length - 1].querySelector('.manualInvPrice') : null;
+            if (lastPrice) lastPrice.value = parseFloat(client.price) || 0;
+        }
+        // Impuesto del perfil.
+        this._cargarImpuestoDelCliente(client, 'manualInvApplyTax', 'manualInvTaxRate', 'toggleManualTaxField');
+        this.updateManualInvoiceTotals?.();
+        // Marcar que esta factura es manual, para que al reabrirla vuelva a Manual.
+        if (window.currentPDFData) window.currentPDFData._isManual = true;
+    }
+
     previewInvoice() {
         const clientId = document.getElementById('invoiceClient').value;
         const startDate = document.getElementById('invoiceStart').value;
@@ -15891,46 +15965,55 @@ Motivo de cancelación (opcional):`);
         this.renderProductionReport();
     }
 
+    // Baja de Drive los horarios que registran las empleadas en BrazosCalendar
+    // (un archivo brazos_horarios_FECHA.json por día) y los fusiona en localStorage.
+    // SIN tocar la interfaz — así se puede llamar al conectar Drive, aunque la pantalla
+    // de Producción esté cerrada. Devuelve { allReports, cargados }.
+    async _bajarHorariosDeDrive() {
+        if (!this.driveConnected || !this.driveFolderId) return { allReports: null, cargados: 0 };
+        const today = new Date();
+        const dates = [];
+        for (let i = -30; i <= 14; i++) {
+            const d = new Date(today);
+            d.setDate(d.getDate() + i);
+            dates.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'));
+        }
+        let allReports = {};
+        let cargados = 0;
+        await Promise.all(dates.map(async date => {
+            const fname = 'brazos_horarios_' + date + '.json';
+            const key   = 'brazos_horarios_' + date;
+            try {
+                const sr = await fetch(
+                    `https://www.googleapis.com/drive/v3/files?q=name='${fname}'+and+'${this.driveFolderId}'+in+parents+and+trashed=false&fields=files(id)`,
+                    { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                );
+                const sd = await sr.json();
+                if (!sd.files || !sd.files.length) return;
+                const fr = await fetch(
+                    `https://www.googleapis.com/drive/v3/files/${sd.files[0].id}?alt=media`,
+                    { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                );
+                const dayData = await fr.json();
+                const existingLocal = JSON.parse(localStorage.getItem(key) || '{}');
+                const mergedDay = this.mergeHorariosDay(existingLocal, dayData);
+                localStorage.setItem(key, JSON.stringify(mergedDay));
+                allReports[date] = mergedDay;
+                cargados++;
+            } catch(e) {}
+        }));
+        return { allReports, cargados };
+    }
+
     async loadProductionFromDrive() {
         const status = document.getElementById('prodStatus');
-        status.textContent = '⏳ Cargando horarios desde Drive…';
-        status.style.color = '#f39c12';
+        if (status) { status.textContent = '⏳ Cargando horarios desde Drive…'; status.style.color = '#f39c12'; }
         if (!this.driveConnected || !this.driveFolderId) {
-            status.textContent = '⚠️ Conecta Drive primero';
-            status.style.color = '#e74c3c'; return;
+            if (status) { status.textContent = '⚠️ Conecta Drive primero'; status.style.color = '#e74c3c'; }
+            return;
         }
         try {
-            const today = new Date();
-            const dates = [];
-            for (let i = -30; i <= 14; i++) {
-                const d = new Date(today);
-                d.setDate(d.getDate() + i);
-                dates.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'));
-            }
-            let allReports = {};
-            let cargados = 0;
-            await Promise.all(dates.map(async date => {
-                const fname = 'brazos_horarios_' + date + '.json';
-                const key   = 'brazos_horarios_' + date;
-                try {
-                    const sr = await fetch(
-                        `https://www.googleapis.com/drive/v3/files?q=name='${fname}'+and+'${this.driveFolderId}'+in+parents+and+trashed=false&fields=files(id)`,
-                        { headers: { Authorization: `Bearer ${this.driveToken}` } }
-                    );
-                    const sd = await sr.json();
-                    if (!sd.files || !sd.files.length) return;
-                    const fr = await fetch(
-                        `https://www.googleapis.com/drive/v3/files/${sd.files[0].id}?alt=media`,
-                        { headers: { Authorization: `Bearer ${this.driveToken}` } }
-                    );
-                    const dayData = await fr.json();
-                    const existingLocal = JSON.parse(localStorage.getItem(key) || '{}');
-                    const mergedDay = this.mergeHorariosDay(existingLocal, dayData);
-                    localStorage.setItem(key, JSON.stringify(mergedDay));
-                    allReports[date] = mergedDay;
-                    cargados++;
-                } catch(e) {}
-            }));
+            const { allReports, cargados } = await this._bajarHorariosDeDrive();
             if (!cargados) {
                 status.textContent = '⚠️ Sin horarios registrados aún.';
                 status.style.color = '#e74c3c'; return;
@@ -16493,7 +16576,16 @@ Motivo de cancelación (opcional):`);
                 await this.driveDownloadData();
                 await this.driveSyncNow();
                 // Descargar horarios de Calendar al conectar
-                try { await this.descargarHorariosGrupos(); } catch(e) {}
+                // Si esto falla, ANTES se tragaba el error en silencio y los horarios se
+                // quedaban viejos sin que nadie se enterara — así se perdió una semana de
+                // registros de Nohemi. Ahora al menos queda el aviso en consola y en el
+                // botón de Drive, para poder recargar a mano desde Producción.
+                try { await this.descargarHorariosGrupos(); }
+                catch(e) {
+                    console.warn('⚠️ No se pudieron descargar los horarios de las empleadas:', e);
+                    const lbl = document.getElementById('driveSyncLabel');
+                    if (lbl) lbl.textContent = 'Sync (horarios ✗)';
+                }
                 // Importar empleados de la Nómina — siempre, sin importar timestamps
                 await this.importEmployeesFromNomina();
                 const toast = document.createElement('div');
@@ -17956,6 +18048,9 @@ document.addEventListener('click', function(e) {
                     <button id="btnGeneratePDF" onclick="app.showPDFPreview()" class="btn" style="background: #1A4FCC; color: white; padding: 8px 15px; font-size: 0.9rem;">
                         👁️ Vista Previa
                     </button>
+                    <button id="btnConvertToManual" onclick="app.convertGenerarToManual()" title="Pasar esta factura a Manual para editar fechas, descripciones o montos" class="btn" style="background: #8e44ad; color: white; padding: 8px 15px; font-size: 0.9rem;">
+                        ✏️ Editar como Manual
+                    </button>
                 </div>
             </div>
         </div>
@@ -19077,6 +19172,13 @@ document.addEventListener('click', function(e) {
         </div>
       </div>
 
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+        <button onclick="app.loadProductionFromDrive()"
+            style="background:#2980b9; color:white; border:none; border-radius:7px; padding:7px 14px; font-size:0.82rem; font-weight:700; cursor:pointer;">
+            🔄 Recargar Drive
+        </button>
+        <span style="font-size:0.72rem; color:#888;">Baja los horarios que registraron las empleadas en BrazosCalendar.</span>
+      </div>
       <div id="prodStatus" style="font-size:0.85rem;color:#888;margin-bottom:12px"></div>
       <div id="prodContent"></div>
     </div>
