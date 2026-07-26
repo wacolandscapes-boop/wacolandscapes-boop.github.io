@@ -1172,112 +1172,144 @@
                         <strong id="cliFormTitle" style="color:#e67e22;">➕ Nuevo Cliente</strong>
                         <button onclick="app.cancelCliForm()" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#999;">✕</button>
                     </div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:15px">
-                        <input type="hidden" id="editCliId">
-                        <input type="text" id="nc" placeholder="Nombre del Dueño" style="grid-column:span 2">
-                        <div id="propIdWrap" style="grid-column:span 2; display:none;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                                <label style="font-size:0.78rem; font-weight:700; color:#555;">🏠 Propiedades</label>
-                                <button type="button" onclick="app.addPropField()" style="background:#27ae60;color:white;border:none;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:0.75rem;">+ Agregar</button>
+
+                    <!-- ===== SECCIÓN 1: Editar Cliente ===== -->
+                    <div class="cliAccSection">
+                        <button type="button" class="cliAccHeader" onclick="app.toggleCliAcc('cliAcc1', this)" style="width:100%; text-align:left; background:#e67e22; color:white; border:none; border-radius:8px; padding:10px 12px; font-size:0.9rem; font-weight:700; cursor:pointer; display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span>👤 Editar Cliente</span><span class="cliAccArrow">▼</span>
+                        </button>
+                        <div id="cliAcc1" class="cliAccBody" style="display:block;">
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:10px">
+                                <input type="hidden" id="editCliId">
+                                <input type="text" id="nc" placeholder="Nombre del Dueño" style="grid-column:span 2">
+                                <div id="propIdWrap" style="grid-column:span 2; display:none;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                        <label style="font-size:0.78rem; font-weight:700; color:#555;">🏠 Propiedades</label>
+                                        <button type="button" onclick="app.addPropField()" style="background:#27ae60;color:white;border:none;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:0.75rem;">+ Agregar</button>
+                                    </div>
+                                    <div id="propFieldsList"></div>
+                                </div>
+                                <input type="hidden" id="np">
+                                <input type="number" id="pc" placeholder="Precio $">
+                                <input type="tel" id="tc" placeholder="Teléfono">
+                                <input type="email" id="ec" placeholder="Email" style="grid-column:span 1">
+                                <input type="text" id="dc" placeholder="Dirección" style="grid-column:span 2">
+                                <input type="text" id="dci" placeholder="Ciudad">
+                                <input type="text" id="dzip" placeholder="ZIP / Código Postal">
+                                <select id="ntype" onchange="app.togglePropIdWrap(this.value)" style="grid-column:span 2">
+                                    <option value="unico">Único</option><option value="diario">Diario</option>
+                                    <option value="2xsemana">2x Sem</option><option value="3xsemana">3x Sem</option>
+                                    <option value="semanal">Semanal</option><option value="cada3semanas">Cada 3 Sem</option><option value="quincenal">Quincenal</option>
+                                    <option value="mensual">Mensual</option><option value="airbnb">AirBnB</option><option value="construccion">🏗️ Construcción</option>
+                                </select>
+                                <select id="cliServiceType" style="grid-column:span 2">
+                                    <option value="residencial">🏠 Residencial</option>
+                                    <option value="comercial">🏢 Comercial</option>
+                                    <option value="airbnb">🏖️ AirBnB</option>
+                                    <option value="construccion">🏗️ Construcción</option>
+                                    <option value="unico">⭐ Único</option>
+                                </select>
+                                <label style="font-size:0.8rem; color:#555; margin-top:6px; display:block; grid-column:span 2;">📆 Frecuencia de Facturación</label>
+                                <select id="cliBillingPeriod" style="grid-column:span 2">
+                                    <option value="weekly">📅 Facturar Semanalmente</option>
+                                    <option value="biweekly">📅 Facturar Quincenalmente</option>
+                                    <option value="monthly">📅 Facturar Mensualmente</option>
+                                    <option value="perservice">📅 Facturar por Servicio</option>
+                                </select>
+                                <label style="font-size:0.8rem; color:#555; margin-top:6px; display:block; grid-column:span 2;">🎨 Diseño o Estilo de Factura</label>
+                                <select id="cliInvoicingType" style="grid-column:span 2">
+                                    <option value="monthly">📋 Mensual (suma de visitas del mes)</option>
+                                    <option value="fixed_monthly">📌 Mensual Fijo (monto fijo sin importar visitas)</option>
+                                    <option value="perservice">🧾 Por Servicio (factura cada visita)</option>
+                                </select>
+                                <div style="grid-column:span 2; background:#fff3cd; border:1px solid #f39c12; border-radius:6px; padding:8px; margin-top:6px;">
+                                    <label style="display:flex; align-items:center; gap:6px; font-size:0.82rem; font-weight:700; color:#856404; cursor:pointer;">
+                                        <input type="checkbox" id="cliExcludeInvoicing" style="width:auto;">
+                                        🚫 No facturar por Brazos (se factura por fuera / otro dueño)
+                                    </label>
+                                    <div style="font-size:0.72rem; color:#856404; margin-top:2px;">El cliente/propiedad sigue programándose normal en el calendario, pero nunca aparece en Pendientes, Urgentes ni se le genera factura desde aquí.</div>
+                                </div>
                             </div>
-                            <div id="propFieldsList"></div>
-                        </div>
-                        <input type="hidden" id="np">
-                        <input type="number" id="pc" placeholder="Precio $">
-                        <input type="tel" id="tc" placeholder="Teléfono">
-                        <input type="email" id="ec" placeholder="Email" style="grid-column:span 1">
-                        <input type="text" id="dc" placeholder="Dirección" style="grid-column:span 2">
-                        <input type="text" id="dci" placeholder="Ciudad">
-                        <input type="text" id="dzip" placeholder="ZIP / Código Postal">
-                        <select id="ntype" onchange="app.togglePropIdWrap(this.value)" style="grid-column:span 2">
-                            <option value="unico">Único</option><option value="diario">Diario</option>
-                            <option value="2xsemana">2x Sem</option><option value="3xsemana">3x Sem</option>
-                            <option value="semanal">Semanal</option><option value="cada3semanas">Cada 3 Sem</option><option value="quincenal">Quincenal</option>
-                            <option value="mensual">Mensual</option><option value="airbnb">AirBnB</option><option value="construccion">🏗️ Construcción</option>
-                        </select>
-                        <select id="cliServiceType" style="grid-column:span 2">
-                            <option value="residencial">🏠 Residencial</option>
-                            <option value="comercial">🏢 Comercial</option>
-                            <option value="airbnb">🏖️ AirBnB</option>
-                            <option value="construccion">🏗️ Construcción</option>
-                            <option value="unico">⭐ Único</option>
-                        </select>
-                        <label style="font-size:0.8rem; color:#555; margin-top:6px; display:block; grid-column:span 2;">📆 Frecuencia de Facturación</label>
-                        <select id="cliBillingPeriod" style="grid-column:span 2">
-                            <option value="weekly">📅 Facturar Semanalmente</option>
-                            <option value="biweekly">📅 Facturar Quincenalmente</option>
-                            <option value="monthly">📅 Facturar Mensualmente</option>
-                            <option value="perservice">📅 Facturar por Servicio</option>
-                        </select>
-                        <label style="font-size:0.8rem; color:#555; margin-top:6px; display:block; grid-column:span 2;">🎨 Diseño o Estilo de Factura</label>
-                        <select id="cliInvoicingType" style="grid-column:span 2">
-                            <option value="monthly">📋 Mensual (suma de visitas del mes)</option>
-                            <option value="fixed_monthly">📌 Mensual Fijo (monto fijo sin importar visitas)</option>
-                            <option value="perservice">🧾 Por Servicio (factura cada visita)</option>
-                        </select>
-                        <label style="font-size:0.8rem; color:#555; margin-top:6px; display:block; grid-column:span 2;">⏱️ Términos de Pago</label>
-                        <select id="cliPaymentTerms" style="grid-column:span 2">
-                            <option value="0">⚡ Inmediato</option>
-                            <option value="7">Net 7 (7 días)</option>
-                            <option value="15" selected>Net 15 (15 días)</option>
-                            <option value="30">Net 30 (30 días)</option>
-                        </select>
-                        <div style="grid-column:span 2; background:#fff3cd; border:1px solid #f39c12; border-radius:6px; padding:8px; margin-top:6px;">
-                            <label style="display:flex; align-items:center; gap:6px; font-size:0.82rem; font-weight:700; color:#856404; cursor:pointer;">
-                                <input type="checkbox" id="cliExcludeInvoicing" style="width:auto;">
-                                🚫 No facturar por Brazos (se factura por fuera / otro dueño)
-                            </label>
-                            <div style="font-size:0.72rem; color:#856404; margin-top:2px;">El cliente/propiedad sigue programándose normal en el calendario, pero nunca aparece en Pendientes, Urgentes ni se le genera factura desde aquí.</div>
-                        </div>
-                        <div style="grid-column:span 2; background:#f3e8ff; border:1px solid #9333ea; border-radius:6px; padding:8px; margin-top:4px;">
-                            <label style="display:flex; align-items:center; gap:6px; font-size:0.82rem; font-weight:700; color:#6b21a8; cursor:pointer;">
-                                <input type="checkbox" id="cliServicePaused" style="width:auto;">
-                                ⏸️ Servicio suspendido / pausado
-                            </label>
-                            <div style="display:flex; align-items:center; gap:6px; margin-top:6px;">
-                                <label style="font-size:0.75rem; color:#6b21a8; white-space:nowrap;">Suspendido desde:</label>
-                                <input type="date" id="cliPausedSince" style="flex:1; padding:4px 6px; border:1px solid #c4b5fd; border-radius:4px; font-size:0.8rem;">
-                            </div>
-                            <div style="font-size:0.72rem; color:#6b21a8; margin-top:4px;">El cliente deja de aparecer en el calendario a partir de esa fecha y ya no se le generan Pendientes ni facturas. <b>Nada se borra</b>: el historial anterior se conserva y al desmarcarlo todo vuelve como estaba.</div>
-                        </div>
-                        <div style="grid-column:span 2; background:#eff6ff; border:1px solid #3b82f6; border-radius:6px; padding:8px; margin-top:4px;">
-                            <label style="font-size:0.85rem; font-weight:700; color:#1d4ed8; display:flex; align-items:center; gap:8px; cursor:pointer;">
-                                <input type="checkbox" id="cliApplyTax" checked style="width:16px; height:16px; accent-color:#3b82f6;">
-                                🏛️ Cobrar impuesto a este cliente
-                            </label>
-                            <div style="font-size:0.72rem; color:#3b5b9a; margin-top:4px;">Activado por defecto. <b>Desmárcalo para clientes EXENTOS</b> (iglesias, etc.). Al facturar, este dato se aplica solo — ya no hay que acordarse de marcarlo cada vez.</div>
-                        </div>
-                        <div style="grid-column:span 2; display:flex; align-items:center; gap:8px; margin-top:4px;">
-                            <label style="font-size:0.8rem; color:#555; white-space:nowrap;">🏛️ Tax Rate:</label>
-                            <input type="number" id="cliTaxRate" step="0.01" min="0" max="10" placeholder="8.25" 
-                                style="width:80px; padding:4px 8px; border:1px solid #ddd; border-radius:4px; font-size:0.85rem;">
-                            <span style="font-size:0.8rem; color:#555;">% (default 8.25% — verificar en gis.cpa.texas.gov/search)</span>
-                        </div>
-                        <div style="grid-column:span 2; background:#f0fff4; border:1px solid #27ae60; border-radius:6px; padding:8px; margin-top:6px;">
-                            <label style="font-size:0.8rem; font-weight:700; color:#27ae60; display:block; margin-bottom:4px;">💳 Cobro Automático con Tarjeta</label>
-                            <div style="display:flex; align-items:center; gap:8px;">
-                                <input type="checkbox" id="cliAutoCharge" style="width:16px; height:16px; accent-color:#27ae60;">
-                                <label for="cliAutoCharge" style="font-size:0.8rem; color:#555;">Cliente autorizó cobro automático con tarjeta guardada</label>
-                            </div>
-                            <input type="text" id="cliStripeCustomerId" placeholder="Stripe Customer ID (se llena automáticamente)" style="margin-top:6px; width:100%; padding:4px 8px; border:1px solid #ddd; border-radius:4px; font-size:0.75rem; color:#888; background:#f9f9f9;">
                         </div>
                     </div>
-                    <div id="regenBlock" style="display:none; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:10px; margin-bottom:8px;">
-                        <div style="font-size:0.8rem; font-weight:700; color:#856404; margin-bottom:6px;">🔄 Regenerar serie al guardar</div>
-                        <div style="display:flex; gap:8px; align-items:center;">
-                            <input type="checkbox" id="regenCheck" style="width:16px; height:16px;">
-                            <label for="regenCheck" style="font-size:0.8rem; color:#856404;">Eliminar servicios futuros y regenerar</label>
-                        </div>
-                        <div style="margin-top:6px;">
-                            <label style="font-size:0.75rem; color:#856404;">Desde fecha:</label>
-                            <input type="date" id="regenFrom" style="width:100%; padding:4px; border:1px solid #ffc107; border-radius:4px; font-size:0.8rem;">
-                        </div>
-                        <div style="margin-top:6px;">
-                            <label style="font-size:0.75rem; color:#856404;">Hasta fecha:</label>
-                            <input type="date" id="regenUntil" style="width:100%; padding:4px; border:1px solid #ffc107; border-radius:4px; font-size:0.8rem;">
+
+                    <!-- ===== SECCIÓN 2: Términos de Pago ===== -->
+                    <div class="cliAccSection">
+                        <button type="button" class="cliAccHeader" onclick="app.toggleCliAcc('cliAcc2', this)" style="width:100%; text-align:left; background:#3b82f6; color:white; border:none; border-radius:8px; padding:10px 12px; font-size:0.9rem; font-weight:700; cursor:pointer; display:flex; justify-content:space-between; align-items:center; margin:6px 0;">
+                            <span>💵 Términos de Pago</span><span class="cliAccArrow">▶</span>
+                        </button>
+                        <div id="cliAcc2" class="cliAccBody" style="display:none;">
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:10px">
+                                <label style="font-size:0.8rem; color:#555; display:block; grid-column:span 2;">⏱️ Términos de Pago (días para pagar)</label>
+                                <select id="cliPaymentTerms" style="grid-column:span 2">
+                                    <option value="0">⚡ Inmediato</option>
+                                    <option value="7">Net 7 (7 días)</option>
+                                    <option value="15" selected>Net 15 (15 días)</option>
+                                    <option value="30">Net 30 (30 días)</option>
+                                </select>
+                                <div style="grid-column:span 2; background:#eff6ff; border:1px solid #3b82f6; border-radius:6px; padding:8px; margin-top:6px;">
+                                    <label style="font-size:0.85rem; font-weight:700; color:#1d4ed8; display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                        <input type="checkbox" id="cliApplyTax" checked style="width:16px; height:16px; accent-color:#3b82f6;">
+                                        🏛️ Cobrar impuesto a este cliente
+                                    </label>
+                                    <div style="font-size:0.72rem; color:#3b5b9a; margin-top:4px;">Activado por defecto. <b>Desmárcalo para clientes EXENTOS</b> (iglesias, etc.). Al facturar, este dato se aplica solo — ya no hay que acordarse de marcarlo cada vez.</div>
+                                </div>
+                                <div style="grid-column:span 2; display:flex; align-items:center; gap:8px; margin-top:4px;">
+                                    <label style="font-size:0.8rem; color:#555; white-space:nowrap;">🏛️ Tax Rate:</label>
+                                    <input type="number" id="cliTaxRate" step="0.01" min="0" max="10" placeholder="8.25"
+                                        style="width:80px; padding:4px 8px; border:1px solid #ddd; border-radius:4px; font-size:0.85rem;">
+                                    <span style="font-size:0.8rem; color:#555;">% (default 8.25% — verificar en gis.cpa.texas.gov/search)</span>
+                                </div>
+                                <div style="grid-column:span 2; background:#f0fff4; border:1px solid #27ae60; border-radius:6px; padding:8px; margin-top:6px;">
+                                    <label style="font-size:0.8rem; font-weight:700; color:#27ae60; display:block; margin-bottom:4px;">💳 Cobro Automático con Tarjeta</label>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <input type="checkbox" id="cliAutoCharge" style="width:16px; height:16px; accent-color:#27ae60;">
+                                        <label for="cliAutoCharge" style="font-size:0.8rem; color:#555;">Cliente autorizó cobro automático con tarjeta guardada</label>
+                                    </div>
+                                    <input type="text" id="cliStripeCustomerId" placeholder="Stripe Customer ID (se llena automáticamente)" style="margin-top:6px; width:100%; padding:4px 8px; border:1px solid #ddd; border-radius:4px; font-size:0.75rem; color:#888; background:#f9f9f9;">
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <button onclick="app.saveCli()" class="btn" style="width:100%; background:var(--success);">💾 GUARDAR CLIENTE</button>
+
+                    <!-- ===== SECCIÓN 3: Suspensión y Regenerar Serie ===== -->
+                    <div class="cliAccSection">
+                        <button type="button" class="cliAccHeader" onclick="app.toggleCliAcc('cliAcc3', this)" style="width:100%; text-align:left; background:#9333ea; color:white; border:none; border-radius:8px; padding:10px 12px; font-size:0.9rem; font-weight:700; cursor:pointer; display:flex; justify-content:space-between; align-items:center; margin:6px 0;">
+                            <span>⏸️ Suspensión y Regenerar Serie</span><span class="cliAccArrow">▶</span>
+                        </button>
+                        <div id="cliAcc3" class="cliAccBody" style="display:none;">
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:10px">
+                                <div style="grid-column:span 2; background:#f3e8ff; border:1px solid #9333ea; border-radius:6px; padding:8px;">
+                                    <label style="display:flex; align-items:center; gap:6px; font-size:0.82rem; font-weight:700; color:#6b21a8; cursor:pointer;">
+                                        <input type="checkbox" id="cliServicePaused" style="width:auto;">
+                                        ⏸️ Servicio suspendido / pausado
+                                    </label>
+                                    <div style="display:flex; align-items:center; gap:6px; margin-top:6px;">
+                                        <label style="font-size:0.75rem; color:#6b21a8; white-space:nowrap;">Suspendido desde:</label>
+                                        <input type="date" id="cliPausedSince" style="flex:1; padding:4px 6px; border:1px solid #c4b5fd; border-radius:4px; font-size:0.8rem;">
+                                    </div>
+                                    <div style="font-size:0.72rem; color:#6b21a8; margin-top:4px;">El cliente deja de aparecer en el calendario a partir de esa fecha y ya no se le generan Pendientes ni facturas. <b>Al guardar, se borrarán sus servicios futuros posteriores a esa fecha (con confirmación).</b></div>
+                                </div>
+                            </div>
+                            <div id="regenBlock" style="display:none; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:10px; margin-bottom:8px;">
+                                <div style="font-size:0.8rem; font-weight:700; color:#856404; margin-bottom:6px;">🔄 Regenerar serie al guardar</div>
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <input type="checkbox" id="regenCheck" style="width:16px; height:16px;">
+                                    <label for="regenCheck" style="font-size:0.8rem; color:#856404;">Eliminar servicios futuros y regenerar</label>
+                                </div>
+                                <div style="margin-top:6px;">
+                                    <label style="font-size:0.75rem; color:#856404;">Desde fecha:</label>
+                                    <input type="date" id="regenFrom" style="width:100%; padding:4px; border:1px solid #ffc107; border-radius:4px; font-size:0.8rem;">
+                                </div>
+                                <div style="margin-top:6px;">
+                                    <label style="font-size:0.75rem; color:#856404;">Hasta fecha:</label>
+                                    <input type="date" id="regenUntil" style="width:100%; padding:4px; border:1px solid #ffc107; border-radius:4px; font-size:0.8rem;">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onclick="app.saveCli()" class="btn" style="width:100%; background:var(--success); margin-top:8px;">💾 GUARDAR CLIENTE</button>
                 </div>
 
                 <div id="listC" style="max-height:450px; overflow-y:auto; margin-top:5px"></div>
@@ -10133,6 +10165,34 @@ Motivo de cancelación (opcional):`);
         this.updateColor(type, color);
         this.updateColorPreview();
     }
+    // Acordeón del formulario de cliente: abre la sección tocada y cierra las demás.
+    toggleCliAcc(bodyId, headerBtn) {
+        const body = document.getElementById(bodyId);
+        if (!body) return;
+        const abrir = body.style.display === 'none';
+        // Cerrar todas
+        document.querySelectorAll('#cliFormContainer .cliAccBody').forEach(b => b.style.display = 'none');
+        document.querySelectorAll('#cliFormContainer .cliAccArrow').forEach(a => a.textContent = '▶');
+        // Abrir la elegida si estaba cerrada
+        if (abrir) {
+            body.style.display = 'block';
+            const arrow = headerBtn.querySelector('.cliAccArrow');
+            if (arrow) arrow.textContent = '▼';
+        }
+    }
+
+    // Deja el acordeón en su estado inicial: sección 1 abierta, las otras cerradas.
+    _resetCliAcc() {
+        const acc1 = document.getElementById('cliAcc1');
+        const acc2 = document.getElementById('cliAcc2');
+        const acc3 = document.getElementById('cliAcc3');
+        if (acc1) acc1.style.display = 'block';
+        if (acc2) acc2.style.display = 'none';
+        if (acc3) acc3.style.display = 'none';
+        const arrows = document.querySelectorAll('#cliFormContainer .cliAccArrow');
+        arrows.forEach((a, i) => a.textContent = i === 0 ? '▼' : '▶');
+    }
+
     toggleCliForm() {
         const form = document.getElementById('cliFormContainer');
         const btn = document.getElementById('btnToggleCliForm');
@@ -10291,6 +10351,34 @@ Motivo de cancelación (opcional):`);
                 const excludeInvoicing = document.getElementById('cliExcludeInvoicing') ? document.getElementById('cliExcludeInvoicing').checked : (this.clis[idx].excludeInvoicing || false);
                 const servicePaused = document.getElementById('cliServicePaused') ? document.getElementById('cliServicePaused').checked : (this.clis[idx].servicePaused || false);
                 const pausedSince = document.getElementById('cliPausedSince') ? (document.getElementById('cliPausedSince').value || '') : (this.clis[idx].pausedSince || '');
+
+                // Al SUSPENDER un cliente, borrar sus servicios futuros posteriores a la
+                // fecha de suspensión — CON CONFIRMACIÓN, porque es destructivo. Sólo corre
+                // si el cliente queda pausado y hay una fecha; cuenta cuántos servicios de
+                // ESTE cliente (por id) caen en o después de esa fecha, avisa y confirma.
+                // Si el usuario cancela, se conserva la suspensión pero NO se borra nada.
+                if (servicePaused && pausedSince) {
+                    const _cliIds = this.clis
+                        .filter(c => c.name === this.clis[idx].name)
+                        .map(c => String(c.id));
+                    const futuros = this.servs.filter(s =>
+                        _cliIds.includes(String(s.cliId)) &&
+                        !s.cancelled &&
+                        String(s.date) >= String(pausedSince)
+                    );
+                    if (futuros.length > 0) {
+                        const ok = confirm(
+                            '⏸️ Vas a SUSPENDER a "' + this.clis[idx].name + '" desde ' + pausedSince + '.\n\n' +
+                            'Esto BORRARÁ ' + futuros.length + ' servicio(s) futuro(s) del calendario a partir de esa fecha.\n\n' +
+                            'Esta acción no se puede deshacer. ¿Continuar?'
+                        );
+                        if (ok) {
+                            const _borrarIds = new Set(futuros.map(s => String(s.id)));
+                            this.servs = this.servs.filter(s => !_borrarIds.has(String(s.id)));
+                        }
+                        // Si cancela: se guarda la suspensión igual, pero no se borra nada.
+                    }
+                }
 
                 if(isMulti) {
                     // Para multi-propiedad: actualizar datos base y agregar/quitar propiedades
@@ -10533,6 +10621,7 @@ Motivo de cancelación (opcional):`);
         form.style.display = 'block';
         document.getElementById('cliFormTitle').textContent = '✏️ Editar Cliente';
         document.getElementById('btnToggleCliForm').textContent = '✕ Cerrar';
+        if (this._resetCliAcc) this._resetCliAcc();
         // Scroll al formulario
         setTimeout(() => form.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
         
