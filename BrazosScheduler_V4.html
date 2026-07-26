@@ -1168,10 +1168,11 @@
 
                 <!-- Formulario retráctil -->
                 <div id="cliFormContainer" style="display:none; background:#f8f9fa; border-radius:10px; padding:15px; margin-bottom:15px; border:2px solid #e67e22; max-height:70vh; overflow-y:auto;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                         <strong id="cliFormTitle" style="color:#e67e22;">➕ Nuevo Cliente</strong>
                         <button onclick="app.cancelCliForm()" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#999;">✕</button>
                     </div>
+                    <div id="cliFormNameBanner" style="display:none; background:#fff8f0; border:1px solid #e67e22; border-radius:6px; padding:6px 10px; margin-bottom:10px; font-size:0.9rem; font-weight:700; color:#c0561a;"></div>
 
                     <!-- ===== SECCIÓN 1: Editar Cliente ===== -->
                     <div class="cliAccSection">
@@ -4072,7 +4073,12 @@ class Scheduler {
 
     // Modales Adicionales
     openCatalog() { const m=document.getElementById('catalogModal'); m.style.display='flex'; m.style.alignItems='center'; m.style.justifyContent='center'; this.renderCat(); }
-    closeCatalog() { document.getElementById('catalogModal').style.display='none'; }
+    closeCatalog() {
+        // Al cerrar el modal, dejar el formulario de cliente limpio y cerrado, para que
+        // la próxima vez que se abra Base de Datos no aparezca la edición a medias.
+        try { if (document.getElementById('cliFormContainer')) this.cancelCliForm(); } catch(e) {}
+        document.getElementById('catalogModal').style.display='none';
+    }
     openFinance() {
         document.getElementById('financeModal').style.display='block';
         
@@ -10315,6 +10321,8 @@ Motivo de cancelación (opcional):`);
         if(_cancelPropList) _cancelPropList.innerHTML = '';
         const propWrap = document.getElementById('propIdWrap');
         if(propWrap) propWrap.style.display = 'none';
+        const _nb = document.getElementById('cliFormNameBanner');
+        if(_nb) { _nb.style.display = 'none'; _nb.textContent = ''; }
     }
 
     saveCli() {
@@ -10621,6 +10629,14 @@ Motivo de cancelación (opcional):`);
         form.style.display = 'block';
         document.getElementById('cliFormTitle').textContent = '✏️ Editar Cliente';
         document.getElementById('btnToggleCliForm').textContent = '✕ Cerrar';
+        // Banner con el nombre real del cliente, siempre visible aunque se colapsen
+        // las secciones — así nunca se pierde de vista a quién se le está editando.
+        const _nameBanner = document.getElementById('cliFormNameBanner');
+        if (_nameBanner) {
+            const _prop = cli.propId && cli.propId !== cli.name ? ' — ' + cli.propId : '';
+            _nameBanner.textContent = '👤 ' + (cli.name || '') + _prop;
+            _nameBanner.style.display = 'block';
+        }
         if (this._resetCliAcc) this._resetCliAcc();
         // Scroll al formulario
         setTimeout(() => form.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
