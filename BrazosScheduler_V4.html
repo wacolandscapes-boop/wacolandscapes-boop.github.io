@@ -13650,23 +13650,34 @@ Motivo de cancelación (opcional):`);
             });
         });
 
-        // Banner flotante con el resumen de verificación.
+        // Banner flotante con el resumen de verificación. Va ARRIBA A LA DERECHA y compacto
+        // para NO tapar el calendario (antes iba centrado y cubría el mes).
         const viejo = document.getElementById('facturaVerifBanner');
         if (viejo) viejo.remove();
         const banner = document.createElement('div');
         banner.id = 'facturaVerifBanner';
         const todoOk = faltantes.length === 0;
-        banner.style.cssText = 'position:fixed; top:70px; left:50%; transform:translateX(-50%); z-index:9500; ' +
-            'background:' + (todoOk ? '#16a085' : '#e74c3c') + '; color:white; padding:12px 20px; border-radius:10px; ' +
-            'box-shadow:0 8px 30px rgba(0,0,0,0.3); font-size:0.9rem; font-weight:600; max-width:90%; text-align:center;';
+        banner.style.cssText = 'position:fixed; top:60px; right:16px; z-index:9500; ' +
+            'background:' + (todoOk ? '#16a085' : '#e74c3c') + '; color:white; padding:10px 14px; border-radius:10px; ' +
+            'box-shadow:0 8px 30px rgba(0,0,0,0.3); font-size:0.82rem; font-weight:600; max-width:300px; text-align:left;';
         banner.innerHTML =
-            '📅 ' + hl.clientName + ' — Facturando ' + hl.fechas.length + ' servicio(s), ' +
-            encontradas + ' encontrado(s) en el calendario' +
+            '📅 ' + hl.clientName + '<br>Facturando ' + hl.fechas.length + ', ' +
+            encontradas + ' en calendario' +
             (todoOk
                 ? ' ✅ Todo cuadra.'
-                : '<br>⚠️ NO están en el calendario: ' + faltantes.join(', ') + '. Verifica antes de enviar.') +
-            '<br><button onclick="app._limpiarFacturaHighlight()" style="margin-top:8px; background:rgba(255,255,255,0.25); color:white; border:none; padding:5px 14px; border-radius:6px; cursor:pointer; font-size:0.82rem; font-weight:700;">✕ Quitar resaltado</button>';
+                : '<br>⚠️ NO están: ' + faltantes.join(', ') + '. Verifica antes de enviar.') +
+            '<br><button onclick="app._cerrarBannerVerif()" style="margin-top:8px; background:rgba(255,255,255,0.25); color:white; border:none; padding:5px 14px; border-radius:6px; cursor:pointer; font-size:0.8rem; font-weight:700;">✕ Ocultar aviso</button>';
         document.body.appendChild(banner);
+    }
+
+    // Cierra SÓLO el aviso y el resaltado, pero DEJA el botón "Volver" para poder regresar.
+    _cerrarBannerVerif() {
+        document.querySelectorAll('[data-date]').forEach(cell => {
+            cell.style.outline = ''; cell.style.outlineOffset = ''; cell.style.boxShadow = '';
+        });
+        const b = document.getElementById('facturaVerifBanner');
+        if (b) b.remove();
+        this._facturaHighlight = null;
     }
 
     _limpiarFacturaHighlight() {
