@@ -6648,7 +6648,6 @@ class Scheduler {
                     ${!isCancelled ? `
                         <div style="display:flex;gap:4px;flex-wrap:wrap;">
                             <button onclick="app.openCobroDetalle('${inv.id}')" class="btn" style="background: #16a085; color: white; padding: 5px 8px; font-size: 0.75rem;">💰 Pago</button>
-                            ${inv.status !== 'pagada' ? `<button id="btnCobrarTarjeta_${inv.id}" onclick="app.cobrarConTarjeta('${inv.id}')" class="btn" style="background: #635bff; color: white; padding: 5px 8px; font-size: 0.75rem;">💳 Cobrar</button>` : ''}
                             ${(() => { const _cli = (app.clis||[]).find(c => c.name === inv.clientName); return (_cli && _cli.autoCharge && _cli.stripeCustomerId && inv.status !== 'pagada') ? `<button onclick="app.cobrarTarjetaGuardada('${inv.id}')" class="btn" style="background: #00a650; color: white; padding: 5px 8px; font-size: 0.75rem;">⚡ Auto</button>` : ''; })()}
                             <button onclick="app.viewInvoiceItems('${inv.id}')" class="btn" style="background: #8e44ad; color: white; padding: 5px 8px; font-size: 0.75rem;">🔍 Detalle</button>
                             <button onclick="app.openInvoiceForEdit('${inv.id}')" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
@@ -6780,7 +6779,6 @@ class Scheduler {
                 <td style="padding:8px; text-align:center; font-size:0.8rem; color:#555;">${inv.paidAmount ? '$'+parseFloat(inv.paidAmount).toLocaleString('en-US',{minimumFractionDigits:2}) : paidFmt}</td>
                 <td style="padding:8px; text-align:center;">
                     <button onclick="app.openCobroDetalle('${inv.id}')" style="background:#16a085; color:white; border:none; border-radius:5px; padding:5px 10px; cursor:pointer; font-size:0.8rem;">✏️ Actualizar</button>
-                    ${inv.status !== 'pagada' ? `<button id="btnCobrarTarjeta_${inv.id}" onclick="app.cobrarConTarjeta('${inv.id}')" style="background:#635bff; color:white; border:none; border-radius:5px; padding:5px 10px; cursor:pointer; font-size:0.8rem; margin-top:3px;">💳 Cobrar</button>` : ''}
                     ${inv.clientEmail ? `<button onclick="app.sendPendingInvoiceByGmail('${inv.id}')" style="background:#ea4335; color:white; border:none; border-radius:5px; padding:5px 10px; cursor:pointer; font-size:0.8rem; margin-top:3px;">📧 Gmail</button>` : '<small style="color:#999;">Sin email</small>'}
                 </td>
             </tr>`;
@@ -12670,7 +12668,6 @@ Motivo de cancelación (opcional):`);
                     <div style="font-size:0.75rem; color:#666;">#${inv.invoiceNumber} · $${parseFloat(inv.total||0).toFixed(2)} · ${(inv.items && inv.items.length > 0) ? inv.items.length : (inv.serviceCount || 1)} serv.</div>
                     <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
                         <button onclick="app.sendPendingInvoiceByGmail('${inv.id}')" style="background:#ea4335; color:white; border:none; border-radius:4px; padding:3px 8px; font-size:0.72rem; cursor:pointer;">📧 Enviar</button>
-                        ${inv.status !== 'pagada' ? `<button id="btnCobrarTarjeta_dash_${inv.id}" onclick="app.cobrarConTarjeta('${inv.id}')" style="background:#635bff; color:white; border:none; border-radius:4px; padding:3px 8px; font-size:0.72rem; cursor:pointer;">💳 Cobrar</button>` : ''}
                     </div>
                 </div>`).join('');
 
