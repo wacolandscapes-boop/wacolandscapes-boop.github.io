@@ -3073,6 +3073,12 @@ class Scheduler {
             cell.addEventListener('dragleave', () => cell.classList.remove('drag-over'));
             cell.addEventListener('drop', e => {
                 e.preventDefault(); cell.classList.remove('drag-over');
+                // Anti-doble-drop: un arrastre titubeante (detenerse antes de soltar, sobre
+                // todo en trackpad) puede disparar dos eventos 'drop' casi juntos. Ignorar
+                // el segundo si llega dentro de 400 ms evita abrir dos modales / mover dos veces.
+                const _ahora = Date.now();
+                if (this._lastDropTs && (_ahora - this._lastDropTs) < 400) return;
+                this._lastDropTs = _ahora;
                 const svcId = e.dataTransfer.getData('svcId');
                 const cliId = e.dataTransfer.getData('cliId');
                 const fromGrupo = e.dataTransfer.getData('svcGrupo');
@@ -3131,6 +3137,11 @@ class Scheduler {
     }
 
     openMoveSvcModal(svcId, toDate, toGrupo, fromGrupo) {
+        // Si un arrastre titubeante dispara dos 'drop', se abrían DOS modales con el mismo
+        // id superpuestos; al elegir en uno quedaba el otro vivo apuntando al servicio
+        // original, y un segundo clic movía el servicio dos veces (duplicado). Quitar
+        // cualquier modal previo antes de crear el nuevo garantiza que sólo haya uno.
+        document.getElementById('moveSvcModal')?.remove();
         const svc = this.servs.find(s => String(s.id) === String(svcId));
         if (!svc) return;
         const cli = this.clis.find(c => String(c.id) === String(svc.cliId));
@@ -3174,21 +3185,35 @@ class Scheduler {
     }
 
     _moveSvc(svcId, toDate, toGrupo, mode) {
+        // Candado anti-doble-disparo: si el mismo servicio se dispara dos veces muy rápido
+        // (doble clic en el botón, o doble drop), la segunda llamada se ignora. Sin esto,
+        // un doble clic podía crear dos copias del servicio movido.
+        const _lockKey = svcId + '|' + toDate + '|' + toGrupo + '|' + mode;
+        if (this._movingSvcLock === _lockKey) return;
+        this._movingSvcLock = _lockKey;
+        setTimeout(() => { if (this._movingSvcLock === _lockKey) this._movingSvcLock = null; }, 1200);
+
         document.getElementById('moveSvcModal')?.remove();
         const svc = this.servs.find(s => String(s.id) === String(svcId));
-        if (!svc) return;
+        if (!svc) { this._movingSvcLock = null; return; }
         const fromDate = svc.date;
         const fromGrupo = svc.empId;
 
         if (mode === 'one') {
-            // Eliminar el original y agregar copia desvinculada de la serie
+            // Eliminar el original y agregar copia desvinculada de la serie.
+            // Los ids llevan un sufijo ALEATORIO además de Date.now(): si se mueven dos
+            // servicios en el mismo milisegundo, 'svc_moved_'+Date.now() les daba el MISMO
+            // id, y luego al mover/editar/borrar uno se borraban los dos (o uno tapaba al
+            // otro al renderizar) — esa era la causa del duplicado intermitente al cambiar
+            // de grupo. El sufijo lo vuelve único, igual que el resto de los ids de la app.
+            const _uniq = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
             this.servs = this.servs.filter(s => String(s.id) !== String(svcId));
             const movedSvc = Object.assign({}, svc, {
-                id: 'svc_moved_' + Date.now(),
+                id: 'svc_moved_' + _uniq,
                 date: toDate,
                 empId: toGrupo,
                 grupo: toGrupo,
-                serieId: 'serie_moved_' + Date.now()
+                serieId: 'serie_moved_' + _uniq
             });
             this.servs.push(movedSvc);
         } else if (mode === 'future') {
@@ -3210,6 +3235,7 @@ class Scheduler {
             });
         }
         this.save(); this.render();
+        this._movingSvcLock = null;
         const msg = mode === 'one' ? '✅ Servicio movido' : '✅ Serie movida';
         const toast = document.createElement('div');
         toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#0e7490;color:white;padding:12px 22px;border-radius:10px;z-index:9999;font-size:0.95rem;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.3)';
