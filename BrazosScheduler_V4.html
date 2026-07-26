@@ -6653,6 +6653,7 @@ class Scheduler {
                             <button onclick="app.viewInvoiceItems('${inv.id}')" class="btn" style="background: #8e44ad; color: white; padding: 5px 8px; font-size: 0.75rem;">🔍 Detalle</button>
                             <button onclick="app.openInvoiceForEdit('${inv.id}')" class="btn" style="background: #e67e22; color: white; padding: 5px 8px; font-size: 0.75rem;">✏️ Editar</button>
                             <button onclick="app.verClienteEnPendientes('${(inv.clientName||'').replace(/'/g,"\\'")}')" class="btn" style="background: #f39c12; color: white; padding: 5px 8px; font-size: 0.75rem;">📋 Ver en Pendientes</button>
+                            <button onclick="app.verFacturaEnCalendarioPorId('${inv.id}')" title="Ver en el calendario las visitas de esta factura y verificar que se realizaron (útil para reclamos)" class="btn" style="background: #16a085; color: white; padding: 5px 8px; font-size: 0.75rem;">📅 Calendario</button>
                             <button onclick="app.editInvoiceNumber('${inv.id}', ${inv.invoiceNumber})" class="btn" style="background: #6c757d; color: white; padding: 5px 8px; font-size: 0.75rem;"># Nº</button>
                             <button onclick="app.cancelInvoice('${inv.id}')" class="btn" style="background: #c0392b; color: white; padding: 5px 8px; font-size: 0.75rem;">🗑️ Cancelar</button>
                             ${(inv.status === 'pagada' || inv.status === 'parcial') ? `
@@ -13487,10 +13488,62 @@ Motivo de cancelación (opcional):`);
         this.displayPDFPreview(pdfData, client, startDate, endDate);
     }    
 
-    verFacturaEnCalendario(clientName, startDate, endDate) {
+    // Llamado por el botón "Ver en Calendario" del preview: saca las fechas de los
+    // servicios que se están facturando (de currentPDFData) y abre el calendario
+    // resaltándolas para verificar que existen.
+    // Desde la lista de Enviadas: abre el calendario resaltando las visitas de una factura
+    // YA guardada (por su id) para verificar que existen en el calendario.
+    // Desde una tarjeta de Pendientes: abre el calendario resaltando las visitas de ese
+    // pendiente para verificar que existen antes de facturar.
+    verPendienteEnCalendario(index) {
+        const pending = this.pendingInvoices[index];
+        if (!pending) { alert('Pendiente no encontrado.'); return; }
+        let fechas = [];
+        if (Array.isArray(pending.serviceDates) && pending.serviceDates.length) {
+            fechas = pending.serviceDates.map(d => String(d).split('T')[0]).filter(Boolean);
+        } else if (pending.startDate) {
+            fechas = [String(pending.startDate).split('T')[0]];
+        }
+        const json = encodeURIComponent(JSON.stringify(fechas));
+        const start = pending.startDate || (fechas[0] || '');
+        const end = pending.endDate || (fechas[fechas.length-1] || start);
+        this.verFacturaEnCalendario(pending.clientName, start, end, json, 'pendientes');
+    }
+
+    verFacturaEnCalendarioPorId(invId) {
+        const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(invId));
+        if (!inv) { alert('Factura no encontrada.'); return; }
+        let fechas = [];
+        if (Array.isArray(inv.items) && inv.items.length) {
+            fechas = inv.items.map(it => String(it.fecha || it.date || '').split('T')[0]).filter(Boolean);
+        }
+        const json = encodeURIComponent(JSON.stringify(fechas));
+        this.verFacturaEnCalendario(inv.clientName, inv.startDate, inv.endDate, json, 'enviadas');
+    }
+
+    verFacturaEnCalendarioDesdePreview() {
+        const d = window.currentPDFData;
+        if (!d) return;
+        const cliName = (d.client && d.client.name) || '';
+        // Fechas de los servicios facturados: primero de _services; si no, de los items.
+        let fechas = [];
+        if (Array.isArray(d._services) && d._services.length) {
+            fechas = d._services.map(s => String(s.date || s.fecha || '').split('T')[0]).filter(Boolean);
+        } else if (Array.isArray(d.items) && d.items.length) {
+            fechas = d.items.map(it => String(it.fecha || it.date || '').split('T')[0]).filter(Boolean);
+        }
+        const json = encodeURIComponent(JSON.stringify(fechas));
+        this.verFacturaEnCalendario(cliName, d.startDate, d.endDate, json, 'preview');
+    }
+
+    verFacturaEnCalendario(clientName, startDate, endDate, serviceDatesJson, origen) {
         // Cerrar el preview del PDF
         const preview = document.getElementById('pdfPreviewModal');
         if (preview) preview.remove();
+
+        // Recordar DE DÓNDE se abrió el calendario para poder regresar con el botón "Volver".
+        // origen: 'enviadas' | 'pendientes' | undefined (preview del PDF, no regresa a lista).
+        this._facturaVolverA = origen || null;
 
         // Cerrar cualquier modal de facturación abierto (Pendientes / Enviadas / Generar)
         // y resetear el historial de navegación, para dejar ver el calendario de fondo.
@@ -13501,19 +13554,130 @@ Motivo de cancelación (opcional):`);
         this._invNavForward = [];
         this._invNavCurrent = null;
 
-        // Filtrar el calendario a este cliente (reconoce automáticamente todas sus
-        // propiedades si es de construcción/airbnb con multipropiedad).
+        // Fechas EXACTAS que se están facturando (para resaltarlas en el calendario y
+        // verificar que de verdad existen como servicios del cliente). Pueden venir como
+        // JSON desde el botón; si no, se deducen de los servicios del cliente en el período.
+        let fechasFacturadas = [];
+        try { if (serviceDatesJson) fechasFacturadas = JSON.parse(decodeURIComponent(serviceDatesJson)); } catch(e) {}
+        this._facturaHighlight = {
+            clientName: clientName,
+            fechas: (fechasFacturadas || []).map(f => String(f).split('T')[0]),
+            startDate, endDate
+        };
+
+        // Filtrar el calendario a este cliente (reconoce todas sus propiedades).
         this._selectCalendarCli(clientName, clientName, '');
 
-        // Si el periodo de la factura es de una semana o menos, mostrar vista SEMANAL
-        // (para ver el detalle sin el resto del mes estorbando); si es más largo
-        // (quincenal, mensual, etc.), mostrar vista MENSUAL como antes.
+        // Vista semanal si el período es corto, mensual si es largo.
         const start = new Date(startDate + 'T00:00:00');
         const end = new Date(endDate + 'T00:00:00');
         const daysDiff = Math.round((end - start) / (1000*60*60*24));
         this.view = (daysDiff <= 7) ? 'week' : 'month';
         this.curDate = start;
         this.render();
+
+        // Tras renderizar, resaltar las celdas de las fechas facturadas y verificar.
+        setTimeout(() => this._pintarFacturaEnCalendario(), 120);
+        // Mostrar el botón flotante "Volver" para regresar a la lista de origen.
+        setTimeout(() => this._mostrarBotonVolverFactura(), 140);
+    }
+
+    // Botón flotante que permite regresar a la lista (Enviadas/Pendientes) desde la que
+    // se abrió el calendario de verificación. Sin esto, el usuario quedaba varado en el
+    // calendario sin forma de volver.
+    _mostrarBotonVolverFactura() {
+        // Quitar uno previo si existe
+        const viejo = document.getElementById('btnVolverFactura');
+        if (viejo) viejo.remove();
+        const btn = document.createElement('button');
+        btn.id = 'btnVolverFactura';
+        const destino = this._facturaVolverA;
+        btn.textContent = destino === 'enviadas' ? '⬅️ Volver a Enviadas'
+                        : destino === 'pendientes' ? '⬅️ Volver a Pendientes'
+                        : destino === 'preview' ? '⬅️ Volver a la Factura'
+                        : '⬅️ Cerrar verificación';
+        btn.style.cssText = 'position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:10050; background:#2c3e50; color:white; border:none; padding:10px 20px; border-radius:24px; font-size:0.95rem; font-weight:bold; cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,0.3);';
+        btn.onclick = () => this._volverDeFacturaCalendario();
+        document.body.appendChild(btn);
+    }
+
+    // Limpia el resaltado, quita el botón, y reabre la lista/preview de donde se vino.
+    _volverDeFacturaCalendario() {
+        const destino = this._facturaVolverA;
+        try { this._limpiarFacturaHighlight(); } catch(e) {}
+        const btn = document.getElementById('btnVolverFactura');
+        if (btn) btn.remove();
+        this._facturaVolverA = null;
+        if (destino === 'enviadas') this.openGeneratedInvoices();
+        else if (destino === 'pendientes') this.openPendingInvoices();
+        else if (destino === 'preview') {
+            // Reconstruir el preview del PDF con los datos que quedaron guardados, para
+            // que el usuario pueda enviar/imprimir de una vez tras verificar en calendario.
+            const d = window.currentPDFData;
+            if (d && d.blob && d.client) {
+                try { this.displayPDFPreview(d, d.client, d.startDate, d.endDate); } catch(e) {}
+            }
+        }
+    }
+
+    // Recorre las celdas del calendario ya renderizado y resalta las fechas de la factura.
+    // Además cuenta cuántas de esas fechas realmente tienen un servicio del cliente en el
+    // calendario, y avisa si alguna falta (el caso peligroso: cobrar algo no registrado).
+    _pintarFacturaEnCalendario() {
+        const hl = this._facturaHighlight;
+        if (!hl || !hl.fechas || !hl.fechas.length) return;
+
+        // Servicios reales del cliente (todas sus fichas) en las fechas facturadas.
+        const idsCliente = this.clis
+            .filter(c => (c.name||'').trim().toLowerCase() === (hl.clientName||'').trim().toLowerCase())
+            .map(c => String(c.id));
+        const fechasConServicio = new Set(
+            (this.servs || [])
+                .filter(s => idsCliente.includes(String(s.cliId)) && !s.cancelled)
+                .map(s => String(s.date).split('T')[0])
+        );
+
+        let encontradas = 0;
+        const faltantes = [];
+        hl.fechas.forEach(f => {
+            const existe = fechasConServicio.has(f);
+            if (existe) encontradas++; else faltantes.push(f);
+            // Resaltar TODAS las celdas de esa fecha (puede haber varias por grupo).
+            document.querySelectorAll('[data-date="' + f + '"]').forEach(cell => {
+                cell.style.outline = existe ? '3px solid #16a085' : '3px solid #e74c3c';
+                cell.style.outlineOffset = '-3px';
+                cell.style.boxShadow = 'inset 0 0 0 9999px ' + (existe ? 'rgba(22,160,133,0.12)' : 'rgba(231,76,60,0.15)');
+            });
+        });
+
+        // Banner flotante con el resumen de verificación.
+        const viejo = document.getElementById('facturaVerifBanner');
+        if (viejo) viejo.remove();
+        const banner = document.createElement('div');
+        banner.id = 'facturaVerifBanner';
+        const todoOk = faltantes.length === 0;
+        banner.style.cssText = 'position:fixed; top:70px; left:50%; transform:translateX(-50%); z-index:9500; ' +
+            'background:' + (todoOk ? '#16a085' : '#e74c3c') + '; color:white; padding:12px 20px; border-radius:10px; ' +
+            'box-shadow:0 8px 30px rgba(0,0,0,0.3); font-size:0.9rem; font-weight:600; max-width:90%; text-align:center;';
+        banner.innerHTML =
+            '📅 ' + hl.clientName + ' — Facturando ' + hl.fechas.length + ' servicio(s), ' +
+            encontradas + ' encontrado(s) en el calendario' +
+            (todoOk
+                ? ' ✅ Todo cuadra.'
+                : '<br>⚠️ NO están en el calendario: ' + faltantes.join(', ') + '. Verifica antes de enviar.') +
+            '<br><button onclick="app._limpiarFacturaHighlight()" style="margin-top:8px; background:rgba(255,255,255,0.25); color:white; border:none; padding:5px 14px; border-radius:6px; cursor:pointer; font-size:0.82rem; font-weight:700;">✕ Quitar resaltado</button>';
+        document.body.appendChild(banner);
+    }
+
+    _limpiarFacturaHighlight() {
+        document.querySelectorAll('[data-date]').forEach(cell => {
+            cell.style.outline = ''; cell.style.outlineOffset = ''; cell.style.boxShadow = '';
+        });
+        const b = document.getElementById('facturaVerifBanner');
+        if (b) b.remove();
+        const vb = document.getElementById('btnVolverFactura');
+        if (vb) vb.remove();
+        this._facturaHighlight = null;
     }
 
    displayPDFPreview(pdfData, client, startDate, endDate, invoiceConfigOverride) {
@@ -13553,7 +13717,7 @@ Motivo de cancelación (opcional):`);
                     <button onclick="app.printPDF('${pdfUrl}')" class="btn" style="background: #1A4FCC; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         🖨️ Imprimir
                     </button>
-                    <button onclick="app.verFacturaEnCalendario('${(client.name||'').replace(/'/g,"\\'")}', '${startDate}', '${endDate}')" class="btn" style="background: #16a085; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                    <button onclick="app.verFacturaEnCalendarioDesdePreview()" class="btn" style="background: #16a085; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         📅 Ver en Calendario
                     </button>
                     <button onclick="app.savePDF(window.currentPDFData.invoiceNumber, window.currentPDFData.client.id, window.currentPDFData.startDate)" class="btn" style="background: #27ae60; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
