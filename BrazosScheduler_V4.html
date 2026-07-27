@@ -16926,9 +16926,15 @@ Motivo de cancelación (opcional):`);
                 document.getElementById('driveSyncBtn').style.background = '#27ae60';
                 await this.driveGetOrCreateFolder();
                 console.log('📁 Folder ID:', this.driveFolderId);
-                // Al conectar: primero descargar, luego subir
-                await this.driveDownloadData();
-                await this.driveSyncNow();
+                // Al conectar: primero descargar, luego subir. Se muestra un overlay
+                // bloqueante mientras baja, para que nadie trabaje sobre datos viejos.
+                this._mostrarOverlayBajando();
+                try {
+                    await this.driveDownloadData();
+                    await this.driveSyncNow();
+                } finally {
+                    this._ocultarOverlayBajando();
+                }
                 // Descargar horarios de Calendar al conectar
                 // Si esto falla, ANTES se tragaba el error en silencio y los horarios se
                 // quedaban viejos sin que nadie se enterara — así se perdió una semana de
@@ -16948,45 +16954,94 @@ Motivo de cancelación (opcional):`);
                 document.body.appendChild(toast);
                 setTimeout(() => toast.remove(), 3000);
                 // ☁️ Auto-sync cada 5 minutos
-                if (this._autoSyncInterval) clearInterval(this._autoSyncInterval);
-                this._autoSyncInterval = setInterval(async () => {
-                    if (!this.driveConnected || !this.driveToken) return;
-                    if (this.tokenExpiry && Date.now() > this.tokenExpiry) {
-                        this.driveConnected = false;
-                        this.driveToken = null;
-                        document.getElementById('driveSyncLabel').textContent = 'Token expirado';
-                        document.getElementById('driveSyncBtn').style.background = '#e74c3c';
-                        clearInterval(this._autoSyncInterval);
-                        return;
-                    }
-                    await this.driveSyncNow();
-                    try { await this.descargarHorariosGrupos(); } catch(e) {}
-                    const now = new Date();
-                    const t = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
-                    document.getElementById('driveSyncLabel').textContent = 'Sync ' + t;
-                    document.getElementById('driveSyncBtn').style.background = '#27ae60';
-                }, 5 * 60 * 1000);
+                this._startAutoSync();
 
                 // ☁️ Verificar pagos de Stripe cuando la app recupera el foco
                 document.addEventListener('visibilitychange', async () => {
-                    if (document.visibilityState === 'visible' && this.driveConnected) {
-                        // Verificar si hay facturas enviadas recientemente sin pago registrado
-                        const recentUnpaid = (this.generatedInvoices || []).some(inv =>
-                            (inv.status === 'enviada' || inv.status === 'pendiente') &&
-                            inv.sentAt && (new Date() - new Date(inv.sentAt)) < 7 * 24 * 60 * 60 * 1000
-                        );
-                        if (recentUnpaid) {
-                            console.log('👀 App recuperó foco — verificando pagos de Stripe en Drive...');
-                            await this.driveSyncNow();
-                            const now = new Date();
-                            const t = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
-                            document.getElementById('driveSyncLabel').textContent = 'Sync ' + t;
+                    if (document.visibilityState !== 'visible') return;
+                    // Al volver a la app tras tenerla en 2do plano: si el token expiró
+                    // mientras no estaba al frente, renovarlo en silencio y reanudar el
+                    // auto-sync (que pudo haberse detenido). Cubre el caso de dejar la app
+                    // abierta todo el día.
+                    if (this.tokenClient && this.tokenExpiry && Date.now() > this.tokenExpiry) {
+                        document.getElementById('driveSyncLabel').textContent = 'Reconectando…';
+                        await this.refreshTokenIfNeeded();
+                        if (this.driveToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
+                            this.driveConnected = true;
+                            // Reanudar el auto-sync de 5 min si se había detenido
+                            if (!this._autoSyncInterval) this._startAutoSync();
                         }
+                    }
+                    if (this.driveConnected && this.driveToken) {
+                        console.log('👀 App recuperó foco — sincronizando con Drive...');
+                        try { await this.driveSyncNow(); } catch(e) {}
+                        const now = new Date();
+                        const t = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
+                        const lbl = document.getElementById('driveSyncLabel');
+                        if (lbl) lbl.textContent = 'Sync ' + t;
                     }
                 });
             }
         });
         this.tokenClient.requestAccessToken({ prompt: '', login_hint: this.DRIVE_ACCOUNT_HINT });
+    }
+
+    // Arranca (o reinicia) el auto-sync de 5 minutos. Extraído a un método para poder
+    // reanudarlo desde el visibilitychange si se había detenido. Renueva el token en
+    // silencio cuando expira, en vez de rendirse.
+    // Overlay bloqueante que se muestra mientras la app baja los últimos datos de Drive
+    // al abrir/conectar. Impide trabajar sobre datos VIEJOS (p.ej. al abrir en una PC que
+    // no se usaba hace mucho) hasta tener lo más reciente. Solo aparece al conectar.
+    _mostrarOverlayBajando() {
+        if (document.getElementById('overlayBajandoDrive')) return;
+        const ov = document.createElement('div');
+        ov.id = 'overlayBajandoDrive';
+        ov.style.cssText = 'position:fixed; inset:0; z-index:100000; background:rgba(20,30,45,0.92); ' +
+            'display:flex; flex-direction:column; align-items:center; justify-content:center; color:white; text-align:center; padding:20px;';
+        ov.innerHTML =
+            '<div style="font-size:3rem; margin-bottom:16px;">☁️⬇️</div>' +
+            '<div style="font-size:1.3rem; font-weight:bold; margin-bottom:10px;">Bajando últimos datos de Drive…</div>' +
+            '<div style="font-size:0.95rem; opacity:0.85; max-width:420px; line-height:1.5;">Espera un momento antes de trabajar, para asegurarnos de que tienes la información más reciente y no se sobrescriba nada.</div>' +
+            '<div style="margin-top:22px;"><div style="width:44px; height:44px; border:5px solid rgba(255,255,255,0.25); border-top-color:#27ae60; border-radius:50%; animation:spinBajando 0.9s linear infinite;"></div></div>' +
+            '<style>@keyframes spinBajando{to{transform:rotate(360deg);}}</style>';
+        document.body.appendChild(ov);
+    }
+
+    _ocultarOverlayBajando() {
+        const ov = document.getElementById('overlayBajandoDrive');
+        if (ov) ov.remove();
+    }
+
+    _startAutoSync() {
+        if (this._autoSyncInterval) clearInterval(this._autoSyncInterval);
+        this._autoSyncInterval = setInterval(async () => {
+            if (!this.driveConnected && !this.tokenClient) return;
+            if (this.tokenExpiry && Date.now() > this.tokenExpiry) {
+                const _lbl = document.getElementById('driveSyncLabel');
+                if (_lbl) _lbl.textContent = 'Reconectando…';
+                await this.refreshTokenIfNeeded();
+                if (!this.driveToken || (this.tokenExpiry && Date.now() > this.tokenExpiry)) {
+                    this.driveConnected = false;
+                    this.driveToken = null;
+                    const l2 = document.getElementById('driveSyncLabel');
+                    const b2 = document.getElementById('driveSyncBtn');
+                    if (l2) l2.textContent = 'Reconecta a Drive';
+                    if (b2) b2.style.background = '#e74c3c';
+                    clearInterval(this._autoSyncInterval);
+                    this._autoSyncInterval = null;
+                    return;
+                }
+            }
+            if (!this.driveToken) return;
+            await this.driveSyncNow();
+            try { await this.descargarHorariosGrupos(); } catch(e) {}
+            const now = new Date();
+            const t = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
+            const lbl = document.getElementById('driveSyncLabel');
+            const btn = document.getElementById('driveSyncBtn');
+            if (lbl) lbl.textContent = 'Sync ' + t;
+            if (btn) btn.style.background = '#27ae60';
+        }, 5 * 60 * 1000);
     }
 
     async refreshTokenIfNeeded() {
