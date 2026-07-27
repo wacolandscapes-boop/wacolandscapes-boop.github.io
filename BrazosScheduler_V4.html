@@ -11400,7 +11400,7 @@ Motivo de cancelación (opcional):`);
                     const d = JSON.parse(r.result);
                     let empsAdded = 0, clisAdded = 0;
 
-                    // Detectar si es backup de AnaCS o exportación de la Nómina
+                    // Detectar si es backup de Brazos o exportación de la Nómina
                     const isNominaExport = !!d.employees && !d.emps;
 
                     if (isNominaExport) {
@@ -11423,7 +11423,7 @@ Motivo de cancelación (opcional):`);
                         const msg = empsAdded === 0 ? '\n\nTodos ya existían.' : '';
                         alert('✅ ' + empsAdded + ' empleados importados de la Nómina.' + msg);
                     } else {
-                        // Backup completo de AnaCS — preguntar si sobreescribir o hacer merge
+                        // Backup completo de Brazos — preguntar si sobreescribir o hacer merge
                         const mode = confirm('Importar: ACEPTAR=Reemplazar todo / CANCELAR=Solo agregar nuevos');
                         if (mode) {
                             // Reemplazar todo
@@ -15682,7 +15682,7 @@ Motivo de cancelación (opcional):`);
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        const filename = `AnaCS_Backup_${new Date().toISOString().split('T')[0]}.json`;
+        const filename = `Brazos_Backup_${new Date().toISOString().split('T')[0]}.json`;
         a.href = url;
         a.download = filename;
         document.body.appendChild(a);
@@ -16973,7 +16973,23 @@ Motivo de cancelación (opcional):`);
                         }
                     }
                     if (this.driveConnected && this.driveToken) {
-                        console.log('👀 App recuperó foco — sincronizando con Drive...');
+                        console.log('👀 App recuperó foco — verificando si Drive está más nuevo...');
+                        // PROTECCIÓN MULTI-PC: antes de SUBIR, verificar si otra PC dejó
+                        // algo más nuevo en Drive mientras esta app estaba en 2do plano.
+                        // Si Drive es más reciente que lo local, BAJAR y FUSIONAR primero
+                        // (reusa driveDownloadData, que ya hace merge por id + lápidas),
+                        // para NO pisar los cambios hechos en la otra computadora.
+                        try {
+                            const driveMasNuevo = await this._driveEstaMasNuevo();
+                            if (driveMasNuevo) {
+                                console.log('📥 Drive más nuevo que local — bajando y fusionando antes de subir.');
+                                this._mostrarOverlayBajando();
+                                try { await this.driveDownloadData(); }
+                                finally { this._ocultarOverlayBajando(); }
+                                this.render();
+                            }
+                        } catch(e) { console.warn('No se pudo verificar frescura de Drive:', e); }
+                        // Ahora sí sincronizar (subir) con lo local ya puesto al día
                         try { await this.driveSyncNow(); } catch(e) {}
                         const now = new Date();
                         const t = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
@@ -17359,6 +17375,33 @@ Motivo de cancelación (opcional):`);
         if (elTs) elTs.textContent = 'Última: ' + ts;
 
         alert(msg.join('\n'));
+    }
+
+    // Consulta SÓLO el lastSavedAt del archivo en Drive (sin bajar todo) y lo compara
+    // con el timestamp local. Devuelve true si Drive es más nuevo → hay cambios de otra
+    // PC que conviene bajar y fusionar antes de subir. De bajo costo: baja el JSON pero
+    // sólo lee su campo lastSavedAt.
+    async _driveEstaMasNuevo() {
+        if (!this.driveConnected || !this.driveFolderId || !this.driveToken) return false;
+        try {
+            const fileName = 'brazosCS_sync.json';
+            const searchRes = await fetch(
+                `https://www.googleapis.com/drive/v3/files?q=name='${fileName}'+and+'${this.driveFolderId}'+in+parents+and+trashed=false&fields=files(id,modifiedTime)`,
+                { headers: { Authorization: `Bearer ${this.driveToken}` } }
+            );
+            const searchData = await searchRes.json();
+            if (!searchData.files || searchData.files.length === 0) return false;
+            const driveMod = searchData.files[0].modifiedTime ? new Date(searchData.files[0].modifiedTime).getTime() : 0;
+            const localSavedAt = localStorage.getItem('anaCS_lastSavedAt');
+            const localTime = localSavedAt ? new Date(localSavedAt).getTime() : 0;
+            // Margen de 10s para evitar falsos positivos por la propia subida de esta PC
+            // (Google actualiza modifiedTime al subir; sin margen, esta PC creería que
+            // Drive es más nuevo justo después de su propia sincronización).
+            return driveMod > (localTime + 10000);
+        } catch(e) {
+            console.warn('_driveEstaMasNuevo error:', e);
+            return false; // ante la duda, no forzar bajada (driveSyncNow sigue su curso)
+        }
     }
 
     async driveDownloadData() {
