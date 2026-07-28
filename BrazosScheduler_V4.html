@@ -1424,27 +1424,17 @@
         <div style="margin-top:16px; padding:14px; background:#f0f4f8; border-radius:10px; border:1px solid #dee2e6;">
             <div style="font-size:0.85rem; font-weight:700; color:#2c3e50; margin-bottom:10px;">💾 Respaldo Local</div>
             <div style="display:flex; gap:8px;">
-                <button class="btn" onclick="app.backupLocal()"
+                <button class="btn" onclick="app.exportar()"
                     style="flex:1; background:#2980b9; color:white; font-weight:600;">
                     💾 Respaldar Datos
                 </button>
-                <button class="btn" onclick="app.restoreLocal()"
+                <button class="btn" onclick="app.importar()"
                     style="flex:1; background:#8e44ad; color:white; font-weight:600;">
                     📂 Restaurar Respaldo
                 </button>
             </div>
             <div style="font-size:0.75rem; color:#888; margin-top:6px;">
-                Guarda o restaura todos tus datos localmente (clientes, empleados, servicios, grupos).
-            </div>
-            <div style="display:flex; gap:8px; margin-top:10px;">
-                <button class="btn" onclick="app.importar()"
-                    style="flex:1; background:#27ae60; color:white; font-weight:600;">
-                    📥 Importar JSON
-                </button>
-                <button class="btn" onclick="app.exportar()"
-                    style="flex:1; background:#1a6b9a; color:white; font-weight:600;">
-                    📤 Exportar JSON
-                </button>
+                Descarga un respaldo COMPLETO de todos tus datos, o restaura uno guardado. Guárdalo en un lugar seguro (Drive, USB, etc.).
             </div>
             <div style="font-size:0.75rem; color:#888; margin-top:6px;">
                 Importa un archivo de sincronización (brazosCS_sync.json). Al importar elige
@@ -11373,6 +11363,9 @@ Motivo de cancelación (opcional):`);
 
     exportar() { 
         const data = {
+            exportType: 'brazosCS_sync',
+            exportDate: new Date().toISOString(),
+            lastSavedAt: new Date().toISOString(),
             emps: this.emps,
             clis: this.clis,
             servs: this.servs,
@@ -11381,14 +11374,24 @@ Motivo de cancelación (opcional):`);
             gastosCategories: this.gastosCategories || {},
             generatedInvoices: this.generatedInvoices || [],
             pendingInvoices: this.pendingInvoices || [],
-            companyConfig: JSON.parse(localStorage.getItem('companyConfig') || '{}'),
-            companyLogo: localStorage.getItem('companyLogo') || ''
+            dismissedPendingKeys: this.dismissedPendingKeys || [],
+            dismissedServiceIds: this.dismissedServiceIds || [],
+            deletedIds: this.deletedIds || [],
+            collectionNotes: this.collectionNotes || {},
+            nominaTotales: this.nominaTotales || [],
+            companyConfig: localStorage.getItem('companyConfig'),
+            companyLogo: localStorage.getItem('companyLogo'),
+            customColors: localStorage.getItem('customColors'),
+            supervisorPin: localStorage.getItem('brazos_supervisorPin') || '1234',
+            cellNotes: JSON.parse(localStorage.getItem('brazos_cellNotes') || '{}'),
+            clavesSuplente: JSON.parse(localStorage.getItem('brazos_clavesSuplente') || '[]'),
         };
-        const b = new Blob([JSON.stringify(data)], {type:'application/json'});
+        const b = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
         const a = document.createElement('a'); 
         a.href = URL.createObjectURL(b); 
-        a.download = 'operativo_mac.json'; 
+        a.download = `Brazos_Respaldo_Completo_${new Date().toISOString().split('T')[0]}.json`; 
         a.click();
+        alert('✅ Respaldo completo descargado.\n\nGuárdalo en un lugar seguro. Contiene TODOS los datos de la app. Puedes restaurarlo con el botón "Importar".');
     }
     importar() {
         const i = document.createElement('input'); i.type = 'file';
@@ -11435,8 +11438,20 @@ Motivo de cancelación (opcional):`);
                             this.gastosCategories = d.gastosCategories || {};
                             this.generatedInvoices = d.generatedInvoices || [];
                             this.pendingInvoices = d.pendingInvoices || [];
-                            if (d.companyConfig) localStorage.setItem('companyConfig', JSON.stringify(d.companyConfig));
+                            // Restaurar también el resto de campos del respaldo completo,
+                            // para que un backup sea 100% fiel (antes se perdían al restaurar).
+                            if (d.dismissedPendingKeys) { this.dismissedPendingKeys = d.dismissedPendingKeys; localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys)); }
+                            if (d.dismissedServiceIds)  { this.dismissedServiceIds = d.dismissedServiceIds; localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds)); }
+                            if (d.deletedIds)           { this.deletedIds = d.deletedIds; localStorage.setItem('v35_deletedIds', JSON.stringify(this.deletedIds)); }
+                            if (d.collectionNotes)      { this.collectionNotes = d.collectionNotes; localStorage.setItem('v35_collectionNotes', JSON.stringify(this.collectionNotes)); }
+                            if (d.nominaTotales)        { this.nominaTotales = d.nominaTotales; localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales)); }
+                            // companyConfig puede venir como string (respaldo nuevo) u objeto (respaldo viejo)
+                            if (d.companyConfig) localStorage.setItem('companyConfig', typeof d.companyConfig === 'string' ? d.companyConfig : JSON.stringify(d.companyConfig));
                             if (d.companyLogo) localStorage.setItem('companyLogo', d.companyLogo);
+                            if (d.customColors) localStorage.setItem('customColors', d.customColors);
+                            if (d.supervisorPin) localStorage.setItem('brazos_supervisorPin', d.supervisorPin);
+                            if (d.cellNotes) localStorage.setItem('brazos_cellNotes', JSON.stringify(d.cellNotes));
+                            if (d.clavesSuplente) localStorage.setItem('brazos_clavesSuplente', JSON.stringify(d.clavesSuplente));
                             this.save();
                             location.reload();
                         } else {
@@ -16970,6 +16985,16 @@ Motivo de cancelación (opcional):`);
                             this.driveConnected = true;
                             // Reanudar el auto-sync de 5 min si se había detenido
                             if (!this._autoSyncInterval) this._startAutoSync();
+                        } else {
+                            // La renovación silenciosa no pudo completarse (el navegador
+                            // suele bloquearla si la pestaña estuvo en 2do plano). No dejar
+                            // el botón atascado en "Reconectando…": avisar claramente que
+                            // hay que dar clic, y NO seguir (sin token no se puede subir).
+                            const lbl = document.getElementById('driveSyncLabel');
+                            const btn = document.getElementById('driveSyncBtn');
+                            if (lbl) lbl.textContent = '⚠️ Toca para reconectar';
+                            if (btn) btn.style.background = '#e67e22';
+                            return;
                         }
                     }
                     if (this.driveConnected && this.driveToken) {
@@ -17064,14 +17089,28 @@ Motivo de cancelación (opcional):`);
         if (!this.tokenClient) return;
         if (!this.tokenExpiry || Date.now() > this.tokenExpiry) {
             await new Promise((resolve) => {
+                let settled = false;
+                const finish = () => { if (!settled) { settled = true; resolve(); } };
+                // Timeout de seguridad: si Google no llama de vuelta al callback en 8s
+                // (típico cuando la pestaña estuvo en 2do plano y la renovación silenciosa
+                // no puede completarse), dejamos de esperar en vez de colgarnos para siempre
+                // en "Reconectando…". Así el flujo de arriba continúa (avisa / reintenta).
+                const to = setTimeout(finish, 8000);
                 this.tokenClient.callback = (response) => {
-                    if (response.error) { resolve(); return; }
-                    this.driveToken = response.access_token;
-                    this.tokenExpiry = Date.now() + (55 * 60 * 1000);
-                    this.driveConnected = true;
-                    resolve();
+                    clearTimeout(to);
+                    if (response && !response.error) {
+                        this.driveToken = response.access_token;
+                        this.tokenExpiry = Date.now() + (55 * 60 * 1000);
+                        this.driveConnected = true;
+                    }
+                    finish();
                 };
-                this.tokenClient.requestAccessToken({ prompt: '', login_hint: this.DRIVE_ACCOUNT_HINT });
+                try {
+                    this.tokenClient.requestAccessToken({ prompt: '', login_hint: this.DRIVE_ACCOUNT_HINT });
+                } catch(e) {
+                    clearTimeout(to);
+                    finish();
+                }
             });
         }
     }
@@ -17273,6 +17312,21 @@ Motivo de cancelación (opcional):`);
             );
             const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
             localStorage.setItem('anaCS_lastSavedAt', new Date().toISOString());
+            // Guardar el modifiedTime que Drive le asignó a ESTA subida, para que el
+            // chequeo "¿Drive más nuevo?" pueda distinguir la propia subida de esta PC
+            // (mismo modifiedTime) de un cambio real de OTRA PC (modifiedTime mayor).
+            // Sin esto, la app se auto-inducía falsos positivos: su propia subida movía
+            // el modifiedTime de Drive y el siguiente chequeo lo veía "más nuevo".
+            try {
+                const vr = await fetch(
+                    `https://www.googleapis.com/drive/v3/files?q=name='${fileName}'+and+'${this.driveFolderId}'+in+parents+and+trashed=false&fields=files(id,modifiedTime)`,
+                    { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                );
+                const vd = await vr.json();
+                if (vd.files && vd.files.length && vd.files[0].modifiedTime) {
+                    this._ultimoModifiedTimePropio = new Date(vd.files[0].modifiedTime).getTime();
+                }
+            } catch(e) { /* no crítico */ }
             this.localDirty = false; // Cambios subidos exitosamente
             document.getElementById('driveSyncLabel').textContent = `Sync ${now}`;
             document.getElementById('driveSyncBtn').style.background = '#27ae60';
@@ -17392,12 +17446,19 @@ Motivo de cancelación (opcional):`);
             const searchData = await searchRes.json();
             if (!searchData.files || searchData.files.length === 0) return false;
             const driveMod = searchData.files[0].modifiedTime ? new Date(searchData.files[0].modifiedTime).getTime() : 0;
+            // Comparar contra el modifiedTime de la PROPIA última subida de esta PC
+            // (mismo reloj de Drive → comparación fiable). Si Drive no es más nuevo que
+            // lo que esta PC subió por última vez, entonces NO hay cambios de otra PC:
+            // es la propia subida. Sólo si Drive tiene un modifiedTime MAYOR (con 2s de
+            // colchón por redondeos) hay algo de otra computadora que bajar.
+            if (this._ultimoModifiedTimePropio) {
+                return driveMod > (this._ultimoModifiedTimePropio + 2000);
+            }
+            // Primer arranque de la sesión (aún no hemos subido): usar el lastSavedAt local
+            // como referencia, con margen amplio para no disparar por diferencia de relojes.
             const localSavedAt = localStorage.getItem('anaCS_lastSavedAt');
             const localTime = localSavedAt ? new Date(localSavedAt).getTime() : 0;
-            // Margen de 10s para evitar falsos positivos por la propia subida de esta PC
-            // (Google actualiza modifiedTime al subir; sin margen, esta PC creería que
-            // Drive es más nuevo justo después de su propia sincronización).
-            return driveMod > (localTime + 10000);
+            return driveMod > (localTime + 15000);
         } catch(e) {
             console.warn('_driveEstaMasNuevo error:', e);
             return false; // ante la duda, no forzar bajada (driveSyncNow sigue su curso)
