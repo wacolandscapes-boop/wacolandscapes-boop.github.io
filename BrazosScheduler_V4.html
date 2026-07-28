@@ -17184,6 +17184,36 @@ Motivo de cancelación (opcional):`);
         return merged;
     }
 
+    // Fusiona las listas de pagos de la MISMA factura provenientes de dos PCs, sin
+    // duplicar los que son el mismo pago ni perder los distintos. Un pago se considera
+    // el MISMO si coincide el `ref` (nº de cheque / ID de Stripe) cuando ambos lo tienen;
+    // si no hay ref, se compara fecha+monto+método. Así, el pago que estaba en ambas PCs
+    // no se duplica y el que se agregó en una sola se conserva. Es la corrección al bug
+    // por el que registrar un 2º pago en una PC borraba los pagos al sincronizar.
+    _fusionarPagos(pagosA = [], pagosB = []) {
+        const norm = (p) => ({
+            date: p && p.date ? String(p.date) : '',
+            amount: p ? parseFloat(p.amount || 0) : 0,
+            method: p && p.method ? String(p.method) : '',
+            ref: p && p.ref ? String(p.ref).trim() : '',
+            notes: p && p.notes ? p.notes : ''
+        });
+        const claveDe = (p) => {
+            if (p.ref) return 'ref:' + p.ref.toLowerCase();
+            // sin ref: fecha (día) + monto (centavos) + método
+            const dia = p.date.split('T')[0];
+            return 'dam:' + dia + '|' + Math.round(p.amount * 100) + '|' + p.method.toLowerCase();
+        };
+        const resultado = [];
+        const vistos = new Set();
+        [...(pagosA || []), ...(pagosB || [])].forEach(raw => {
+            const p = norm(raw);
+            const k = claveDe(p);
+            if (!vistos.has(k)) { vistos.add(k); resultado.push(raw); }
+        });
+        return resultado;
+    }
+
     mergeArraysById(winnerArr = [], loserArr = [], idKeys = ['id']) {
         const getKey = (item) => {
             for (const k of idKeys) {
@@ -17604,6 +17634,26 @@ Motivo de cancelación (opcional):`);
             // una corrección local (ej. borrar un cheque que se marcó por error) se
             // revierte solo en el siguiente sync porque Drive todavía tenía el dato viejo.
             const mergedInvoices = this.mergeArraysById(winner.generatedInvoices, loser.generatedInvoices);
+            // FUSIÓN DE PAGOS: cuando la MISMA factura existe en ambos lados, mergeArraysById
+            // se quedó con la del ganador ENTERA y descartó la del perdedor — perdiendo los
+            // pagos que sólo estaban en el perdedor. Aquí recuperamos: para cada factura que
+            // esté en los dos lados, fusionamos sus listas de pagos (sin duplicar). Esto
+            // corrige el bug por el que registrar un 2º pago en una PC borraba los pagos.
+            const loserInvById = {};
+            (loser.generatedInvoices || []).forEach(li => { loserInvById[String(li.id)] = li; });
+            mergedInvoices.forEach(inv => {
+                const li = loserInvById[String(inv.id)];
+                if (li && (Array.isArray(inv.payments) || Array.isArray(li.payments))) {
+                    inv.payments = this._fusionarPagos(inv.payments || [], li.payments || []);
+                    // Recalcular el estado según la suma REAL de los pagos fusionados,
+                    // salvo canceladas (nunca se tocan) — así si al juntar quedó pagada
+                    // o parcial, el estado lo refleja. Stripe se maneja aparte abajo.
+                    if (inv.status !== 'cancelada') {
+                        const suma = (inv.payments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+                        inv.status = (suma > 0 && this._cubreTotal(suma, inv.total)) ? 'pagada' : (suma > 0 ? 'parcial' : (inv.status === 'pagada' || inv.status === 'parcial' ? 'enviada' : inv.status));
+                    }
+                }
+            });
             const driveInvoices = data.generatedInvoices || [];
             mergedInvoices.forEach(inv => {
                 const driveVersion = driveInvoices.find(d => String(d.id) === String(inv.id));
