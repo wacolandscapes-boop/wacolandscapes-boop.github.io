@@ -3230,6 +3230,7 @@ class Scheduler {
             // otro al renderizar) — esa era la causa del duplicado intermitente al cambiar
             // de grupo. El sufijo lo vuelve único, igual que el resto de los ids de la app.
             const _uniq = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            this._tombstone('servs', svcId);
             this.servs = this.servs.filter(s => String(s.id) !== String(svcId));
             const movedSvc = Object.assign({}, svc, {
                 id: 'svc_moved_' + _uniq,
@@ -3638,6 +3639,7 @@ class Scheduler {
         }
         const opcion = confirm("¿Borrar SOLO este servicio?\n\n✅ Aceptar = Solo este\n❌ Cancelar = Ver más opciones");
         if (opcion) {
+            this._tombstone('servs', this.editing.id);
             this.servs = this.servs.filter(s => String(s.id) !== String(this.editing.id));
             this.save();
             this.reorderPriorityByTime(document.getElementById('mEmp').value, document.getElementById('mDate').value);
@@ -3651,13 +3653,19 @@ class Scheduler {
             const borrarSerie = confirm("¿Borrar toda la serie FUTURA?\n(Desde " + dLimit + " en adelante)");
             if (borrarSerie) {
                 const serieId = this.editing.serieId;
+                let _borrados;
                 if (serieId) {
                     // Borrar solo los de la misma serie
+                    _borrados = this.servs.filter(s => (s.serieId === serieId && s.date >= dLimit));
                     this.servs = this.servs.filter(s => !(s.serieId === serieId && s.date >= dLimit));
                 } else {
                     // Fallback: borrar por cliId + fecha
+                    _borrados = this.servs.filter(s => (s.cliId == cid && s.date >= dLimit));
                     this.servs = this.servs.filter(s => !(s.cliId == cid && s.date >= dLimit));
                 }
+                // Dejar lápida de cada servicio borrado, para que la eliminación se
+                // propague a las otras PCs y el merge no los reviva desde Drive.
+                (_borrados || []).forEach(s => this._tombstone('servs', s.id));
                 this.save(); 
                 this.closeModal(); 
                 this.render();
