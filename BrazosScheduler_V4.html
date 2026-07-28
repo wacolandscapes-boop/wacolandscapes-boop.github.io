@@ -16936,7 +16936,7 @@ Motivo de cancelación (opcional):`);
                 if (response.error) { alert('❌ Error: ' + response.error); return; }
                 this.driveToken = response.access_token;
                 this.driveConnected = true;
-                this.tokenExpiry = Date.now() + (55 * 60 * 1000);
+                this._fijarTokenExpiry(response);
                 document.getElementById('driveSyncLabel').textContent = 'Sincronizar';
                 document.getElementById('driveSyncBtn').style.background = '#27ae60';
                 await this.driveGetOrCreateFolder();
@@ -17085,6 +17085,18 @@ Motivo de cancelación (opcional):`);
         }, 5 * 60 * 1000);
     }
 
+    // Calcula tokenExpiry usando la duración REAL que Google devuelve (`expires_in`,
+    // en segundos) en vez de asumir 55 min fijos. Antes se asumía 55 min y si Google
+    // emitía un token más corto, la app lo creía vivo cuando ya estaba muerto → fallos
+    // de subida y mensajes de "expirado" descoordinados. Se renueva 5 min ANTES del
+    // vencimiento real (colchón) para no usar nunca un token a punto de morir.
+    _fijarTokenExpiry(response) {
+        const secs = (response && Number(response.expires_in)) ? Number(response.expires_in) : 3300; // fallback 55 min
+        const margenMs = 5 * 60 * 1000; // renovar 5 min antes
+        this.tokenExpiry = Date.now() + (secs * 1000) - margenMs;
+        console.log('🔑 Token de Drive: Google dice expires_in =', secs, 'seg (~' + Math.round(secs/60) + ' min). Se renovará ~5 min antes, a las', new Date(this.tokenExpiry).toLocaleTimeString());
+    }
+
     async refreshTokenIfNeeded() {
         if (!this.tokenClient) return;
         if (!this.tokenExpiry || Date.now() > this.tokenExpiry) {
@@ -17100,7 +17112,7 @@ Motivo de cancelación (opcional):`);
                     clearTimeout(to);
                     if (response && !response.error) {
                         this.driveToken = response.access_token;
-                        this.tokenExpiry = Date.now() + (55 * 60 * 1000);
+                        this._fijarTokenExpiry(response);
                         this.driveConnected = true;
                     }
                     finish();
@@ -18383,7 +18395,9 @@ function ensureSchedulerDriveConnected(instance) {
                     if (r.error) { resolve(false); return; }
                     a.driveToken = r.access_token;
                     a.driveConnected = true;
-                    a.tokenExpiry = Date.now() + (55 * 60 * 1000);
+                    { const secs = (r && Number(r.expires_in)) ? Number(r.expires_in) : 3300;
+                      a.tokenExpiry = Date.now() + (secs * 1000) - (5 * 60 * 1000);
+                      console.log('🔑 Token de Drive (auto-reconexión): expires_in =', secs, 'seg'); }
                     try {
                         if (!a.driveFolderId) await a.driveGetOrCreateFolder();
                     } catch (e) {}
