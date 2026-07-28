@@ -13877,7 +13877,7 @@ Motivo de cancelación (opcional):`);
         if (pdfData.startDate) existing.startDate = pdfData.startDate;
         if (pdfData.endDate) existing.endDate = pdfData.endDate;
         if (pdfData._services) existing.items = this.buildInvoiceItems(pdfData._services, pdfData.client);
-        existing.updatedAt = new Date().toISOString().split('T')[0];
+        existing.updatedAt = new Date().toISOString();
 
         this.save();
         this.renderGeneratedInvoices?.();
@@ -17641,6 +17641,28 @@ Motivo de cancelación (opcional):`);
             // corrige el bug por el que registrar un 2º pago en una PC borraba los pagos.
             const loserInvById = {};
             (loser.generatedInvoices || []).forEach(li => { loserInvById[String(li.id)] = li; });
+            // RECONCILIACIÓN DE EDICIONES POR updatedAt: cuando la MISMA factura fue editada
+            // distinto en dos PCs (p.ej. una le quitó impuestos → total distinto), mergeArraysById
+            // se quedó con la del ganador y descartó la edición del otro lado. Aquí, para cada
+            // factura en ambos lados, si la versión del PERDEDOR fue editada MÁS RECIENTEMENTE,
+            // copiamos SUS campos editables (total, líneas, fechas, config). Así la última
+            // corrección real gana, en vez de que gane al azar según el timing del sync.
+            // (Los pagos se fusionan aparte más abajo; el status se recalcula tras eso.)
+            mergedInvoices.forEach(inv => {
+                const li = loserInvById[String(inv.id)];
+                if (!li) return;
+                const tWinner = inv.updatedAt ? new Date(inv.updatedAt).getTime() : 0;
+                const tLoser  = li.updatedAt  ? new Date(li.updatedAt).getTime()  : 0;
+                if (tLoser > tWinner) {
+                    if (li.total !== undefined && li.total !== null) inv.total = li.total;
+                    if (li.items !== undefined) inv.items = li.items;
+                    if (li.startDate) inv.startDate = li.startDate;
+                    if (li.endDate) inv.endDate = li.endDate;
+                    if (li.serviceCount !== undefined) inv.serviceCount = li.serviceCount;
+                    if (li.invoiceConfig !== undefined) inv.invoiceConfig = li.invoiceConfig;
+                    inv.updatedAt = li.updatedAt;
+                }
+            });
             mergedInvoices.forEach(inv => {
                 const li = loserInvById[String(inv.id)];
                 if (li && (Array.isArray(inv.payments) || Array.isArray(li.payments))) {
