@@ -17353,6 +17353,8 @@ Motivo de cancelación (opcional):`);
                 deletedIds: this.deletedIds || [],
                 collectionNotes: this.collectionNotes || {},
                 nominaTotales: this.nominaTotales || [],
+                nominaPrecios: JSON.parse(localStorage.getItem('brazos_nomina_precios') || '{}'),
+                nominaSemanas: JSON.parse(localStorage.getItem('brazos_nomina_semanas') || '{}'),
                 companyConfig: localStorage.getItem('companyConfig'),
                 companyLogo: localStorage.getItem('companyLogo'),
                 customColors: localStorage.getItem('customColors'),
@@ -17593,6 +17595,8 @@ Motivo de cancelación (opcional):`);
                 if (data.dismissedServiceIds) { this.dismissedServiceIds = data.dismissedServiceIds; localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds)); }
                 if (data.collectionNotes) { this.collectionNotes = data.collectionNotes; localStorage.setItem('v35_collectionNotes', JSON.stringify(this.collectionNotes)); }
                 if (data.nominaTotales)    { this.nominaTotales = data.nominaTotales; localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales)); }
+                if (data.nominaPrecios)    localStorage.setItem('brazos_nomina_precios', JSON.stringify(data.nominaPrecios));
+                if (data.nominaSemanas)    localStorage.setItem('brazos_nomina_semanas', JSON.stringify(data.nominaSemanas));
                 if (data.companyConfig)    localStorage.setItem('companyConfig', data.companyConfig);
                 if (data.companyLogo)      localStorage.setItem('companyLogo', data.companyLogo);
                 if (data.customColors)     localStorage.setItem('customColors', data.customColors);
@@ -17743,6 +17747,24 @@ Motivo de cancelación (opcional):`);
             const loserNomina  = localWins ? (data.nominaTotales || []) : (this.nominaTotales || []);
             this.nominaTotales = this.mergeArraysById(winnerNomina, loserNomina, ['id', 'periodo', 'weekStart']);
 
+            // NÓMINA POR PORCENTAJE: precios = catálogo simple, gana el lado ganador (con
+            // los del perdedor como base). Semanas = objeto anidado empleado→semana; se
+            // JUNTAN las de ambas PCs para no perder ninguna, y si la misma semana del mismo
+            // empleado está en las dos, gana la del lado ganador.
+            const winnerNomPre = localWins ? JSON.parse(localStorage.getItem('brazos_nomina_precios') || '{}') : (data.nominaPrecios || {});
+            const loserNomPre  = localWins ? (data.nominaPrecios || {}) : JSON.parse(localStorage.getItem('brazos_nomina_precios') || '{}');
+            localStorage.setItem('brazos_nomina_precios', JSON.stringify(Object.assign({}, loserNomPre, winnerNomPre)));
+
+            const winnerNomSem = localWins ? JSON.parse(localStorage.getItem('brazos_nomina_semanas') || '{}') : (data.nominaSemanas || {});
+            const loserNomSem  = localWins ? (data.nominaSemanas || {}) : JSON.parse(localStorage.getItem('brazos_nomina_semanas') || '{}');
+            const nomSemMerged = {};
+            [loserNomSem, winnerNomSem].forEach(src => {
+                Object.keys(src || {}).forEach(empId => {
+                    nomSemMerged[empId] = Object.assign({}, nomSemMerged[empId] || {}, src[empId] || {});
+                });
+            });
+            localStorage.setItem('brazos_nomina_semanas', JSON.stringify(nomSemMerged));
+
             const winnerCats = localWins ? (this.gastosCategories || {}) : (data.gastosCategories || {});
             const loserCats  = localWins ? (data.gastosCategories || {}) : (this.gastosCategories || {});
             this.gastosCategories = Object.assign({}, loserCats, winnerCats);
@@ -17817,9 +17839,11 @@ Motivo de cancelación (opcional):`);
             sel.appendChild(opt);
         });
 
-        // Setear semana actual
+        // Setear semana PASADA por defecto (la nómina se calcula sobre la semana ya
+        // trabajada, no la actual). Ranu siempre calcula la semana anterior.
         const mon = new Date();
-        mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+        mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));  // lunes de ESTA semana
+        mon.setDate(mon.getDate() - 7);                          // retroceder a la semana pasada
         const monStr = mon.getFullYear() + '-' + String(mon.getMonth()+1).padStart(2,'0') + '-' + String(mon.getDate()).padStart(2,'0');
         document.getElementById('nmWeekStart').value = monStr;
         this.calcNominaMaria();
