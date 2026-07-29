@@ -11393,6 +11393,11 @@ Motivo de cancelación (opcional):`);
             supervisorPin: localStorage.getItem('brazos_supervisorPin') || '1234',
             cellNotes: JSON.parse(localStorage.getItem('brazos_cellNotes') || '{}'),
             clavesSuplente: JSON.parse(localStorage.getItem('brazos_clavesSuplente') || '[]'),
+            serviceCatalog: this.serviceCatalog || [],
+            estimates: this.estimates || [],
+            nominaPrecios: JSON.parse(localStorage.getItem('brazos_nomina_precios') || '{}'),
+            nominaSemanas: JSON.parse(localStorage.getItem('brazos_nomina_semanas') || '{}'),
+            customTextModes: JSON.parse(localStorage.getItem('customTextModes') || 'null'),
         };
         const b = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
         const a = document.createElement('a'); 
@@ -11460,6 +11465,11 @@ Motivo de cancelación (opcional):`);
                             if (d.supervisorPin) localStorage.setItem('brazos_supervisorPin', d.supervisorPin);
                             if (d.cellNotes) localStorage.setItem('brazos_cellNotes', JSON.stringify(d.cellNotes));
                             if (d.clavesSuplente) localStorage.setItem('brazos_clavesSuplente', JSON.stringify(d.clavesSuplente));
+                            if (d.serviceCatalog)  { this.serviceCatalog = d.serviceCatalog; localStorage.setItem('v35_serviceCatalog', JSON.stringify(this.serviceCatalog)); }
+                            if (d.estimates)       { this.estimates = d.estimates; localStorage.setItem('v35_estimates', JSON.stringify(this.estimates)); }
+                            if (d.nominaPrecios)   localStorage.setItem('brazos_nomina_precios', JSON.stringify(d.nominaPrecios));
+                            if (d.nominaSemanas)   localStorage.setItem('brazos_nomina_semanas', JSON.stringify(d.nominaSemanas));
+                            if (d.customTextModes) localStorage.setItem('customTextModes', JSON.stringify(d.customTextModes));
                             this.save();
                             location.reload();
                         } else {
@@ -17343,6 +17353,8 @@ Motivo de cancelación (opcional):`);
                 supervisorPin: localStorage.getItem('brazos_supervisorPin') || '1234',
                 cellNotes: JSON.parse(localStorage.getItem('brazos_cellNotes') || '{}'),
                 clavesSuplente: JSON.parse(localStorage.getItem('brazos_clavesSuplente') || '[]'),
+                serviceCatalog: this.serviceCatalog || [],
+                estimates: this.estimates || [],
             };
             const fileName = 'brazosCS_sync.json';
             const searchRes = await fetch(
@@ -17578,7 +17590,8 @@ Motivo de cancelación (opcional):`);
                 if (data.companyConfig)    localStorage.setItem('companyConfig', data.companyConfig);
                 if (data.companyLogo)      localStorage.setItem('companyLogo', data.companyLogo);
                 if (data.customColors)     localStorage.setItem('customColors', data.customColors);
-                // Re-evaluar Pendientes ya con los datos reales de Drive — si no se hace
+                if (data.serviceCatalog)   { this.serviceCatalog = data.serviceCatalog; localStorage.setItem('v35_serviceCatalog', JSON.stringify(this.serviceCatalog)); }
+                if (data.estimates)        { this.estimates = data.estimates; localStorage.setItem('v35_estimates', JSON.stringify(this.estimates)); }
                 // esto aquí, las tarjetas se calculan con lo que había ANTES de conectar a
                 // Drive, y una factura enviada desde otro dispositivo (que este todavía no
                 // conocía) se sigue mostrando como pendiente cada vez que se recarga la
@@ -17609,6 +17622,8 @@ Motivo de cancelación (opcional):`);
                 dismissedServiceIds: this.dismissedServiceIds || [],
                 deletedIds: this.deletedIds || [],
                 collectionNotes: this.collectionNotes || {},
+                serviceCatalog: this.serviceCatalog || [],
+                estimates: this.estimates || [],
             };
             const driveSide = {
                 emps: data.emps || [], clis: data.clis || [], servs: data.servs || [],
@@ -17618,6 +17633,8 @@ Motivo de cancelación (opcional):`);
                 dismissedServiceIds: data.dismissedServiceIds || [],
                 deletedIds: data.deletedIds || [],
                 collectionNotes: data.collectionNotes || {},
+                serviceCatalog: data.serviceCatalog || [],
+                estimates: data.estimates || [],
             };
             const winner = localWins ? localSide : driveSide;
             const loser  = localWins ? driveSide : localSide;
@@ -17626,6 +17643,8 @@ Motivo de cancelación (opcional):`);
             this.clis               = this.mergeArraysById(winner.clis, loser.clis);
             this.servs               = this.mergeArraysById(winner.servs, loser.servs);
             this.gastos              = this.mergeArraysById(winner.gastos, loser.gastos);
+            this.serviceCatalog      = this.mergeArraysById(winner.serviceCatalog, loser.serviceCatalog);
+            this.estimates           = this.mergeArraysById(winner.estimates, loser.estimates);
 
             // Para facturas: merge especial — el status de pago SIEMPRE viene de Drive
             // ÚNICAMENTE cuando es un pago real de Stripe (el Worker actualiza Drive
@@ -17749,6 +17768,8 @@ Motivo de cancelación (opcional):`);
             localStorage.setItem('v35_dismissedPending', JSON.stringify(this.dismissedPendingKeys));
             localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds));
             localStorage.setItem('v35_collectionNotes', JSON.stringify(this.collectionNotes));
+            localStorage.setItem('v35_serviceCatalog', JSON.stringify(this.serviceCatalog));
+            localStorage.setItem('v35_estimates', JSON.stringify(this.estimates));
             localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales));
 
             if (document.getElementById('pendingInvoicesModal')?.style.display === 'block') this.renderPendingInvoices();
