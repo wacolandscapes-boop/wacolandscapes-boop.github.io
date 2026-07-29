@@ -1139,6 +1139,7 @@
                 <button class="btn" onclick="app.showSec('secGrupos')" style="background:#2c3e50; color:white">👥 Grupos</button>
                 <button class="btn" onclick="app.showSec('secServiceCatalog')" style="background:#16a085; color:white">📐 Catálogo Servicios</button>
                 <button class="btn" onclick="app.showSec('secSupervisor')" style="background:#6c3483; color:white">🔐 Supervisor</button>
+                <button class="btn" onclick="app.showSec('secRespaldo')" style="background:#c0392b; color:white">🔒 Respaldo de Datos</button>
             </div>
             <div id="secEmp">
                 <div style="margin-bottom:15px; display:flex; justify-content:flex-end; gap:8px; align-items:flex-start;">
@@ -1420,25 +1421,29 @@
                 </div>
             </div>
         </div>
-        <!-- Respaldo Local -->
-        <div style="margin-top:16px; padding:14px; background:#f0f4f8; border-radius:10px; border:1px solid #dee2e6;">
-            <div style="font-size:0.85rem; font-weight:700; color:#2c3e50; margin-bottom:10px;">💾 Respaldo Local</div>
+        <!-- Respaldo de Datos (sección propia, zona delicada) -->
+        <div id="secRespaldo" style="display:none">
+            <h3 style="margin-top:0; color:#c0392b">🔒 Respaldo de Datos — Zona Delicada</h3>
+            <div style="padding:14px; background:#fdECEA; border:1px solid #e74c3c; border-radius:10px; margin-bottom:16px;">
+                <div style="font-weight:700; color:#c0392b; margin-bottom:8px;">⚠️ Lee esto antes de usar esta sección</div>
+                <div style="font-size:0.85rem; color:#2c3e50; line-height:1.5;">
+                    Esta sección maneja <b>TODOS los datos de la app</b>. Úsala con cuidado:<br><br>
+                    • <b>💾 Respaldar Datos</b> (seguro): descarga una copia completa de todos tus datos. No borra nada. Úsalo seguido y guárdalo en un lugar seguro (Drive, USB, etc.).<br><br>
+                    • <b>📂 Restaurar Respaldo</b> (⚠️ PELIGROSO): <b>reemplaza TODOS los datos actuales</b> con los del archivo. Todo lo que tengas ahora se pierde y no se puede deshacer. Úsalo solo si sabes lo que haces y tienes un respaldo reciente.
+                </div>
+            </div>
             <div style="display:flex; gap:8px;">
                 <button class="btn" onclick="app.exportar()"
                     style="flex:1; background:#2980b9; color:white; font-weight:600;">
                     💾 Respaldar Datos
                 </button>
                 <button class="btn" onclick="app.importar()"
-                    style="flex:1; background:#8e44ad; color:white; font-weight:600;">
+                    style="flex:1; background:#c0392b; color:white; font-weight:600;">
                     📂 Restaurar Respaldo
                 </button>
             </div>
-            <div style="font-size:0.75rem; color:#888; margin-top:6px;">
-                Descarga un respaldo COMPLETO de todos tus datos, o restaura uno guardado. Guárdalo en un lugar seguro (Drive, USB, etc.).
-            </div>
-            <div style="font-size:0.75rem; color:#888; margin-top:6px;">
-                Importa un archivo de sincronización (brazosCS_sync.json). Al importar elige
-                ACEPTAR = Reemplazar todo.
+            <div style="font-size:0.75rem; color:#888; margin-top:8px;">
+                Al restaurar, se importa un archivo de respaldo o de sincronización (brazosCS_sync.json). Elige ACEPTAR = Reemplazar todo.
             </div>
         </div>
         <button class="btn" onclick="app.closeCatalog()" style="width:100%; margin-top:16px; background:#2c3e50; color:white">CERRAR</button>
@@ -9930,7 +9935,7 @@ Motivo de cancelación (opcional):`);
 
     
     showSec(s) { 
-        ['secEmp','secCli','secConfig','secGrupos','secSupervisor','secServiceCatalog'].forEach(x => document.getElementById(x).style.display = x === s ? 'block' : 'none');
+        ['secEmp','secCli','secConfig','secGrupos','secSupervisor','secServiceCatalog','secRespaldo'].forEach(x => document.getElementById(x).style.display = x === s ? 'block' : 'none');
         // Refrescar PIN actual al abrir sección supervisor
         if (s === 'secSupervisor') {
             const el = document.getElementById('supPinActual');
@@ -11407,6 +11412,7 @@ Motivo de cancelación (opcional):`);
         alert('✅ Respaldo completo descargado.\n\nGuárdalo en un lugar seguro. Contiene TODOS los datos de la app. Puedes restaurarlo con el botón "Importar".');
     }
     importar() {
+        if (!confirm('⚠️ RESTAURAR REEMPLAZA TODOS LOS DATOS ACTUALES.\n\nTodo lo que tengas ahora en esta PC se perderá y se sustituirá por el contenido del archivo. Esto no se puede deshacer.\n\n¿Estás seguro de que quieres continuar?')) return;
         const i = document.createElement('input'); i.type = 'file';
         i.accept = '.json';
         i.onchange = e => {
