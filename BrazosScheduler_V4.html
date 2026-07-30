@@ -2366,7 +2366,14 @@ class Scheduler {
                             const evLetra = evGrp.replace(/Grupo /i,'').trim();
                             const evColor = this.getGrupoColor(evGrp);
                             const badge = evLetra ? `<span style="display:inline-block;background:${evColor};color:white;border-radius:50%;width:13px;height:13px;font-size:0.55rem;font-weight:900;text-align:center;line-height:13px;margin-right:3px;vertical-align:middle;flex-shrink:0;">${evLetra}</span>` : '';
-                            ev.innerHTML = `${badge}<span>${lblM}</span>`;
+                            // Hora del servicio: SÓLO cuando el calendario está filtrado por cliente
+                            // (fCli !== 'all'), que es el caso de la verificación de factura. En la vista
+                            // mensual normal (sin filtro) no se muestra para no saturar la celda. La vista
+                            // semanal la muestra siempre por su cuenta en _fillCell.
+                            const horaMesFiltrado = (fCli !== 'all' && (s.timeStart || s.timeEnd))
+                                ? `<div style="font-size:0.62rem;font-weight:700;line-height:1.15;margin-top:1px;white-space:nowrap;">🕐 ${this.fmt12(s.timeStart)}${s.timeEnd ? '–' + this.fmt12(s.timeEnd) : ''}</div>`
+                                : '';
+                            ev.innerHTML = `${badge}<span>${lblM}</span>${horaMesFiltrado}`;
                         }
                         ev.title = `${c.city ? c.city + ' · ' : ''}${c.name} — ${s.grupo}`;
                         ev.onclick = (e) => { e.stopPropagation(); this.openModal(s); };
@@ -2387,7 +2394,7 @@ class Scheduler {
                                 ev.style.backgroundColor = bgColorH;
                                 const textModeH = this.getTextMode(typeKeyH);
                                 ev.style.color = textModeH === 'auto' ? getTextColor(bgColorH) : (textModeH === 'white' ? '#fff' : '#000');
-                                const showPropH = (c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion'); ev.textContent = (s.priority ? `${s.priority}. ` : '') + c.name + (c.city ? ' - ' + c.city : '') + (showPropH && c.propId ? ' / ' + c.propId : '');
+                                const showPropH = (c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion'); ev.textContent = (s.priority ? `${s.priority}. ` : '') + c.name + (c.city ? ' - ' + c.city : '') + (showPropH && c.propId ? ' / ' + c.propId : '') + (fCli !== 'all' && s.timeStart ? '  🕐' + this.fmt12(s.timeStart) : '');
                                 ev.onclick = (e2) => { e2.stopPropagation(); this.openModal(s); };
                                 cell.insertBefore(ev, more);
                             });
