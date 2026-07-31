@@ -2092,6 +2092,36 @@ class Scheduler {
         return `${h12}:${String(m).padStart(2,'0')} ${ampm}`;
     }
 
+    // Devuelve {checkin, checkout} del reporte de la empleada para un servicio (por fecha e id),
+    // buscando primero en _prodReports (memoria) y luego en localStorage. null si no hay registro.
+    // Es la MISMA fuente que la vista semanal usa para pintar el ▶/✓; se extrajo para poder
+    // mostrarla también en la vista mensual cuando está filtrada por cliente.
+    _getCheckInOut(dStr, svcId) {
+        try {
+            let rpt = null;
+            if (this._prodReports && this._prodReports[dStr]) {
+                Object.values(this._prodReports[dStr]).forEach(empData => {
+                    if (rpt) return;
+                    if (empData && empData.services) {
+                        const found = empData.services.find(r => String(r.id) === String(svcId));
+                        if (found) rpt = found;
+                    }
+                });
+            }
+            if (!rpt) {
+                const dayData = JSON.parse(localStorage.getItem('brazos_horarios_' + dStr) || '{}');
+                Object.values(dayData).forEach(empData => {
+                    if (rpt) return;
+                    if (empData && empData.services) {
+                        const found = empData.services.find(r => String(r.id) === String(svcId));
+                        if (found) rpt = found;
+                    }
+                });
+            }
+            return (rpt && rpt.checkin) ? { checkin: rpt.checkin, checkout: rpt.checkout || null } : null;
+        } catch(e) { return null; }
+    }
+
     // Helper para obtener fecha local en formato YYYY-MM-DD
     getLocalDate() {
         const now = new Date();
@@ -2367,11 +2397,13 @@ class Scheduler {
                             const evColor = this.getGrupoColor(evGrp);
                             const badge = evLetra ? `<span style="display:inline-block;background:${evColor};color:white;border-radius:50%;width:13px;height:13px;font-size:0.55rem;font-weight:900;text-align:center;line-height:13px;margin-right:3px;vertical-align:middle;flex-shrink:0;">${evLetra}</span>` : '';
                             // Hora del servicio: SÓLO cuando el calendario está filtrado por cliente
-                            // (fCli !== 'all'), que es el caso de la verificación de factura. En la vista
-                            // mensual normal (sin filtro) no se muestra para no saturar la celda. La vista
-                            // semanal la muestra siempre por su cuenta en _fillCell.
-                            const horaMesFiltrado = (fCli !== 'all' && (s.timeStart || s.timeEnd))
-                                ? `<div style="font-size:0.62rem;font-weight:700;line-height:1.15;margin-top:1px;white-space:nowrap;">🕐 ${this.fmt12(s.timeStart)}${s.timeEnd ? '–' + this.fmt12(s.timeEnd) : ''}</div>`
+                            // (fCli !== 'all'), que es el caso de la verificación de factura. Se muestra
+                            // el check-in/check-out REAL que registró la empleada (misma fuente que la
+                            // vista semanal), no la hora programada. En la vista mensual sin filtro no se
+                            // muestra, para no saturar la celda.
+                            const _cio = (fCli !== 'all') ? this._getCheckInOut(dStr, s.id) : null;
+                            const horaMesFiltrado = _cio
+                                ? `<div style="font-size:0.62rem;font-weight:700;line-height:1.15;margin-top:1px;white-space:nowrap;">▶ ${this.fmt12(_cio.checkin)}${_cio.checkout ? ' ✓ ' + this.fmt12(_cio.checkout) : ''}</div>`
                                 : '';
                             ev.innerHTML = `${badge}<span>${lblM}</span>${horaMesFiltrado}`;
                         }
@@ -2394,7 +2426,7 @@ class Scheduler {
                                 ev.style.backgroundColor = bgColorH;
                                 const textModeH = this.getTextMode(typeKeyH);
                                 ev.style.color = textModeH === 'auto' ? getTextColor(bgColorH) : (textModeH === 'white' ? '#fff' : '#000');
-                                const showPropH = (c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion'); ev.textContent = (s.priority ? `${s.priority}. ` : '') + c.name + (c.city ? ' - ' + c.city : '') + (showPropH && c.propId ? ' / ' + c.propId : '') + (fCli !== 'all' && s.timeStart ? '  🕐' + this.fmt12(s.timeStart) : '');
+                                const showPropH = (c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion'); const _cioH = (fCli !== 'all') ? this._getCheckInOut(dStr, s.id) : null; ev.textContent = (s.priority ? `${s.priority}. ` : '') + c.name + (c.city ? ' - ' + c.city : '') + (showPropH && c.propId ? ' / ' + c.propId : '') + (_cioH ? '  ▶ ' + this.fmt12(_cioH.checkin) : '');
                                 ev.onclick = (e2) => { e2.stopPropagation(); this.openModal(s); };
                                 cell.insertBefore(ev, more);
                             });
