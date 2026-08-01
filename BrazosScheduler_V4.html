@@ -6292,11 +6292,12 @@ class Scheduler {
             // Reenviar un recordatorio NO reinicia el reloj del atraso.
             const firstSentStr = hist.length > 0 ? hist[0].date.split('T')[0] : (inv.sentAt || inv.generatedDate);
             const lastSentStr  = hist.length > 0 ? hist[hist.length - 1].date.split('T')[0] : (inv.sentAt || inv.generatedDate);
-            // El plazo cuenta desde el FIN DEL PERIODO DE SERVICIO (el trabajo ya se hizo),
-            // no desde que se envió la factura. Así una factura de mayo enviada en julio
-            // aparece con el atraso REAL. Si la factura no trae periodo (manuales viejas),
-            // se cae al primer envío / generación como antes.
-            const baseDateStr = inv.endDate || inv.startDate || firstSentStr;
+            // El plazo cuenta desde el PRIMER ENVÍO de la factura + términos del cliente,
+            // NO desde el fin del servicio. Así, si a nosotros se nos pasó enviar la factura
+            // a tiempo, ese retraso no cae sobre el cliente: su reloj empieza cuando la recibe.
+            // firstSentStr ya toma el PRIMER envío (no se reinicia al reenviar). Esto mantiene
+            // Cobranza consistente con el vencimiento que el cliente ve en su factura.
+            const baseDateStr = firstSentStr;
             if (!baseDateStr) return;
             const baseDate = new Date(baseDateStr + 'T00:00:00');
             const dueDate = new Date(baseDate);
@@ -7659,7 +7660,11 @@ class Scheduler {
                 if (hiddenNum) hiddenNum.value = invoice.invoiceNumber;
                 this._updateEditingInvoiceBadge();
             } else {
-                // Factura normal — abrir tab Generar
+                // Factura normal — abrir tab Generar. IMPORTANTE: cambiar SIEMPRE a la
+                // pestaña Generar (simétrico a la rama manual, que hace switchInvoiceTab('manual')).
+                // Sin esto, si venías de abrir una factura Manual, la pantalla se quedaba en Manual
+                // con datos viejos aunque esta factura sea generada.
+                this.switchInvoiceTab('generar');
                 const clientSel = document.getElementById('invoiceClient');
                 if (clientSel) {
                     // Usar el clientIds guardado en la factura (la propiedad EXACTA) cuando
