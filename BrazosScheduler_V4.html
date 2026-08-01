@@ -6151,6 +6151,20 @@ class Scheduler {
         document.getElementById('genInvClientText').value = '';
         document.getElementById('genInvClient').value = 'all';
 
+        // Limpiar los FILTROS de búsqueda al abrir Enviadas, para que la lista siempre
+        // arranque mostrando TODAS las facturas. Antes NO se limpiaban → un número (ej. 7538),
+        // un nombre, o un estatus que quedó de una búsqueda anterior seguía filtrando la lista
+        // cada vez que se reabría, escondiendo el resto. Esto NO cambia ningún dato de las
+        // facturas — sólo lo que se muestra. Los flujos que abren Enviadas YA filtrada
+        // (verClienteEnEnviadas, volver de Pendientes) aplican su filtro DESPUÉS con setTimeout,
+        // así que este reset no los afecta.
+        const _bSearch = document.getElementById('genInvSearch');
+        if (_bSearch) _bSearch.value = '';
+        const _bNum = document.getElementById('genInvNumSearch');
+        if (_bNum) _bNum.value = '';
+        const _bStatus = document.getElementById('genInvStatus');
+        if (_bStatus) _bStatus.value = 'all';
+
         // Populate period dropdown dynamically (last 12 months)
         const periodSel = document.getElementById('genInvPeriod');
         const monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
