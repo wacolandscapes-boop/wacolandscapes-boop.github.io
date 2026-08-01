@@ -20093,5 +20093,36 @@ document.addEventListener('click', function(e) {
   else window.addEventListener('DOMContentLoaded', preguntar);
 })();
 </script>
+<style>
+/* Parpadeo del botón de sincronización cuando está en estado de ALERTA (no se pudo
+   conectar/subir). Hace más visible el aviso — además del color, el botón pulsa. */
+@keyframes syncParpadeo {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(231,76,60,0.75); }
+  50%      { opacity: 0.5; box-shadow: 0 0 0 5px rgba(231,76,60,0); }
+}
+.sync-parpadeo { animation: syncParpadeo 1s ease-in-out infinite; }
+</style>
+<script>
+/* Vigila el color del botón de sync: si está en rojo (#e74c3c "Reconecta a Drive") o
+   naranja de reconexión (#e67e22 "Toca para reconectar"), le activa el parpadeo; en
+   cualquier otro estado (verde, guardando, reconectando, azul) lo quita. Con un
+   MutationObserver no hay que tocar los muchos puntos que cambian el botón — reacciona
+   solo a cualquier cambio de estado. NO toca la lógica de sincronización ni de datos. */
+(function() {
+  var btn = document.getElementById('driveSyncBtn');
+  if (!btn || !window.MutationObserver) return;
+  function esAlerta(v) {
+    v = (v || '').toLowerCase();
+    return v.indexOf('#e74c3c') !== -1 || v.indexOf('#e67e22') !== -1 ||
+           v.indexOf('rgb(231, 76, 60)') !== -1 || v.indexOf('rgb(230, 126, 34)') !== -1;
+  }
+  function revisar() {
+    var alerta = esAlerta(btn.style.background) || esAlerta(btn.style.backgroundColor);
+    btn.classList.toggle('sync-parpadeo', alerta);
+  }
+  new MutationObserver(revisar).observe(btn, { attributes: true, attributeFilter: ['style'] });
+  revisar();
+})();
+</script>
 </body>
 </html>
