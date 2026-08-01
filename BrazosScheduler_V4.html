@@ -16329,12 +16329,13 @@ Motivo de cancelación (opcional):`);
         let allReports = {};
         let totalDates = 0;
         // Leer archivos por fecha de localStorage
-        const today = new Date();
-        for (let i = -30; i <= 14; i++) {
-            const d = new Date(today);
-            d.setDate(d.getDate() + i);
-            const date = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-            const key = 'brazos_horarios_' + date;
+        // Leer TODO el historial de horarios que haya en localStorage (todas las keys
+        // brazos_horarios_YYYY-MM-DD), no sólo una ventana de fechas.
+        for (let k = 0; k < localStorage.length; k++) {
+            const key = localStorage.key(k);
+            const m = key && /^brazos_horarios_(\d{4}-\d{2}-\d{2})$/.exec(key);
+            if (!m) continue;
+            const date = m[1];
             try {
                 const raw = localStorage.getItem(key);
                 if (!raw) continue;
@@ -16422,37 +16423,44 @@ Motivo de cancelación (opcional):`);
     // de Producción esté cerrada. Devuelve { allReports, cargados }.
     async _bajarHorariosDeDrive() {
         if (!this.driveConnected || !this.driveFolderId) return { allReports: null, cargados: 0 };
-        const today = new Date();
-        const dates = [];
-        for (let i = -30; i <= 14; i++) {
-            const d = new Date(today);
-            d.setDate(d.getDate() + i);
-            dates.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'));
-        }
         let allReports = {};
         let cargados = 0;
-        await Promise.all(dates.map(async date => {
-            const fname = 'brazos_horarios_' + date + '.json';
-            const key   = 'brazos_horarios_' + date;
-            try {
-                const sr = await fetch(
-                    `https://www.googleapis.com/drive/v3/files?q=name='${fname}'+and+'${this.driveFolderId}'+in+parents+and+trashed=false&fields=files(id)`,
-                    { headers: { Authorization: `Bearer ${this.driveToken}` } }
-                );
-                const sd = await sr.json();
-                if (!sd.files || !sd.files.length) return;
-                const fr = await fetch(
-                    `https://www.googleapis.com/drive/v3/files/${sd.files[0].id}?alt=media`,
-                    { headers: { Authorization: `Bearer ${this.driveToken}` } }
-                );
-                const dayData = await fr.json();
-                const existingLocal = JSON.parse(localStorage.getItem(key) || '{}');
-                const mergedDay = this.mergeHorariosDay(existingLocal, dayData);
-                localStorage.setItem(key, JSON.stringify(mergedDay));
-                allReports[date] = mergedDay;
-                cargados++;
-            } catch(e) {}
-        }));
+        // Lista TODOS los archivos brazos_horarios_*.json de la carpeta (historial completo) y
+        // los baja en lotes — antes usaba una ventana de fechas y no traía los registros viejos.
+        let archivos = [];
+        try {
+            let pageToken = '';
+            do {
+                const q = encodeURIComponent(`name contains 'brazos_horarios_' and '${this.driveFolderId}' in parents and trashed=false`);
+                let url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name)&pageSize=1000`;
+                if (pageToken) url += `&pageToken=${pageToken}`;
+                const lr = await fetch(url, { headers: { Authorization: `Bearer ${this.driveToken}` } });
+                const ld = await lr.json();
+                if (ld.files) archivos = archivos.concat(ld.files);
+                pageToken = ld.nextPageToken || '';
+            } while (pageToken);
+        } catch(e) {}
+        const LOTE = 12;
+        for (let i = 0; i < archivos.length; i += LOTE) {
+            const grupo = archivos.slice(i, i + LOTE);
+            await Promise.all(grupo.map(async f => {
+                const m = /^(brazos_horarios_(\d{4}-\d{2}-\d{2}))\.json$/.exec(f.name);
+                if (!m) return;
+                const key = m[1], date = m[2];
+                try {
+                    const fr = await fetch(
+                        `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`,
+                        { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                    );
+                    const dayData = await fr.json();
+                    const existingLocal = JSON.parse(localStorage.getItem(key) || '{}');
+                    const mergedDay = this.mergeHorariosDay(existingLocal, dayData);
+                    localStorage.setItem(key, JSON.stringify(mergedDay));
+                    allReports[date] = mergedDay;
+                    cargados++;
+                } catch(e) {}
+            }));
+        }
         return { allReports, cargados };
     }
 
@@ -16959,41 +16967,54 @@ Motivo de cancelación (opcional):`);
         // Ahora descarga archivos por fecha en lugar de por grupo
         if (!this.driveConnected || !this.driveFolderId) { console.log('❌ descargarHorariosGrupos: no conectado o sin folderId'); return; }
         console.log('📥 descargarHorariosGrupos iniciado, folderId:', this.driveFolderId);
-        const today = new Date();
-        const dates = [];
-        for (let i = -14; i <= 14; i++) {
-            const d = new Date(today);
-            d.setDate(d.getDate() + i);
-            dates.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'));
-        }
+        // ANTES usaba una ventana de fechas (-14..+14) y una PC nueva/oficina no veía los
+        // registros viejos. AHORA lista TODOS los archivos brazos_horarios_*.json de la carpeta
+        // y los baja todos → historial COMPLETO. Corre en segundo plano (no bloquea el arranque);
+        // al terminar refresca el calendario.
         let updated = false;
         if (!this._prodReports) this._prodReports = {};
-        await Promise.all(dates.map(async date => {
-            const fname = 'brazos_horarios_' + date + '.json';
-            const key   = 'brazos_horarios_' + date;
-            try {
-                const sr = await fetch(
-                    `https://www.googleapis.com/drive/v3/files?q=name='${fname}'+and+'${this.driveFolderId}'+in+parents+and+trashed=false&fields=files(id)`,
-                    { headers: { Authorization: `Bearer ${this.driveToken}` } }
-                );
-                const sd = await sr.json();
-                if (!sd.files || !sd.files.length) return;
-                console.log('📄 Encontrado:', fname);
-                const fr = await fetch(
-                    `https://www.googleapis.com/drive/v3/files/${sd.files[0].id}?alt=media`,
-                    { headers: { Authorization: `Bearer ${this.driveToken}` } }
-                );
-                const dayData = await fr.json();
-                const existingLocal = JSON.parse(localStorage.getItem(key) || '{}');
-                const mergedDay = this.mergeHorariosDay(existingLocal, dayData);
-                localStorage.setItem(key, JSON.stringify(mergedDay));
-                if (!this._prodReports[date]) this._prodReports[date] = {};
-                Object.keys(mergedDay).forEach(empId => {
-                    this._prodReports[date][empId] = mergedDay[empId];
-                });
-                updated = true;
-            } catch(e) { console.log('❌ Error en fecha', date, e.message); }
-        }));
+
+        // 1) Listar TODOS los archivos de horarios de la carpeta (con paginación).
+        let archivos = [];
+        try {
+            let pageToken = '';
+            do {
+                const q = encodeURIComponent(`name contains 'brazos_horarios_' and '${this.driveFolderId}' in parents and trashed=false`);
+                let url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name)&pageSize=1000`;
+                if (pageToken) url += `&pageToken=${pageToken}`;
+                const lr = await fetch(url, { headers: { Authorization: `Bearer ${this.driveToken}` } });
+                const ld = await lr.json();
+                if (ld.files) archivos = archivos.concat(ld.files);
+                pageToken = ld.nextPageToken || '';
+            } while (pageToken);
+        } catch(e) { console.log('❌ Error listando horarios', e.message); }
+        console.log('📄 Archivos de horarios en Drive:', archivos.length);
+
+        // 2) Bajar cada uno en LOTES para no saturar la red/API.
+        const LOTE = 12;
+        for (let i = 0; i < archivos.length; i += LOTE) {
+            const grupo = archivos.slice(i, i + LOTE);
+            await Promise.all(grupo.map(async f => {
+                const m = /^(brazos_horarios_(\d{4}-\d{2}-\d{2}))\.json$/.exec(f.name);
+                if (!m) return;
+                const key = m[1], date = m[2];
+                try {
+                    const fr = await fetch(
+                        `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`,
+                        { headers: { Authorization: `Bearer ${this.driveToken}` } }
+                    );
+                    const dayData = await fr.json();
+                    const existingLocal = JSON.parse(localStorage.getItem(key) || '{}');
+                    const mergedDay = this.mergeHorariosDay(existingLocal, dayData);
+                    localStorage.setItem(key, JSON.stringify(mergedDay));
+                    if (!this._prodReports[date]) this._prodReports[date] = {};
+                    Object.keys(mergedDay).forEach(empId => {
+                        this._prodReports[date][empId] = mergedDay[empId];
+                    });
+                    updated = true;
+                } catch(e) { console.log('❌ Error bajando', f.name, e.message); }
+            }));
+        }
         console.log('✅ descargarHorariosGrupos terminado, updated:', updated);
         if (updated) {
             this.render();
