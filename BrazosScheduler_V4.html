@@ -20005,5 +20005,72 @@ document.addEventListener('click', function(e) {
     } catch(e) { console.warn('No se pudo actualizar el version stamp', e); }
 })();
 </script>
+<script>
+/* ===== GUARDIÁN DE INSTANCIA ÚNICA =====
+   Evita trabajar en la app en 2 pestañas/ventanas a la vez (que al sincronizar
+   con Drive se pisan los datos). La primera pestaña es la "dueña"; cualquier
+   segunda se BLOQUEA con un aviso y un botón para tomar el control si la otra
+   ya no se usa. Es autocontenido: NO toca la lógica de facturación ni de datos. */
+(function() {
+  var TAB_ID = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  var esDueno = true;
+  var canal;
+  try { canal = new BroadcastChannel('brazos_instancia_unica'); }
+  catch (e) { return; } /* navegador sin soporte → no bloquear, no romper */
+
+  function mostrarBloqueo() {
+    if (document.getElementById('single-instance-overlay')) return;
+    var ov = document.createElement('div');
+    ov.id = 'single-instance-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(20,30,50,0.97);' +
+      'display:flex;align-items:center;justify-content:center;padding:20px;' +
+      'font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;';
+    ov.innerHTML =
+      '<div style="max-width:460px;background:#fff;border-radius:14px;padding:30px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,0.4);">' +
+        '<div style="font-size:3rem;margin-bottom:10px;">\u26A0\uFE0F</div>' +
+        '<h2 style="color:#c0392b;margin:0 0 12px;font-size:1.3rem;">La app ya est\u00E1 abierta en otra ventana</h2>' +
+        '<p style="color:#2c3e50;font-size:0.95rem;line-height:1.5;margin:0 0 22px;">' +
+          'Para no perder datos, usa <b>solo una</b> ventana a la vez. Lo m\u00E1s seguro es volver a la ' +
+          'que ya ten\u00EDas abierta (b\u00FAscala con <b>Alt+Tab</b>; suele quedar oculta detr\u00E1s de otras ventanas) ' +
+          'y cerrar \u00E9sta.<br><br>Si esa otra ya no la usas, puedes tomar el control aqu\u00ED:' +
+        '</p>' +
+        '<button id="si-takeover" style="width:100%;background:#e67e22;color:#fff;border:none;border-radius:8px;padding:13px;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:10px;">Usar esta ventana</button>' +
+        '<button id="si-cerrar" style="width:100%;background:#ecf0f1;color:#2c3e50;border:none;border-radius:8px;padding:11px;font-size:0.9rem;cursor:pointer;">Cerrar esta pesta\u00F1a</button>' +
+      '</div>';
+    document.body.appendChild(ov);
+    document.getElementById('si-takeover').onclick = function() {
+      /* Tomar el control: avisa a las otras (que se auto-bloquean) y libera ésta. */
+      canal.postMessage({ type: 'takeover', from: TAB_ID });
+      esDueno = true;
+      var o = document.getElementById('single-instance-overlay');
+      if (o) o.remove();
+    };
+    document.getElementById('si-cerrar').onclick = function() {
+      /* Si el navegador no permite cerrar por script, la pesta\u00F1a se queda
+         bloqueada — que es justo lo seguro. */
+      window.close();
+    };
+  }
+
+  canal.onmessage = function(ev) {
+    var msg = ev.data; if (!msg) return;
+    if (msg.type === 'ping') {
+      /* Otra pesta\u00F1a pregunta si hay alguien activo. Si YO soy la due\u00F1a, respondo. */
+      if (esDueno) canal.postMessage({ type: 'pong', to: msg.from, from: TAB_ID });
+    } else if (msg.type === 'pong' && msg.to === TAB_ID) {
+      /* Alguien respondi\u00F3 → YA hay otra ventana due\u00F1a → me bloqueo. */
+      esDueno = false; mostrarBloqueo();
+    } else if (msg.type === 'takeover' && msg.from !== TAB_ID) {
+      /* Otra ventana tom\u00F3 el control → cedo y me bloqueo. */
+      esDueno = false; mostrarBloqueo();
+    }
+  };
+
+  /* Al cargar, preguntar si ya hay una due\u00F1a. Si nadie responde, esta queda como due\u00F1a. */
+  function preguntar() { try { canal.postMessage({ type: 'ping', from: TAB_ID }); } catch (e) {} }
+  if (document.body) preguntar();
+  else window.addEventListener('DOMContentLoaded', preguntar);
+})();
+</script>
 </body>
 </html>
