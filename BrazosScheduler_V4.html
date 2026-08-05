@@ -769,6 +769,7 @@
                         </button>
                         <button onclick="app.openGeneratedInvoices(); closeAllDropdowns();">📑 Enviadas</button>
                         <button onclick="app.openServiceLog(); closeAllDropdowns();">📋 Log</button>
+                        <button onclick="app.openRevisarDuplicados(); closeAllDropdowns();">🔍 Revisar Duplicados</button>
                         <span id="cobrosBadge" style="display:none"></span>
                     </div>
                 </div>
@@ -1230,6 +1231,13 @@
                                         🚫 No facturar por Brazos (se factura por fuera / otro dueño)
                                     </label>
                                     <div style="font-size:0.72rem; color:#856404; margin-top:2px;">El cliente/propiedad sigue programándose normal en el calendario, pero nunca aparece en Pendientes, Urgentes ni se le genera factura desde aquí.</div>
+                                </div>
+                                <div style="grid-column:span 2; background:#e7f3ff; border:1px solid #3b82f6; border-radius:6px; padding:8px; margin-top:6px;">
+                                    <label style="display:flex; align-items:center; gap:6px; font-size:0.82rem; font-weight:700; color:#1e40af; cursor:pointer;">
+                                        <input type="checkbox" id="cliAbrirManual" style="width:auto;">
+                                        ✏️ Abrir sus facturas como Manual (editar descripción y precio)
+                                    </label>
+                                    <div style="font-size:0.72rem; color:#1e40af; margin-top:2px;">Actívala para clientes como 254 Lawns o JGM cuya factura quieres editar a mano. Construcción y servicio único ya se abren en Manual solos, sin necesidad de esto.</div>
                                 </div>
                             </div>
                         </div>
@@ -2156,11 +2164,18 @@ class Scheduler {
             if (ok) {
                 if(btn) btn.style.background = '#f39c12';
                 if(lbl) lbl.textContent = 'Guardando...';
-                this.driveSyncNow().then(() => {
-                    if(btn) btn.style.background = '#27ae60';
-                    const now = new Date();
-                    if(lbl) lbl.textContent = 'Sync ' + now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
-                });
+                // driveSyncNow controla el color FINAL: verde "Sync HH:MM" si subió, o
+                // rojo "⚠️ Error" si la subida falló a medio camino. Antes aquí se ponía
+                // verde SIEMPRE al terminar, lo que BORRABA ese aviso rojo cuando la subida
+                // fallaba (p.ej. el token vencía justo al subir) → parecía que sí subió.
+                // Ahora no lo pisamos: dejamos que driveSyncNow decida el color.
+                this.driveSyncNow();
+            } else {
+                // No se pudo conectar (token vencido y no se pudo renovar en silencio):
+                // AVISAR en vez de quedar callado. Botón en rojo de alerta — el parpadeo se
+                // activa solo — para que se vea que este cambio NO subió a Drive.
+                if(btn) btn.style.background = '#e74c3c';
+                if(lbl) lbl.textContent = '⚠️ Sin subir — reconecta';
             }
         });
         // Mostrar última importación de nómina si existe
@@ -3395,6 +3410,88 @@ class Scheduler {
 
     // Funciones de Lógica
     getMon(d) { let r = new Date(d); r.setDate(r.getDate() - (r.getDay() || 7) + 1); return r; }
+
+    // ¿Este servicio tiene horas reales registradas (check-in de la empleada)?
+    _servicioTieneHoras(s) {
+        try { return !!this._getCheckInOut(s.date, s.id); } catch(e) { return false; }
+    }
+
+    // Detecta servicios que EXCEDEN la recurrencia del cliente (posibles duplicados del
+    // merge de 2 pestañas/PCs, o de mover de fecha/grupo). SÓLO cuenta servicios DE LA SERIE
+    // (con serieId) y SIN horas registradas. Respeta los ÚNICOS (sin serieId) y los que
+    // tienen check-in (se realizaron). NO borra nada — sólo devuelve la lista para revisar.
+    _detectarDuplicados() {
+        const porSemana = { 'semanal':1, '2xsemana':2, '3xsemana':3, 'diario':5 };
+        const sospechosos = [];
+        const porCli = {};
+        (this.servs || []).forEach(s => {
+            if (s.cancelled) return;
+            (porCli[s.cliId] = porCli[s.cliId] || []).push(s);
+        });
+        Object.keys(porCli).forEach(cliId => {
+            const cli = (this.clis || []).find(c => String(c.id) === String(cliId));
+            if (!cli) return;
+            const tipo = (cli.type || '').toLowerCase();
+            // Sólo servicios de la SERIE (con serieId) y SIN horas registradas
+            const candidatos = porCli[cliId].filter(s => s.serieId && s.date && !this._servicioTieneHoras(s));
+            if (!candidatos.length) return;
+            const grupos = {};
+            const agregar = (periodo, arr, esperado) => {
+                if (arr.length > esperado) sospechosos.push({
+                    cliente: cli.name || '(sin nombre)', tipo, periodo, esperado,
+                    encontrado: arr.length,
+                    servicios: arr.slice().sort((a,b) => (a.date > b.date ? 1 : -1))
+                });
+            };
+            if (porSemana[tipo]) {
+                candidatos.forEach(s => { const k = this.getMon(new Date(s.date + 'T12:00:00')).toISOString().slice(0,10); (grupos[k] = grupos[k] || []).push(s); });
+                Object.keys(grupos).forEach(k => agregar('Semana del ' + k, grupos[k], porSemana[tipo]));
+            } else if (tipo === 'mensual') {
+                candidatos.forEach(s => { const k = (s.date || '').slice(0,7); (grupos[k] = grupos[k] || []).push(s); });
+                Object.keys(grupos).forEach(k => agregar('Mes ' + k, grupos[k], 1));
+            } else if (tipo === 'quincenal') {
+                candidatos.forEach(s => { const mon = this.getMon(new Date(s.date + 'T12:00:00')); const sem = Math.floor(mon.getTime() / 604800000); const k = Math.floor(sem / 2); (grupos[k] = grupos[k] || []).push(s); });
+                Object.keys(grupos).forEach(k => agregar('Quincena (semana del ' + this.getMon(new Date(grupos[k][0].date + 'T12:00:00')).toISOString().slice(0,10) + ')', grupos[k], 1));
+            }
+            // airbnb, construccion, unico → recurrencia irregular, no se revisan
+        });
+        return sospechosos;
+    }
+
+    // Abre el panel "Revisar servicios duplicados". 1ª versión: SÓLO LISTA, no borra.
+    openRevisarDuplicados() {
+        const sosp = this._detectarDuplicados();
+        let cuerpo;
+        if (!sosp.length) {
+            cuerpo = '<div style="padding:24px; text-align:center; color:#27ae60; font-size:1rem;">✅ Todo cuadra. No se encontraron servicios de más según la recurrencia de cada cliente.</div>';
+        } else {
+            cuerpo = '<div style="padding:4px 0; font-size:0.85rem; color:#555; margin-bottom:8px;">Estos clientes tienen <b>más servicios de los que su recurrencia indica</b>. Revisa cada bloque para ver cuál sobra. Los servicios <b>únicos</b> y los que <b>ya tienen horas registradas</b> NO aparecen aquí (se respetan). Por ahora esto sólo muestra la lista — nada se borra.</div>';
+            sosp.forEach(g => {
+                cuerpo += '<div style="border:1px solid #e0e0e0; border-radius:8px; margin-bottom:10px; overflow:hidden;">' +
+                    '<div style="background:#fdecea; padding:8px 12px; font-weight:700; color:#c0392b; font-size:0.9rem;">' +
+                        g.cliente + ' <span style="font-weight:400; color:#7b241c;">(' + g.tipo + ')</span> — ' + g.periodo +
+                        '<span style="float:right; font-weight:400;">esperado: ' + g.esperado + ' · encontrado: ' + g.encontrado + '</span>' +
+                    '</div><div style="padding:4px 12px;">';
+                g.servicios.forEach(s => {
+                    cuerpo += '<div style="padding:5px 0; border-bottom:1px solid #f2f2f2; font-size:0.85rem;">📅 ' + s.date + ' · grupo: ' + (s.grupo || '-') + ' · $' + (s.price !== undefined ? s.price : '-') + ' <span style="color:#aaa; font-size:0.72rem;">id ' + s.id + '</span></div>';
+                });
+                cuerpo += '</div></div>';
+            });
+        }
+        let ov = document.getElementById('revisarDupOverlay');
+        if (ov) ov.remove();
+        ov = document.createElement('div');
+        ov.id = 'revisarDupOverlay';
+        ov.style.cssText = 'position:fixed; inset:0; z-index:99999; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; padding:20px;';
+        ov.innerHTML = '<div style="background:#fff; border-radius:12px; max-width:640px; width:100%; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 10px 40px rgba(0,0,0,0.3);">' +
+            '<div style="padding:14px 18px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">' +
+                '<h3 style="margin:0; font-size:1.1rem; color:#2c3e50;">🔍 Revisar servicios duplicados</h3>' +
+                '<button onclick="document.getElementById(\'revisarDupOverlay\').remove()" style="background:#ecf0f1; border:none; border-radius:6px; padding:6px 12px; cursor:pointer; font-size:0.9rem;">Cerrar</button>' +
+            '</div>' +
+            '<div style="padding:14px 18px; overflow-y:auto;">' + cuerpo + '</div>' +
+        '</div>';
+        document.body.appendChild(ov);
+    }
     setView(v) {
         this.view = v;
         
@@ -7587,6 +7684,23 @@ class Scheduler {
         this.refreshGeneratedInvoices();
     }
 
+    // Limpia el cliente y las líneas de AMBAS pestañas (Generar y Manual) del modal de
+    // factura. Se llama al abrir una factura para editar, para que la pestaña que NO se
+    // llene no conserve el cliente/datos de la factura ANTERIOR — antes, al cambiar de
+    // pestaña a mano, aparecía otra factura/cliente (riesgo de editar al equivocado).
+    _limpiarPestanasFactura() {
+        const selGen = document.getElementById('invoiceClient');
+        if (selGen) selGen.value = '';
+        const mCli = document.getElementById('manualInvClient');
+        if (mCli) mCli.value = '';
+        const mSearch = document.getElementById('manualInvClientSearch');
+        if (mSearch) mSearch.value = '';
+        const mList = document.getElementById('manualInvItemsList');
+        if (mList) mList.innerHTML = '';
+        const mEmail = document.getElementById('manualInvEmail');
+        if (mEmail) mEmail.value = '';
+    }
+
     openInvoiceForEdit(id) {
         const invoice = (this.generatedInvoices || []).find(inv => 
             (inv.id && inv.id == id) || inv.invoiceNumber == id
@@ -7597,6 +7711,12 @@ class Scheduler {
         this.openInvoice();
 
         setTimeout(() => {
+            // Limpiar AMBAS pestañas ANTES de llenar la que corresponda: así la pestaña que
+            // NO se use no queda con el cliente/datos de otra factura. Antes, al abrir una
+            // factura y cambiar de pestaña a mano, aparecía la factura anterior (p.ej. abrir
+            // Home Abstract y ver a Andrew Hall en la otra pestaña) — riesgo de editar al
+            // cliente equivocado.
+            this._limpiarPestanasFactura();
             // Detectar si es una factura manual (tiene items pero no servicios del calendario)
             // Usar clientIds (la propiedad exacta) cuando exista, no solo el nombre —
             // en clientes multipropiedad como JGM, "el nombre" solo no identifica cuál.
@@ -7613,11 +7733,21 @@ class Scheduler {
             // puede editar la descripción. Por eso se revisa primero la marca `isManual` y,
             // para facturas viejas que no la tienen, si NINGUNA línea está ligada a un
             // servicio del calendario (sin `id`), se trata como manual.
-            const itemsSinVinculo = (invoice.items && invoice.items.length > 0)
-                && !invoice.items.some(it => it && it.id);
-            const isManual = invoice.isManual === true
-                || itemsSinVinculo
-                || invoice.type === 'construccion' || (invoice.items && invoice.items.length > 0 &&
+            // DETECCIÓN Manual/Generada. Se abre en MANUAL (para editar descripción/precio,
+            // con las líneas desglosadas) cuando el CLIENTE es de construcción o de servicio
+            // único, o su ficha tiene marcada la casilla "Abrir facturas como Manual" (254,
+            // JGM-casa); o la factura es de construcción; o (respaldo) no hay NINGÚN servicio
+            // del cliente en el rango (manuales puras sin nada en el calendario).
+            // Ya NO se usa la marca `isManual` (se contaminó al usar "Editar como Manual" en
+            // facturas generadas), ni "líneas sin id" (daba falso positivo: Home Abstract es
+            // generada real pero sus líneas no guardaron id).
+            const _cliFactura = (this.clis || []).find(c => invClientIds.includes(String(c.id)));
+            const _tipoCli = _cliFactura ? (_cliFactura.serviceType || '') : '';
+            const _clienteEsManual = !!(_cliFactura && (_cliFactura.abrirManual === true
+                || _tipoCli === 'construccion' || _tipoCli === 'unico'));
+            const isManual = _clienteEsManual
+                || invoice.type === 'construccion'
+                || (invoice.items && invoice.items.length > 0 &&
                 !this.servs.some(s => invClientIds.includes(String(s.cliId)) &&
                     s.date >= invoice.startDate && s.date <= invoice.endDate));
 
@@ -7669,7 +7799,7 @@ class Scheduler {
                 // no se cargaba nada aquí, así que al editar una factura el checkbox quedaba
                 // como estuviera de la vez anterior y la factura salía SIN impuestos aunque
                 // el cliente sí los cobre.
-                this._cargarImpuestoDelCliente(cli, 'manualInvApplyTax', 'manualInvTaxRate', 'toggleManualTaxField');
+                this._cargarImpuestoDeFactura(invoice, cli, 'manualInvApplyTax', 'manualInvTaxRate', 'toggleManualTaxField');
                 const hiddenNum = document.getElementById('editingInvoiceNumber');
                 if (hiddenNum) hiddenNum.value = invoice.invoiceNumber;
                 this._updateEditingInvoiceBadge();
@@ -7698,7 +7828,7 @@ class Scheduler {
                 const _cliGen = (invoice.clientIds && invoice.clientIds.length > 0)
                     ? this.clis.find(c => String(c.id) === String(invoice.clientIds[0]))
                     : this.clis.find(c => c.name === invoice.clientName);
-                this._cargarImpuestoDelCliente(_cliGen, 'invoiceApplyTax', 'invoiceTaxRate', 'toggleTaxField');
+                this._cargarImpuestoDeFactura(invoice, _cliGen, 'invoiceApplyTax', 'invoiceTaxRate', 'toggleTaxField');
                 const hiddenNum = document.getElementById('editingInvoiceNumber');
                 if (hiddenNum) hiddenNum.value = invoice.invoiceNumber;
                 this._updateEditingInvoiceBadge();
@@ -7716,6 +7846,27 @@ class Scheduler {
         chk.checked = cli.cobraImpuestos !== false;
         if (rate) rate.value = parseFloat(cli.taxRate) || 8.25;
         if (typeof this[nombreToggle] === 'function') this[nombreToggle]();
+    }
+
+    // Pone el checkbox y la tasa de impuesto según LA FACTURA MISMA (su invoiceConfig).
+    // Así, al reeditar, la factura MANDA sobre su propio impuesto y ya NO se re-marca desde
+    // el perfil del cliente. El perfil NUNCA se modifica aquí. Sólo si la factura no guardó
+    // su decisión (facturas viejas de antes de este arreglo) se cae al perfil como respaldo.
+    _cargarImpuestoDeFactura(invoice, cli, idCheckbox, idTasa, nombreToggle) {
+        const cfg = invoice && invoice.invoiceConfig;
+        // ¿La factura ya tiene su propia decisión de impuesto guardada?
+        if (cfg && cfg.applyTax !== undefined && cfg.applyTax !== null) {
+            const chk = document.getElementById(idCheckbox);
+            const rate = document.getElementById(idTasa);
+            if (chk) chk.checked = !!cfg.applyTax;
+            if (rate) rate.value = (cfg.taxRate !== undefined && cfg.taxRate !== null && cfg.taxRate !== '')
+                ? parseFloat(cfg.taxRate)
+                : (parseFloat(cli && cli.taxRate) || 8.25);
+            if (typeof this[nombreToggle] === 'function') this[nombreToggle]();
+            return;
+        }
+        // Factura vieja sin decisión propia → respaldo: el perfil del cliente
+        this._cargarImpuestoDelCliente(cli, idCheckbox, idTasa, nombreToggle);
     }
 
     // Muestra/oculta el indicador de "Editando factura #XXXX" en el encabezado, según si
@@ -9377,6 +9528,7 @@ Motivo de cancelación (opcional):`);
     deleteGasto(id) {
         if (!confirm('¿Estás seguro de eliminar este gasto?')) return;
         
+        this._tombstone('gastos', id);   // lápida: que no reviva al sincronizar con la otra PC
         this.gastos = this.gastos.filter(g => g.id !== id);
         this.save();
         this.refreshGastos();
@@ -10468,6 +10620,7 @@ Motivo de cancelación (opcional):`);
                 const taxRate = document.getElementById('cliTaxRate') ? parseFloat(document.getElementById('cliTaxRate').value) || 8.25 : (this.clis[idx].taxRate || 8.25);
                 const cobraImpuestos = document.getElementById('cliApplyTax') ? document.getElementById('cliApplyTax').checked : (this.clis[idx].cobraImpuestos !== false);
                 const excludeInvoicing = document.getElementById('cliExcludeInvoicing') ? document.getElementById('cliExcludeInvoicing').checked : (this.clis[idx].excludeInvoicing || false);
+                const abrirManual = document.getElementById('cliAbrirManual') ? document.getElementById('cliAbrirManual').checked : (this.clis[idx].abrirManual || false);
                 const servicePaused = document.getElementById('cliServicePaused') ? document.getElementById('cliServicePaused').checked : (this.clis[idx].servicePaused || false);
                 const pausedSince = document.getElementById('cliPausedSince') ? (document.getElementById('cliPausedSince').value || '') : (this.clis[idx].pausedSince || '');
 
@@ -10518,6 +10671,7 @@ Motivo de cancelación (opcional):`);
                         c.taxRate = taxRate;
                         c.cobraImpuestos = cobraImpuestos;
                         c.excludeInvoicing = excludeInvoicing;
+                        c.abrirManual = abrirManual;
                         c.servicePaused = servicePaused;
                         c.pausedSince = pausedSince;
                         if (stripeCustomerId) c.stripeCustomerId = stripeCustomerId;
@@ -10608,7 +10762,7 @@ Motivo de cancelación (opcional):`);
                         id: this.clis[idx].id,
                         name, propId, price, tel, email, address, city, zip,
                         type, serviceType, billingPeriod, invoicingType,
-                        excludeInvoicing,
+                        excludeInvoicing, abrirManual,
                         taxRate, cobraImpuestos,
                         servicePaused, pausedSince
                     };
@@ -10700,6 +10854,7 @@ Motivo de cancelación (opcional):`);
             const taxRate = document.getElementById('cliTaxRate') ? parseFloat(document.getElementById('cliTaxRate').value) || 8.25 : 8.25;
             const cobraImpuestos = document.getElementById('cliApplyTax') ? document.getElementById('cliApplyTax').checked : true;
             const excludeInvoicingNew = document.getElementById('cliExcludeInvoicing') ? document.getElementById('cliExcludeInvoicing').checked : false;
+            const abrirManualNew = document.getElementById('cliAbrirManual') ? document.getElementById('cliAbrirManual').checked : false;
             const servicePausedNew = document.getElementById('cliServicePaused') ? document.getElementById('cliServicePaused').checked : false;
             const pausedSinceNew = document.getElementById('cliPausedSince') ? (document.getElementById('cliPausedSince').value || '') : '';
             const newCli = {
@@ -10721,6 +10876,7 @@ Motivo de cancelación (opcional):`);
                 taxRate: taxRate,
                 cobraImpuestos: cobraImpuestos,
                 excludeInvoicing: excludeInvoicingNew,
+                abrirManual: abrirManualNew,
                 servicePaused: servicePausedNew,
                 pausedSince: pausedSinceNew,
             };
@@ -10774,6 +10930,9 @@ Motivo de cancelación (opcional):`);
             }
             if (document.getElementById('cliExcludeInvoicing')) {
                 document.getElementById('cliExcludeInvoicing').checked = cli.excludeInvoicing || false;
+            }
+            if (document.getElementById('cliAbrirManual')) {
+                document.getElementById('cliAbrirManual').checked = cli.abrirManual || false;
             }
             if (document.getElementById('cliServicePaused')) {
                 document.getElementById('cliServicePaused').checked = cli.servicePaused || false;
@@ -10834,6 +10993,12 @@ Motivo de cancelación (opcional):`);
         this.clis  = (this.clis  || []).filter(c => !dead.has('clis:'  + String(c.id)));
         this.servs = (this.servs || []).filter(s => !dead.has('servs:' + String(s.id)));
         this.emps  = (this.emps  || []).filter(e => !dead.has('emps:'  + String(e.id)));
+        // Mismos que arriba, extendido a gastos/estimados/catálogo (Ago 1) para que un
+        // borrado no reviva al fusionar con la otra PC. Nómina se deja fuera a propósito
+        // (su id es compuesto y se tratará aparte).
+        this.gastos         = (this.gastos         || []).filter(g => !dead.has('gastos:'         + String(g.id)));
+        this.estimates      = (this.estimates      || []).filter(e => !dead.has('estimates:'      + String(e.id)));
+        this.serviceCatalog = (this.serviceCatalog || []).filter(s => !dead.has('serviceCatalog:' + String(s.id)));
     }
 
     delCli(id) {
@@ -12110,6 +12275,7 @@ Motivo de cancelación (opcional):`);
     }
     deleteServiceCatalogItem(id) {
         if (!confirm('¿Eliminar este tipo de servicio del catálogo?')) return;
+        this._tombstone('serviceCatalog', id);   // lápida: que no reviva al sincronizar con la otra PC
         this.serviceCatalog = this.serviceCatalog.filter(s => s.id !== id);
         this.save();
         this.renderServiceCatalog();
@@ -12239,6 +12405,7 @@ Motivo de cancelación (opcional):`);
 
     deleteEstimate(id) {
         if (!confirm('¿Eliminar este estimado? Esta acción no se puede deshacer.')) return;
+        this._tombstone('estimates', id);   // lápida: que no reviva al sincronizar con la otra PC
         this.estimates = (this.estimates || []).filter(e => e.id !== id);
         this.save();
         this.renderEstimatesList();
@@ -13225,8 +13392,16 @@ Motivo de cancelación (opcional):`);
             const lastPrice = rows.length ? rows[rows.length - 1].querySelector('.manualInvPrice') : null;
             if (lastPrice) lastPrice.value = parseFloat(client.price) || 0;
         }
-        // Impuesto del perfil.
-        this._cargarImpuestoDelCliente(client, 'manualInvApplyTax', 'manualInvTaxRate', 'toggleManualTaxField');
+        // Impuesto: si esta conversión viene de una factura YA registrada (editingInvoiceNumber
+        // tiene valor), respetar SU decisión de impuesto — la factura manda, no se re-marca del
+        // perfil. Si es una factura NUEVA, usar el perfil del cliente como punto de partida.
+        const _editNumC = parseInt(document.getElementById('editingInvoiceNumber')?.value || '');
+        const _facEditC = _editNumC ? (this.generatedInvoices || []).find(i => i.invoiceNumber === _editNumC) : null;
+        if (_facEditC) {
+            this._cargarImpuestoDeFactura(_facEditC, client, 'manualInvApplyTax', 'manualInvTaxRate', 'toggleManualTaxField');
+        } else {
+            this._cargarImpuestoDelCliente(client, 'manualInvApplyTax', 'manualInvTaxRate', 'toggleManualTaxField');
+        }
         this.updateManualInvoiceTotals?.();
         // Marcar que esta factura es manual, para que al reabrirla vuelva a Manual.
         if (window.currentPDFData) window.currentPDFData._isManual = true;
@@ -13944,13 +14119,29 @@ Motivo de cancelación (opcional):`);
 
         const estadoAntes = existing.status;
 
-        // Actualizar SOLO los datos — el estado NO se toca
+        // Actualizar los datos editables (fechas, total, líneas, impuestos).
         existing.invoiceConfig = pdfData.invoiceConfig || existing.invoiceConfig;
         if (pdfData.serviceCount !== undefined) existing.serviceCount = pdfData.serviceCount;
         if (pdfData.total !== undefined && pdfData.total !== null) existing.total = pdfData.total;
         if (pdfData.startDate) existing.startDate = pdfData.startDate;
         if (pdfData.endDate) existing.endDate = pdfData.endDate;
         if (pdfData._services) existing.items = this.buildInvoiceItems(pdfData._services, pdfData.client);
+
+        // Recalcular el estatus SOLO hacia lo evidente, tras cambiar el total:
+        //   pagos cubren el total → pagada · hay pagos pero no cubren → parcial · sin pagos → NO se toca.
+        // Salvaguardas: nunca tocar CANCELADAS ni facturas por STRIPE (se manejan solas); centavos vía _cubreTotal.
+        const _esStripe = (existing.paymentMethod || '').toLowerCase().includes('stripe')
+            || (existing.payments || []).some(p => (p.method || '').toLowerCase().includes('stripe'));
+        if (existing.status !== 'cancelada' && !_esStripe) {
+            const _totalPaid = (existing.payments && existing.payments.length)
+                ? existing.payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0)
+                : parseFloat(existing.paidAmount || 0);
+            if (_totalPaid > 0) {
+                existing.status = this._cubreTotal(_totalPaid, existing.total) ? 'pagada' : 'parcial';
+            }
+            // si no hay pagos (_totalPaid === 0) → el estatus se queda como está
+        }
+
         existing.updatedAt = new Date().toISOString();
 
         this.save();
@@ -13959,10 +14150,11 @@ Motivo de cancelación (opcional):`);
         this.closeInvoice?.();
 
         const periodo = `${existing.startDate} → ${existing.endDate}`;
+        const _estadoCambio = existing.status !== estadoAntes;
         alert(`💾 Cambios guardados en la factura #${invoiceNumber.toString().padStart(4, '0')}\n\n` +
               `Período: ${periodo}\n` +
               `Total: $${parseFloat(existing.total || 0).toFixed(2)}\n` +
-              `Estado: ${estadoAntes} (sin cambios)`);
+              `Estado: ${existing.status}${_estadoCambio ? ' (actualizado desde: ' + estadoAntes + ')' : ' (sin cambios)'}`);
     }
 
     saveAsEnviada() {
@@ -17673,6 +17865,7 @@ Motivo de cancelación (opcional):`);
                 localStorage.setItem('v35_emps', JSON.stringify(this.emps || []));
                 if (data.dismissedServiceIds) { this.dismissedServiceIds = data.dismissedServiceIds; localStorage.setItem('v35_dismissedServiceIds', JSON.stringify(this.dismissedServiceIds)); }
                 if (data.collectionNotes) { this.collectionNotes = data.collectionNotes; localStorage.setItem('v35_collectionNotes', JSON.stringify(this.collectionNotes)); }
+                if (data.cellNotes)        localStorage.setItem('brazos_cellNotes', JSON.stringify(data.cellNotes));
                 if (data.nominaTotales)    { this.nominaTotales = data.nominaTotales; localStorage.setItem('v35_nominaTotales', JSON.stringify(this.nominaTotales)); }
                 if (data.nominaPrecios)    localStorage.setItem('brazos_nomina_precios', JSON.stringify(data.nominaPrecios));
                 if (data.nominaSemanas)    localStorage.setItem('brazos_nomina_semanas', JSON.stringify(data.nominaSemanas));
@@ -17711,6 +17904,7 @@ Motivo de cancelación (opcional):`);
                 dismissedServiceIds: this.dismissedServiceIds || [],
                 deletedIds: this.deletedIds || [],
                 collectionNotes: this.collectionNotes || {},
+                cellNotes: JSON.parse(localStorage.getItem('brazos_cellNotes') || '{}'),
                 serviceCatalog: this.serviceCatalog || [],
                 estimates: this.estimates || [],
             };
@@ -17722,6 +17916,7 @@ Motivo de cancelación (opcional):`);
                 dismissedServiceIds: data.dismissedServiceIds || [],
                 deletedIds: data.deletedIds || [],
                 collectionNotes: data.collectionNotes || {},
+                cellNotes: data.cellNotes || {},
                 serviceCatalog: data.serviceCatalog || [],
                 estimates: data.estimates || [],
             };
@@ -17812,6 +18007,12 @@ Motivo de cancelación (opcional):`);
             this.deletedIds = [...new Set([...(winner.deletedIds||[]), ...(loser.deletedIds||[])])];
             this._applyTombstones();
             this.collectionNotes = Object.assign({}, loser.collectionNotes || {}, winner.collectionNotes || {});
+            // Notas generales del calendario (viven en localStorage, no en this.). Igual que
+            // collectionNotes: se juntan las de ambas PCs; si la MISMA celda se anotó distinto
+            // en las dos, gana la del lado ganador. Las de Airbnb NO van aquí: son campo del
+            // servicio y ya viajan con él.
+            const _cellMerged = Object.assign({}, loser.cellNotes || {}, winner.cellNotes || {});
+            localStorage.setItem('brazos_cellNotes', JSON.stringify(_cellMerged));
             this.pendingInvoices = this.pendingInvoices.filter(p => !this.dismissedPendingKeys.includes(p.periodKey));
             this.pendingInvoices = this.pendingInvoices.filter(p =>
                 !(p.serviceIds && p.serviceIds.some(sid => this.dismissedServiceIds.includes(sid)))
