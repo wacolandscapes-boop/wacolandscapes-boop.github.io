@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Brazos Scheduler v56.0</title>
+    <title>Brazos Scheduler v57.0</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://accounts.google.com/gsi/client" async></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -3465,7 +3465,7 @@ class Scheduler {
         if (!sosp.length) {
             cuerpo = '<div style="padding:24px; text-align:center; color:#27ae60; font-size:1rem;">✅ Todo cuadra. No se encontraron servicios de más según la recurrencia de cada cliente.</div>';
         } else {
-            cuerpo = '<div style="padding:4px 0; font-size:0.85rem; color:#555; margin-bottom:8px;">Estos clientes tienen <b>más servicios de los que su recurrencia indica</b>. Revisa cada bloque para ver cuál sobra. Los servicios <b>únicos</b> y los que <b>ya tienen horas registradas</b> NO aparecen aquí (se respetan). Por ahora esto sólo muestra la lista — nada se borra.</div>';
+            cuerpo = '<div style="padding:4px 0; font-size:0.85rem; color:#555; margin-bottom:8px;">Estos clientes tienen <b>más servicios de los que su recurrencia indica</b>. Revisa cada bloque para ver cuál sobra. Los servicios <b>únicos</b> y los que <b>ya tienen horas registradas</b> NO aparecen aquí (se respetan). <b>Marca la casilla</b> de los que sobran y usa <b>🗑️ Borrar seleccionados</b> abajo.</div>';
             sosp.forEach(g => {
                 cuerpo += '<div style="border:1px solid #e0e0e0; border-radius:8px; margin-bottom:10px; overflow:hidden;">' +
                     '<div style="background:#fdecea; padding:8px 12px; font-weight:700; color:#c0392b; font-size:0.9rem;">' +
@@ -3473,7 +3473,9 @@ class Scheduler {
                         '<span style="float:right; font-weight:400;">esperado: ' + g.esperado + ' · encontrado: ' + g.encontrado + '</span>' +
                     '</div><div style="padding:4px 12px;">';
                 g.servicios.forEach(s => {
-                    cuerpo += '<div style="padding:5px 0; border-bottom:1px solid #f2f2f2; font-size:0.85rem;">📅 ' + s.date + ' · grupo: ' + (s.grupo || '-') + ' · $' + (s.price !== undefined ? s.price : '-') + ' <span style="color:#aaa; font-size:0.72rem;">id ' + s.id + '</span></div>';
+                    cuerpo += '<label style="display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid #f2f2f2; font-size:0.85rem; cursor:pointer;">' +
+                        '<input type="checkbox" class="dup-chk" value="' + String(s.id) + '">' +
+                        '<span>📅 ' + s.date + ' · grupo: ' + (s.grupo || '-') + ' · $' + (s.price !== undefined ? s.price : '-') + ' <span style="color:#aaa; font-size:0.72rem;">id ' + s.id + '</span></span></label>';
                 });
                 cuerpo += '</div></div>';
             });
@@ -3488,9 +3490,32 @@ class Scheduler {
                 '<h3 style="margin:0; font-size:1.1rem; color:#2c3e50;">🔍 Revisar servicios duplicados</h3>' +
                 '<button onclick="document.getElementById(\'revisarDupOverlay\').remove()" style="background:#ecf0f1; border:none; border-radius:6px; padding:6px 12px; cursor:pointer; font-size:0.9rem;">Cerrar</button>' +
             '</div>' +
-            '<div style="padding:14px 18px; overflow-y:auto;">' + cuerpo + '</div>' +
+            '<div style="padding:14px 18px; overflow-y:auto; flex:1;">' + cuerpo + '</div>' +
+            (sosp.length ? '<div style="padding:12px 18px; border-top:1px solid #eee; display:flex; justify-content:space-between; align-items:center; gap:10px;">' +
+                '<span style="font-size:0.8rem; color:#888;">Marca los que sobran y bórralos.</span>' +
+                '<button onclick="app._borrarDuplicadosSeleccionados()" style="background:#e74c3c; color:#fff; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:0.9rem; font-weight:600;">🗑️ Borrar seleccionados</button>' +
+            '</div>' : '') +
         '</div>';
         document.body.appendChild(ov);
+    }
+
+    // Borra los servicios marcados en el panel de duplicados. Deja lápida (no reviven al
+    // sincronizar con la otra PC) y refresca calendario + el propio panel. Con confirmación.
+    _borrarDuplicadosSeleccionados() {
+        const chks = Array.from(document.querySelectorAll('#revisarDupOverlay .dup-chk:checked'));
+        if (!chks.length) { alert('Selecciona al menos un servicio para borrar.'); return; }
+        const ids = chks.map(c => c.value);
+        if (!confirm('🗑️ ¿Borrar ' + ids.length + ' servicio(s) seleccionado(s)?\n\nDeja lápida (no reviven al sincronizar) y NO se puede deshacer.')) return;
+        const idSet = new Set(ids.map(String));
+        ids.forEach(id => this._tombstone('servs', id));
+        this.servs = (this.servs || []).filter(s => !idSet.has(String(s.id)));
+        this.save();
+        this.render();
+        const fm = document.getElementById('financeModal');
+        if (fm && fm.style.display === 'block') this.refreshFinance();
+        alert('✅ ' + ids.length + ' servicio(s) borrado(s).');
+        // Recalcular y volver a mostrar el panel para ver qué queda
+        this.openRevisarDuplicados();
     }
     setView(v) {
         this.view = v;
@@ -15830,9 +15855,9 @@ Motivo de cancelación (opcional):`);
     
     // CSV FUNCTIONS
     downloadClientTemplate() {
-        const csv = 'Nombre,Dirección,Ciudad,ZIP,Teléfono,PropiedadID,Precio,Tipo\n' +
-                   'Ejemplo Cliente,123 Main St,555-1234,CASA-001,150,semanal\n' +
-                   'Otro Cliente,456 Oak Ave,555-5678,APT-002,200,mensual';
+        const csv = 'Nombre,Dirección,Ciudad,ZIP,Teléfono,Email,PropiedadID,Precio,Tipo\n' +
+                   'Ejemplo Cliente,123 Main St,Waco,76712,555-1234,cliente@ejemplo.com,CASA-001,150,semanal\n' +
+                   'Otro Cliente,456 Oak Ave,Woodway,76712,555-5678,,APT-002,200,mensual';
         
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
@@ -15851,9 +15876,9 @@ Motivo de cancelación (opcional):`);
             return;
         }
         
-        let csv = 'Nombre,Dirección,Teléfono,PropiedadID,Precio,Tipo\n';
+        let csv = 'Nombre,Dirección,Ciudad,ZIP,Teléfono,Email,PropiedadID,Precio,Tipo\n';
         this.clis.forEach(c => {
-            csv += `"${c.name}","${c.address || ''}","${c.city || ''}","${c.zip || ''}","${c.phone || ''}","${c.propId || ''}","${c.price || ''}","${c.type}"\n`;
+            csv += `"${c.name}","${c.address || ''}","${c.city || ''}","${c.zip || ''}","${c.tel || c.phone || ''}","${c.email || ''}","${c.propId || ''}","${c.price || ''}","${c.type}"\n`;
         });
         
         const blob = new Blob([csv], { type: 'text/csv' });
@@ -15892,32 +15917,39 @@ Motivo de cancelación (opcional):`);
                     const newClients = [];
                     let errors = 0;
                     
+                    // Parser robusto: respeta comillas y CAPTURA campos vacíos (el regex viejo
+                    // se saltaba los vacíos y desalineaba). 9 columnas:
+                    // Nombre,Dirección,Ciudad,ZIP,Teléfono,Email,PropiedadID,Precio,Tipo
+                    const parseCSVLine = (ln) => {
+                        const out = []; let cur = ''; let inQ = false;
+                        for (let i = 0; i < ln.length; i++) {
+                            const ch = ln[i];
+                            if (ch === '"') {
+                                if (inQ && ln[i+1] === '"') { cur += '"'; i++; }
+                                else inQ = !inQ;
+                            } else if (ch === ',' && !inQ) { out.push(cur); cur = ''; }
+                            else cur += ch;
+                        }
+                        out.push(cur);
+                        return out.map(v => v.trim());
+                    };
                     dataLines.forEach((line, index) => {
                         try {
-                            // Parse CSV line (handle quotes)
-                            const matches = line.match(/(".*?"|[^,]+)(?=\s*,|\s*$)/g);
-                            if (!matches || matches.length < 6) {
-                                errors++;
-                                return;
-                            }
-                            
-                            const clean = matches.map(m => m.replace(/^"|"$/g, '').trim());
-                            
+                            const clean = parseCSVLine(line);
+                            if (!clean[0]) { errors++; return; }
                             const client = {
                                 id: Date.now() + index,
                                 name: clean[0],
                                 address: clean[1] || '',
-                                phone: clean[2] || '',
-                                propId: clean[3] || '',
-                                price: parseFloat(clean[4]) || 0,
-                                type: clean[5] || 'semanal'
+                                city: clean[2] || '',
+                                zip: clean[3] || '',
+                                phone: clean[4] || '',
+                                email: clean[5] || '',
+                                propId: clean[6] || '',
+                                price: parseFloat(clean[7]) || 0,
+                                type: clean[8] || 'semanal'
                             };
-                            
-                            if (client.name) {
-                                newClients.push(client);
-                            } else {
-                                errors++;
-                            }
+                            newClients.push(client);
                         } catch (err) {
                             errors++;
                         }
@@ -15939,7 +15971,7 @@ Motivo de cancelación (opcional):`);
                     
                     this.clis = [...this.clis, ...newClients];
                     localStorage.setItem('v35_clis', JSON.stringify(this.clis));
-                    this.renderClis();
+                    this.renderCat(); this.refreshSels(); this.render();
                     
                     alert(`✅ ¡${newClients.length} clientes importados correctamente!` +
                          (errors > 0 ? `\n\n⚠️ ${errors} líneas con errores fueron omitidas` : ''));
