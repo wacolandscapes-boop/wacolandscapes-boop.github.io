@@ -6808,7 +6808,7 @@ class Scheduler {
                         // Antes la fecha del pago SOLO se mostraba en las pagadas: en las
                         // PARCIALES no aparecía, y parecía que no se hubiera guardado.
                         const d = inv.paidAt.split('T')[0].split('-');
-                        const icono = {cash:'💵',check:'🏦',credit:'💳',zelle:'📱'}[inv.paymentMethod]
+                        const icono = {cash:'💵',check:'🏦',credit:'💳',zelle:'📱',ach:'🏛️'}[inv.paymentMethod]
                                       || (String(inv.paymentMethod||'').includes('Stripe') ? '💳 Stripe' : '💰');
                         const color = inv.status==='pagada' ? '#27ae60' : '#d4a017';
                         return `<div style="font-size:0.7rem;color:${color};margin-top:2px;">📅 ${d[1]}/${d[2]}/${d[0].slice(2)}${inv.paymentMethod ? ' · '+icono : ''}</div>`;
@@ -7279,7 +7279,7 @@ class Scheduler {
         const el = document.getElementById('cobroPaymentHistory');
         if (!el) return;
         const payments = inv.payments || [];
-        const methodIcons = {cash:'💵',check:'🏦',credit:'💳',zelle:'📱',other:'💰'};
+        const methodIcons = {cash:'💵',check:'🏦',credit:'💳',zelle:'📱',ach:'🏛️',other:'💰'};
 
         // ── PAGO HUÉRFANO: resumen sin historial ───────────────────────────────────
         // Si la factura dice que tiene un pago (paidAmount) pero el historial está
@@ -20043,6 +20043,7 @@ document.addEventListener('click', function(e) {
                         <option value="check">🏦 Check</option>
                         <option value="credit">💳 Credit Card</option>
                         <option value="zelle">📱 Zelle</option>
+                        <option value="ach">🏛️ ACH</option>
                         <option value="other">Otro</option>
                     </select>
                 </div>
