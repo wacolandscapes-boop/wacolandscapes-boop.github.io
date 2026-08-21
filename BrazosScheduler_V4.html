@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Brazos Scheduler v57.0</title>
+    <title>Brazos Scheduler v59.0</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://accounts.google.com/gsi/client" async></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -6299,6 +6299,22 @@ class Scheduler {
             periodSel.innerHTML += `<option value="${key}">${fullNames[d.getMonth()]} ${d.getFullYear()}</option>`;
         }
         
+        // Si venimos de "✏️ Editar" una factura, restaurar el filtro que tenía Enviadas
+        // antes de salir a editar (cliente, status, período, búsquedas, fechas) en vez de
+        // dejarlo limpio. Se aplica UNA sola vez y se descarta.
+        if (this._enviadasFiltroGuardado) {
+            const f = this._enviadasFiltroGuardado;
+            document.getElementById('genInvClientText').value = f.clientText;
+            document.getElementById('genInvClient').value = f.client;
+            if (_bSearch) _bSearch.value = f.search;
+            if (_bNum) _bNum.value = f.numSearch;
+            if (_bStatus) _bStatus.value = f.status;
+            if (f.period) periodSel.value = f.period;
+            if (f.start) document.getElementById('genInvStart').value = f.start;
+            if (f.end) document.getElementById('genInvEnd').value = f.end;
+            this._enviadasFiltroGuardado = null;
+        }
+
         this.refreshGeneratedInvoices();
         document.getElementById('generatedInvoicesModal').style.display = 'block';
     }
@@ -6331,6 +6347,22 @@ class Scheduler {
         document.getElementById('genInvClientText').value = name === 'all' ? '' : name;
         document.getElementById('genInvClient').value = name;
         document.getElementById('genInvClientDropdown').style.display = 'none';
+        this.refreshGeneratedInvoices();
+    }
+
+    // "✕ Limpiar" de Enviadas — antes SOLO borraba el número/nombre de búsqueda y dejaba
+    // el filtro de Cliente (autocompletado), Status y Período intactos, así que la lista
+    // seguía viéndose filtrada. Ahora limpia TODOS los filtros de búsqueda (no toca el
+    // rango de fechas Desde/Hasta, que es un filtro aparte).
+    limpiarFiltrosEnviadas() {
+        document.getElementById('genInvSearch').value = '';
+        document.getElementById('genInvNumSearch').value = '';
+        document.getElementById('genInvClientText').value = '';
+        document.getElementById('genInvClient').value = 'all';
+        document.getElementById('genInvStatus').value = 'all';
+        document.getElementById('genInvPeriod').value = 'all';
+        const dropdown = document.getElementById('genInvClientDropdown');
+        if (dropdown) dropdown.style.display = 'none';
         this.refreshGeneratedInvoices();
     }
 
@@ -7262,7 +7294,132 @@ class Scheduler {
             _toggle.style.display = _cubierta ? 'inline-block' : 'none';
             _toggle.textContent = 'Mostrar';
         }
+        // Pago con cheque cubriendo varias facturas del mismo cliente + crédito a favor.
+        this._renderMultiFacturaCheckboxes(inv);
+        this._renderCreditoBanner(inv);
+
         document.getElementById('cobroDetalleModal').style.display = 'flex';
+    }
+
+    // Encuentra la ficha de cliente dueña de una factura (por clientIds, con respaldo por nombre).
+    _getClienteDeFactura(inv) {
+        if (inv.clientIds && inv.clientIds.length > 0) {
+            const porId = (this.clis || []).find(c => String(c.id) === String(inv.clientIds[0]));
+            if (porId) return porId;
+        }
+        return (this.clis || []).find(c => c.name === inv.clientName) || null;
+    }
+
+    // Otras facturas del MISMO cliente con saldo pendiente (no esta, no pagadas/canceladas),
+    // ordenadas de la más antigua a la más reciente — así se reparte el pago en ese orden.
+    _facturasHermanasPendientes(inv) {
+        return (this.generatedInvoices || [])
+            .filter(o => String(o.id) !== String(inv.id)
+                && o.clientName === inv.clientName
+                && !['pagada', 'cancelada'].includes(o.status))
+            .map(o => {
+                const pagado = (o.payments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+                return { inv: o, balance: parseFloat(o.total || 0) - pagado };
+            })
+            .filter(x => x.balance > 0.009)
+            .sort((a, b) => (a.inv.generatedDate || '').localeCompare(b.inv.generatedDate || '')
+                || (a.inv.invoiceNumber || 0) - (b.inv.invoiceNumber || 0));
+    }
+
+    _renderMultiFacturaCheckboxes(inv) {
+        const block = document.getElementById('cobroMultiFacturaBlock');
+        const list = document.getElementById('cobroMultiFacturaList');
+        const hermanas = this._facturasHermanasPendientes(inv);
+        if (hermanas.length === 0) {
+            block.style.display = 'none';
+            list.innerHTML = '';
+            this._actualizarResumenMultiFactura();
+            return;
+        }
+        block.style.display = 'block';
+        list.innerHTML = hermanas.map(({ inv: o, balance }) => {
+            const num = o.invoiceNumber?.toString().padStart(4, '0');
+            return `<label style="display:flex; align-items:center; gap:6px; font-size:0.82rem; color:#333; cursor:pointer;">
+                <input type="checkbox" class="cobro-multi-chk" data-inv-id="${o.id}" onchange="app._actualizarResumenMultiFactura()">
+                #${num} — ${o.generatedDate || ''} — Saldo: $${balance.toFixed(2)}
+            </label>`;
+        }).join('');
+        this._actualizarResumenMultiFactura();
+    }
+
+    // Recalcula en vivo cuánto suman la factura actual + las marcadas, y lo compara con
+    // el monto capturado — solo informativo, no bloquea nada.
+    _actualizarResumenMultiFactura() {
+        const resumen = document.getElementById('cobroMultiFacturaResumen');
+        if (!resumen) return;
+        const id = document.getElementById('cobroDetalleId').value;
+        const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(id));
+        if (!inv) { resumen.textContent = ''; return; }
+        const propioPagado = (inv.payments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+        let totalAdeudado = Math.max(0, parseFloat(inv.total || 0) - propioPagado);
+        document.querySelectorAll('.cobro-multi-chk:checked').forEach(chk => {
+            const o = (this.generatedInvoices || []).find(x => String(x.id) === String(chk.dataset.invId));
+            if (!o) return;
+            const pagado = (o.payments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+            totalAdeudado += Math.max(0, parseFloat(o.total || 0) - pagado);
+        });
+        const monto = parseFloat(document.getElementById('cobroDetallePaidAmount').value || 0);
+        const marcadas = document.querySelectorAll('.cobro-multi-chk:checked').length;
+        if (marcadas === 0) { resumen.textContent = ''; return; }
+        let nota;
+        if (Math.round(monto * 100) === Math.round(totalAdeudado * 100)) {
+            nota = `✅ Cubre exacto las ${marcadas + 1} facturas ($${totalAdeudado.toFixed(2)}).`;
+        } else if (monto < totalAdeudado) {
+            nota = `⚠️ Adeudado de las ${marcadas + 1} facturas: $${totalAdeudado.toFixed(2)}. Con $${monto.toFixed(2)} se cubren las más antiguas y la más reciente queda parcial/pendiente.`;
+        } else {
+            nota = `💰 Adeudado de las ${marcadas + 1} facturas: $${totalAdeudado.toFixed(2)}. Sobran $${(monto - totalAdeudado).toFixed(2)} — se guardarán como crédito del cliente.`;
+        }
+        resumen.textContent = nota;
+    }
+
+    _renderCreditoBanner(inv) {
+        const banner = document.getElementById('cobroCreditoBanner');
+        if (!banner) return;
+        const cli = this._getClienteDeFactura(inv);
+        const credito = parseFloat(cli && cli.creditBalance || 0);
+        if (!cli || credito <= 0.009) {
+            banner.style.display = 'none';
+            banner.innerHTML = '';
+            return;
+        }
+        banner.style.display = 'block';
+        banner.innerHTML = `💳 Este cliente tiene <b>$${credito.toFixed(2)}</b> de crédito a favor (de un sobrepago anterior).
+            <button onclick="app.aplicarCreditoDisponible()" style="margin-left:8px; background:#f39c12; color:#fff; border:none; border-radius:6px; padding:4px 10px; font-size:0.78rem; font-weight:700; cursor:pointer;">Aplicar a esta factura</button>`;
+    }
+
+    // Aplica el crédito a favor del cliente a la factura ABIERTA. Acción explícita
+    // (botón), no automática — Ranu confirma cada vez que se usa el crédito.
+    aplicarCreditoDisponible() {
+        const id = document.getElementById('cobroDetalleId').value;
+        const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(id));
+        if (!inv) return;
+        const cli = this._getClienteDeFactura(inv);
+        if (!cli) return;
+        const credito = parseFloat(cli.creditBalance || 0);
+        if (credito <= 0.009) return;
+        const yaPagado = (inv.payments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+        const saldo = Math.max(0, parseFloat(inv.total || 0) - yaPagado);
+        if (saldo <= 0.009) {
+            alert('Esta factura ya está cubierta — no hay saldo al cual aplicar el crédito.');
+            return;
+        }
+        const aplicar = Math.min(credito, saldo);
+        if (!confirm(`¿Aplicar $${aplicar.toFixed(2)} de crédito a la factura #${inv.invoiceNumber?.toString().padStart(4,'0')}?`)) return;
+        if (!inv.payments) inv.payments = [];
+        inv.payments.push({ date: new Date().toISOString().split('T')[0], amount: aplicar, method: 'credito', ref: 'Saldo a favor del cliente', notes: 'Crédito aplicado' });
+        cli.creditBalance = parseFloat((credito - aplicar).toFixed(2));
+        const totalPaid = inv.payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+        inv.paidAmount = totalPaid.toFixed(2);
+        inv.status = this._cubreTotal(totalPaid, inv.total) ? 'pagada' : 'parcial';
+        this.save();
+        this.openCobroDetalle(id); // refresca el modal con el saldo/estado ya actualizados
+        this.refreshGeneratedInvoices();
+        this.updateCobrosBadge();
     }
 
     // Despliega/oculta el formulario de captura de pago dentro del modal de cobro.
@@ -7442,6 +7599,59 @@ class Scheduler {
         }
     }
 
+    // Reparte UN pago (ej. un cheque) entre la factura abierta y las marcadas con checkbox
+    // del mismo cliente. Orden: de la más ANTIGUA a la más RECIENTE, cada una se cubre
+    // COMPLETA mientras el monto alcance. Si no alcanza, la(s) más reciente(s) quedan
+    // parciales o sin tocar. Si sobra después de cubrir todas, el excedente se guarda como
+    // crédito del cliente (se aplica a mano, desde el botón del banner, en su próxima factura).
+    _guardarPagoMultiFactura(mainInv, amount, paidAt, method, ref, notes, marcadasEls) {
+        const ids = Array.from(marcadasEls).map(chk => chk.dataset.invId);
+        const seleccionadas = (this.generatedInvoices || []).filter(o => ids.includes(String(o.id)));
+        const grupo = [mainInv, ...seleccionadas]
+            .sort((a, b) => (a.generatedDate || '').localeCompare(b.generatedDate || '')
+                || (a.invoiceNumber || 0) - (b.invoiceNumber || 0));
+
+        const numsAplicados = [];
+        let remaining = amount;
+        grupo.forEach(inv => {
+            const yaPagado = (inv.payments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+            const balance = parseFloat(inv.total || 0) - yaPagado;
+            if (balance <= 0.009 || remaining <= 0.009) return;
+            const pago = Math.min(balance, remaining);
+            if (!inv.payments) inv.payments = [];
+            const num = inv.invoiceNumber?.toString().padStart(4, '0');
+            inv.payments.push({
+                date: paidAt, amount: pago, method, ref,
+                notes: (notes ? notes + ' — ' : '') + `Pago múltiple (cheque cubre #${grupo.map(g => g.invoiceNumber?.toString().padStart(4,'0')).join(', #')})`
+            });
+            const totalPaidInv = inv.payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+            inv.paidAmount = totalPaidInv.toFixed(2);
+            inv.paidAt = paidAt;
+            inv.paymentMethod = method;
+            inv.paymentRef = ref;
+            inv._pagoBorradoManual = false;
+            inv.status = this._cubreTotal(totalPaidInv, inv.total) ? 'pagada' : 'parcial';
+            remaining -= pago;
+            numsAplicados.push(`#${num}: $${pago.toFixed(2)}`);
+        });
+
+        let creditoMsg = '';
+        if (remaining > 0.009) {
+            const cli = this._getClienteDeFactura(mainInv);
+            if (cli) {
+                cli.creditBalance = parseFloat((parseFloat(cli.creditBalance || 0) + remaining).toFixed(2));
+                creditoMsg = `\n\nSobraron $${remaining.toFixed(2)} — guardados como crédito de ${cli.name} (total a favor: $${cli.creditBalance.toFixed(2)}).`;
+            }
+        }
+
+        mainInv.sentAt = document.getElementById('cobroDetalleSentAt').value || mainInv.sentAt || null;
+        this.save();
+        alert(`✅ Pago de $${amount.toFixed(2)} repartido:\n${numsAplicados.join('\n')}${creditoMsg}`);
+        document.getElementById('cobroDetalleModal').style.display = 'none';
+        this.refreshGeneratedInvoices();
+        this.updateCobrosBadge();
+    }
+
     saveCobroDetalle() {
         // Candado antiduplicados: un doble clic aquí registraba el MISMO pago dos veces,
         // inflando el total pagado y marcando como "pagada" una factura a medio cobrar.
@@ -7469,6 +7679,16 @@ class Scheduler {
         if (amount > 0 && !paidAt) {
             alert('⚠️ Falta la FECHA DEL PAGO.\n\nCapturaste un monto de $' + amount.toFixed(2) +
                   ' pero sin fecha el pago no se puede registrar.\n\nPon la fecha y vuelve a guardar.');
+            return;
+        }
+
+        // Pago con cheque que cubre TAMBIÉN otras facturas del cliente (checkboxes marcados
+        // en el modal): se va por su propia función y NO por el flujo de una sola factura
+        // (evita los avisos de sobrepago/referencia-duplicada de abajo, que no aplican aquí
+        // porque el reparto entre varias facturas es intencional).
+        const marcadas = document.querySelectorAll('.cobro-multi-chk:checked');
+        if (amount > 0 && paidAt && marcadas.length > 0) {
+            this._guardarPagoMultiFactura(inv, amount, paidAt, method, ref, notes, marcadas);
             return;
         }
 
@@ -7731,6 +7951,20 @@ class Scheduler {
             (inv.id && inv.id == id) || inv.invoiceNumber == id
         );
         if (!invoice) { alert('No se encontró la factura'); return; }
+
+        // Guardar el filtro que tenía Enviadas ANTES de salir a editar, para restaurarlo
+        // al volver (botón 📑 Enviadas) en vez de que se limpie y haya que rebuscar al
+        // mismo cliente. Se usa UNA sola vez, en _openGeneratedInvoicesRaw.
+        this._enviadasFiltroGuardado = {
+            clientText: document.getElementById('genInvClientText')?.value || '',
+            client: document.getElementById('genInvClient')?.value || 'all',
+            search: document.getElementById('genInvSearch')?.value || '',
+            numSearch: document.getElementById('genInvNumSearch')?.value || '',
+            status: document.getElementById('genInvStatus')?.value || 'all',
+            period: document.getElementById('genInvPeriod')?.value || 'all',
+            start: document.getElementById('genInvStart')?.value || '',
+            end: document.getElementById('genInvEnd')?.value || ''
+        };
 
         this.closeGeneratedInvoices();
         this.openInvoice();
@@ -19563,7 +19797,7 @@ document.addEventListener('click', function(e) {
                         placeholder="Buscar por nombre, estado..."
                         style="width:100%; padding:8px 12px 8px 34px; border:2px solid #1a56a0; border-radius:6px; font-size:0.9rem;">
                 </div>
-                <button onclick="document.getElementById('genInvSearch').value=''; document.getElementById('genInvNumSearch').value=''; app.refreshGeneratedInvoices();" 
+                <button onclick="app.limpiarFiltrosEnviadas();" 
                     class="btn" style="padding:8px 12px; background:#e74c3c; color:white; font-size:0.85rem;">
                     ✕ Limpiar
                 </button>
@@ -19998,6 +20232,16 @@ document.addEventListener('click', function(e) {
             <button onclick="document.getElementById('cobroDetalleModal').style.display='none'" style="background:none; border:none; font-size:1.4rem; cursor:pointer; color:#999;">✕</button>
         </div>
         <div id="cobroBalanceInfo" style="background:#f8f9fa; border-radius:8px; padding:8px 12px; margin-bottom:12px; font-size:0.85rem; color:#444;"></div>
+        <div id="cobroCreditoBanner" style="display:none; background:#fff8e1; border:1px solid #ffe082; border-left:4px solid #f39c12; border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:0.85rem; color:#7a5b00;"></div>
+        <!-- Un mismo cheque puede cubrir varias facturas de un mismo cliente: se eligen aquí
+             las OTRAS facturas pendientes que también cubre este pago. El monto capturado
+             arriba se reparte de la más ANTIGUA a la más RECIENTE (cada una se cubre completa
+             mientras alcance); lo que sobra al final se guarda como crédito del cliente. -->
+        <div id="cobroMultiFacturaBlock" style="display:none; background:#eef6ff; border:1px solid #cfe3ff; border-radius:8px; padding:10px 12px; margin-bottom:12px;">
+            <div style="font-size:0.82rem; font-weight:700; color:#1d4ed8; margin-bottom:6px;">🧾 Este pago también cubre otras facturas del cliente</div>
+            <div id="cobroMultiFacturaList" style="display:flex; flex-direction:column; gap:4px; max-height:140px; overflow-y:auto;"></div>
+            <div id="cobroMultiFacturaResumen" style="font-size:0.78rem; color:#1d4ed8; margin-top:6px; font-weight:600;"></div>
+        </div>
         <div id="cobroPaymentHistory" style="display:none; background:#f0faf5; border-radius:8px; padding:10px 12px; margin-bottom:12px; border:1px solid #a8e6cf;"></div>
         <input type="hidden" id="cobroDetalleId">
 
@@ -20031,7 +20275,7 @@ document.addEventListener('click', function(e) {
                 </div>
                 <div>
                     <label style="font-size:0.82rem; font-weight:700; color:#444;">Monto pagado ($)</label>
-                    <input type="number" id="cobroDetallePaidAmount" placeholder="0.00" step="0.01" style="width:100%; padding:9px; margin-top:5px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
+                    <input type="number" id="cobroDetallePaidAmount" placeholder="0.00" step="0.01" oninput="app._actualizarResumenMultiFactura()" style="width:100%; padding:9px; margin-top:5px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
                 </div>
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
