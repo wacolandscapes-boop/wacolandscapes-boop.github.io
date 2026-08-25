@@ -1833,7 +1833,29 @@ class Scheduler {
         // Cargar colores personalizados
         this.loadCustomColors();
         this.displayLogo();
-        
+
+        // ✅ AUTO-CORRECCION al abrir: reparar facturas cuyo pago llego por sincronizacion
+        // pero dejo vacios los campos-resumen (fecha/cheque/monto) que muestra la LISTA.
+        // Recalcula esos campos desde payments[] (el detalle si tiene el dato). Arregla al
+        // instante casos como Dante #7754, sin esperar a sincronizar.
+        let _resFix = false;
+        (this.generatedInvoices || []).forEach(inv => {
+            if (inv.status === 'cancelada') return;
+            const pays = inv.payments || [];
+            if (pays.length > 0 && !inv.paidAt) {
+                const ult = pays.reduce((a, b) => (new Date(b.date || 0) >= new Date(a.date || 0) ? b : a), pays[0]);
+                const suma = pays.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+                inv.paidAmount = suma.toFixed(2);
+                if (ult) {
+                    inv.paidAt = ult.date || inv.paidAt;
+                    inv.paymentMethod = ult.method || inv.paymentMethod;
+                    inv.paymentRef = (ult.ref !== undefined && ult.ref !== null) ? ult.ref : inv.paymentRef;
+                }
+                _resFix = true;
+            }
+        });
+        if (_resFix) this.save();
+
         // ✅ MIGRACIÓN: Arreglar clientes sin propId
         this.clis = this.clis.map(c => {
             if(!c.propId || c.propId === '') {
@@ -18365,6 +18387,20 @@ Motivo de cancelación (opcional):`);
                         // SALVAGUARDA: una factura ya "pagada" NO se degrada durante un sync;
                         // solo puede subir a pagada, nunca bajar sola (evita el bug pagada->parcial).
                         inv.status = yaPagada ? 'pagada' : recalculado;
+                        // Recalcular los campos-resumen (fecha/cheque/monto que muestra la LISTA)
+                        // desde los pagos fusionados, para que la LISTA coincida con el detalle.
+                        // Sin esto, un pago que llega por fusion queda en payments[] pero la lista
+                        // no muestra cheque/fecha (le pasaba a Dante #7754).
+                        if ((inv.payments || []).length > 0) {
+                            const ult = inv.payments.reduce((a, b) =>
+                                (new Date(b.date || 0) >= new Date(a.date || 0) ? b : a), inv.payments[0]);
+                            inv.paidAmount = suma.toFixed(2);
+                            if (ult) {
+                                inv.paidAt = ult.date || inv.paidAt;
+                                inv.paymentMethod = ult.method || inv.paymentMethod;
+                                inv.paymentRef = (ult.ref !== undefined && ult.ref !== null) ? ult.ref : inv.paymentRef;
+                            }
+                        }
                     }
                 }
             });
