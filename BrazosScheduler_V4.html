@@ -17757,6 +17757,13 @@ Motivo de cancelación (opcional):`);
         } else {
             this._lockFileId = fileId;
             await this._lockEscribir(fileId, yo);
+            const veniaDeSoloLectura = this._lockReadOnly === true;
+            if (veniaDeSoloLectura) {
+                // Al LIBERARSE el candado, bajar lo ultimo de Drive ANTES de permitir editar,
+                // para no empezar con datos viejos. (driveSyncNow sigue bloqueado aqui porque
+                // _lockReadOnly aun es true, asi que solo baja, no sube.)
+                try { await this.driveDownloadData(); } catch(e) { console.warn('bajada al liberar candado', e); }
+            }
             this._salirSoloLectura();
             this._iniciarLatido();
         }
