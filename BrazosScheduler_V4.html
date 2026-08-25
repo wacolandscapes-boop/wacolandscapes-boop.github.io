@@ -17785,6 +17785,12 @@ Motivo de cancelación (opcional):`);
                 // para no empezar con datos viejos. (driveSyncNow sigue bloqueado aqui porque
                 // _lockReadOnly aun es true, asi que solo baja, no sube.)
                 try { await this.driveDownloadData(); } catch(e) { console.warn('bajada al liberar candado', e); }
+                // La bajada dejo el boton en "Verificando..."; como la subida estaba bloqueada
+                // (solo lectura), nadie lo restablecio. Lo dejamos en el estado normal.
+                try {
+                    const _l = document.getElementById('driveSyncLabel');
+                    if (_l) { const _t = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }); _l.textContent = 'Sync ' + _t; }
+                } catch(e) {}
             }
             this._salirSoloLectura();
             this._iniciarLatido();
