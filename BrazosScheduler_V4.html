@@ -3282,23 +3282,17 @@ class Scheduler {
         const fromGrupo = svc.empId;
 
         if (mode === 'one') {
-            // Eliminar el original y agregar copia desvinculada de la serie.
-            // Los ids llevan un sufijo ALEATORIO además de Date.now(): si se mueven dos
-            // servicios en el mismo milisegundo, 'svc_moved_'+Date.now() les daba el MISMO
-            // id, y luego al mover/editar/borrar uno se borraban los dos (o uno tapaba al
-            // otro al renderizar) — esa era la causa del duplicado intermitente al cambiar
-            // de grupo. El sufijo lo vuelve único, igual que el resto de los ids de la app.
+            // Mover UNA ocurrencia: modificar el servicio EN SU LUGAR (MISMO id) y
+            // desvincularlo de la serie. Antes se borraba el original y se creaba una copia
+            // con id NUEVO ('svc_moved_...'); si el MISMO servicio se movía en dos PCs, cada
+            // una generaba un id distinto y el merge (unión por id) conservaba las DOS ->
+            // duplicado. Manteniendo el MISMO id, el merge por id no puede duplicarlo.
             const _uniq = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-            this._tombstone('servs', svcId);
-            this.servs = this.servs.filter(s => String(s.id) !== String(svcId));
-            const movedSvc = Object.assign({}, svc, {
-                id: 'svc_moved_' + _uniq,
-                date: toDate,
-                empId: toGrupo,
-                grupo: toGrupo,
-                serieId: 'serie_moved_' + _uniq
-            });
-            this.servs.push(movedSvc);
+            svc.date = toDate;
+            svc.empId = toGrupo;
+            svc.grupo = toGrupo;
+            svc.serieId = 'serie_moved_' + _uniq;
+            svc.updatedAt = new Date().toISOString();
         } else if (mode === 'future') {
             // Mover este y todos los futuros — por serieId o por mismo cliente+grupo
             const diffDays = (new Date(toDate) - new Date(fromDate)) / 86400000;
@@ -7411,7 +7405,7 @@ class Scheduler {
         const aplicar = Math.min(credito, saldo);
         if (!confirm(`¿Aplicar $${aplicar.toFixed(2)} de crédito a la factura #${inv.invoiceNumber?.toString().padStart(4,'0')}?`)) return;
         if (!inv.payments) inv.payments = [];
-        inv.payments.push({ date: new Date().toISOString().split('T')[0], amount: aplicar, method: 'credito', ref: 'Saldo a favor del cliente', notes: 'Crédito aplicado' });
+        inv.payments.push({ date: new Date().toISOString().split('T')[0], amount: aplicar, method: 'credito', ref: 'Saldo a favor del cliente', notes: 'Crédito aplicado', updatedAt: new Date().toISOString() });
         cli.creditBalance = parseFloat((credito - aplicar).toFixed(2));
         const totalPaid = inv.payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
         inv.paidAmount = totalPaid.toFixed(2);
@@ -7717,7 +7711,7 @@ class Scheduler {
 
             if (editando) {
                 // ACTUALIZA el pago existente — no agrega otro
-                inv.payments[this._editingPaymentIndex] = { date: paidAt, amount, method, ref, notes };
+                inv.payments[this._editingPaymentIndex] = { date: paidAt, amount, method, ref, notes, updatedAt: new Date().toISOString() };
                 this._editingPaymentIndex = null;
             } else {
                 // Red de seguridad anti-repetición: si YA existe un pago idéntico (misma
@@ -7766,7 +7760,7 @@ class Scheduler {
                         `¿Es correcto?`);
                     if (!seguir2) { this.renderPaymentHistory(inv); return; }
                 }
-                inv.payments.push({ date: paidAt, amount, method, ref, notes });
+                inv.payments.push({ date: paidAt, amount, method, ref, notes, updatedAt: new Date().toISOString() });
             }
             // Calculate total paid
             const totalPaid = inv.payments.reduce((s,p) => s + parseFloat(p.amount||0), 0);
@@ -8154,6 +8148,7 @@ Motivo de cancelación (opcional):`);
         inv.status = 'cancelada';
         inv.cancelledReason = reason || 'Cancelada manualmente';
         inv.cancelledAt = new Date().toISOString().split('T')[0];
+        inv.updatedAt = new Date().toISOString();
         this.save();
         this.refreshGeneratedInvoices();
         this.updateCobrosBadge();
@@ -17705,6 +17700,99 @@ Motivo de cancelación (opcional):`);
             const folder = await createRes.json();
             this.driveFolderId = folder.id;
         }
+        try { await this._candadoCheck(); } catch(e) { console.warn('candado', e); }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // CANDADO CROSS-PC (archivo brazos_lock.json en Drive)
+    // Evita que dos PCs escriban a la vez. La 2a PC que llega entra en SOLO
+    // LECTURA (no sube a Drive) hasta que la 1a cierre. Auto-liberado: si el
+    // "latido" del dueno lleva >2.5 min sin refrescarse, el candado se suelta.
+    // ══════════════════════════════════════════════════════════════════════
+    _lockNombre() { return 'brazos_lock.json'; }
+    _lockStaleMs() { return 150000; } // 2.5 minutos
+
+    async _lockLeer() {
+        try {
+            const r = await fetch(
+                `https://www.googleapis.com/drive/v3/files?q=name='${this._lockNombre()}'+and+'${this.driveFolderId}'+in+parents+and+trashed=false`,
+                { headers: { Authorization: `Bearer ${this.driveToken}` } }
+            );
+            const d = await r.json();
+            if (!d.files || !d.files.length) return { fileId: null, data: null };
+            const fileId = d.files[0].id;
+            const fr = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+                { headers: { Authorization: `Bearer ${this.driveToken}` } });
+            let data = null; try { data = await fr.json(); } catch(e) { data = null; }
+            return { fileId, data };
+        } catch(e) { console.warn('_lockLeer error', e); return { fileId: null, data: null }; }
+    }
+
+    async _lockEscribir(fileId, owner) {
+        const cuerpo = { owner, heartbeat: new Date().toISOString(),
+                         label: (localStorage.getItem('brazos_pcLabel') || '') };
+        const form = new FormData();
+        const metadata = { name: this._lockNombre(), parents: fileId ? undefined : [this.driveFolderId] };
+        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+        form.append('file', new Blob([JSON.stringify(cuerpo)], { type: 'application/json' }));
+        try {
+            await fetch(
+                fileId ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`
+                       : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+                { method: fileId ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${this.driveToken}` }, body: form }
+            );
+        } catch(e) { console.warn('_lockEscribir error', e); }
+    }
+
+    async _candadoCheck() {
+        if (!this.driveToken || !this.driveFolderId) return;
+        const yo = localStorage.getItem('anaCS_deviceId') || 'unknown';
+        const { fileId, data } = await this._lockLeer();
+        const ahora = Date.now();
+        const hb = data && data.heartbeat ? new Date(data.heartbeat).getTime() : 0;
+        const fresco = hb && (ahora - hb) < this._lockStaleMs();
+        const duenoOtro = data && data.owner && data.owner !== yo;
+        if (fresco && duenoOtro) {
+            this._entrarSoloLectura(data.label || 'otra PC');
+        } else {
+            this._lockFileId = fileId;
+            await this._lockEscribir(fileId, yo);
+            this._salirSoloLectura();
+            this._iniciarLatido();
+        }
+    }
+
+    _iniciarLatido() {
+        if (this._latidoInt) return;
+        const yo = localStorage.getItem('anaCS_deviceId') || 'unknown';
+        this._latidoInt = setInterval(async () => {
+            if (this._lockReadOnly) return;
+            const { fileId } = await this._lockLeer();
+            this._lockFileId = fileId;
+            await this._lockEscribir(fileId, yo);
+        }, 30000);
+    }
+
+    _entrarSoloLectura(quien) {
+        this._lockReadOnly = true;
+        let b = document.getElementById('brazosLockBanner');
+        if (!b) {
+            b = document.createElement('div');
+            b.id = 'brazosLockBanner';
+            b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#c0392b;color:#fff;padding:10px 16px;font-weight:700;text-align:center;font-size:0.95rem;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+            document.body.appendChild(b);
+        }
+        b.textContent = '🔒 SOLO LECTURA — Brazos ya esta abierto en otra PC. NO hagas cambios aqui (no se guardaran). Se liberara solo cuando cierres la otra.';
+        if (!this._reintentoInt) {
+            this._reintentoInt = setInterval(() => { this._candadoCheck(); }, 45000);
+        }
+    }
+
+    _salirSoloLectura() {
+        this._lockReadOnly = false;
+        const b = document.getElementById('brazosLockBanner');
+        if (b) b.remove();
+        if (this._reintentoInt) { clearInterval(this._reintentoInt); this._reintentoInt = null; }
     }
 
     // ── MERGE INTELIGENTE (Opción A: unión por id, gana el lado con timestamp global más reciente) ──
@@ -17757,14 +17845,19 @@ Motivo de cancelación (opcional):`);
             const dia = p.date.split('T')[0];
             return 'dam:' + dia + '|' + Math.round(p.amount * 100) + '|' + p.method.toLowerCase();
         };
-        const resultado = [];
-        const vistos = new Set();
+        const porClave = new Map();
         [...(pagosA || []), ...(pagosB || [])].forEach(raw => {
             const p = norm(raw);
             const k = claveDe(p);
-            if (!vistos.has(k)) { vistos.add(k); resultado.push(raw); }
+            const prev = porClave.get(k);
+            if (!prev) { porClave.set(k, raw); return; }
+            // Colision (mismo cheque/ref): conservar el pago EDITADO mas recientemente,
+            // para que una correccion hecha en una PC gane sobre el dato viejo de la otra.
+            const tNew = raw && raw.updatedAt ? new Date(raw.updatedAt).getTime() : 0;
+            const tOld = prev && prev.updatedAt ? new Date(prev.updatedAt).getTime() : 0;
+            if (tNew > tOld) porClave.set(k, raw);
         });
-        return resultado;
+        return [...porClave.values()];
     }
 
     mergeArraysById(winnerArr = [], loserArr = [], idKeys = ['id']) {
@@ -17802,6 +17895,7 @@ Motivo de cancelación (opcional):`);
 
     async driveSyncNow() {
         if (!this.driveConnected || !this.driveFolderId) return;
+        if (this._lockReadOnly) return; // CANDADO: la 2a PC en solo lectura NO sube a Drive
         // ── CANDADO: mientras se está facturando, Drive NO se toca ──────────────
         // Salvo que se pida explícitamente (la sincronización final de la Fase 4, que
         // llama a esta función con el candado ya soltado). Se ignoran aquí los tres
@@ -18232,6 +18326,24 @@ Motivo de cancelación (opcional):`);
                     inv.updatedAt = li.updatedAt;
                 }
             });
+            // #3 CANCELACIONES: si una PC canceló una factura y la otra la tenía activa,
+            // gana la decisión MÁS RECIENTE (por updatedAt). Sin updatedAt (datos viejos),
+            // la cancelación es "pegajosa" (gana) para no perder cancelaciones al sincronizar.
+            mergedInvoices.forEach(inv => {
+                const li = loserInvById[String(inv.id)];
+                if (!li) return;
+                const wCancel = inv.status === 'cancelada';
+                const lCancel = li.status === 'cancelada';
+                if (wCancel === lCancel) return;
+                const tW = inv.updatedAt ? new Date(inv.updatedAt).getTime() : 0;
+                const tL = li.updatedAt ? new Date(li.updatedAt).getTime() : 0;
+                if (lCancel && tL >= tW) {
+                    inv.status = 'cancelada';
+                    inv.cancelledReason = li.cancelledReason || inv.cancelledReason || 'Cancelada';
+                    inv.cancelledAt = li.cancelledAt || inv.cancelledAt;
+                    inv.updatedAt = li.updatedAt || inv.updatedAt;
+                }
+            });
             mergedInvoices.forEach(inv => {
                 const li = loserInvById[String(inv.id)];
                 if (li && (Array.isArray(inv.payments) || Array.isArray(li.payments))) {
@@ -18241,7 +18353,11 @@ Motivo de cancelación (opcional):`);
                     // o parcial, el estado lo refleja. Stripe se maneja aparte abajo.
                     if (inv.status !== 'cancelada') {
                         const suma = (inv.payments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0);
-                        inv.status = (suma > 0 && this._cubreTotal(suma, inv.total)) ? 'pagada' : (suma > 0 ? 'parcial' : (inv.status === 'pagada' || inv.status === 'parcial' ? 'enviada' : inv.status));
+                        const yaPagada = inv.status === 'pagada';
+                        const recalculado = (suma > 0 && this._cubreTotal(suma, inv.total)) ? 'pagada' : (suma > 0 ? 'parcial' : (inv.status === 'pagada' || inv.status === 'parcial' ? 'enviada' : inv.status));
+                        // SALVAGUARDA: una factura ya "pagada" NO se degrada durante un sync;
+                        // solo puede subir a pagada, nunca bajar sola (evita el bug pagada->parcial).
+                        inv.status = yaPagada ? 'pagada' : recalculado;
                     }
                 }
             });
