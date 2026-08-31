@@ -770,6 +770,7 @@
                         <button onclick="app.openGeneratedInvoices(); closeAllDropdowns();">📑 Enviadas</button>
                         <button onclick="app.openServiceLog(); closeAllDropdowns();">📋 Log</button>
                         <button onclick="app.openRevisarDuplicados(); closeAllDropdowns();">🔍 Revisar Duplicados</button>
+                        <button onclick="app.openRevisarFacturasDuplicadas(); closeAllDropdowns();">🧾 Facturas Duplicadas</button>
                         <span id="cobrosBadge" style="display:none"></span>
                     </div>
                 </div>
@@ -3436,6 +3437,126 @@ class Scheduler {
     // merge de 2 pestañas/PCs, o de mover de fecha/grupo). SÓLO cuenta servicios DE LA SERIE
     // (con serieId) y SIN horas registradas. Respeta los ÚNICOS (sin serieId) y los que
     // tienen check-in (se realizaron). NO borra nada — sólo devuelve la lista para revisar.
+    // ── DETECTOR DE FACTURAS DUPLICADAS (distinto del de SERVICIOS) ─────────────
+    // El de arriba (_detectarDuplicados) revisa SERVICIOS del calendario contra la
+    // recurrencia. Éste revisa FACTURAS en generatedInvoices: mismo cliente cuyos
+    // períodos [startDate,endDate] SE CRUZAN y ninguna está cancelada. Nace del bug
+    // de multi-ventana/multi-PC (el merge une por id → dos facturas del mismo período
+    // con id distinto sobreviven las dos). Sólo LISTA + deja CANCELAR con confirmación.
+    _detectarFacturasDuplicadas() {
+        const activos = (this.generatedInvoices || []).filter(i => i.status !== 'cancelada' && i.startDate && i.endDate);
+        const porCli = {};
+        activos.forEach(i => { (porCli[i.clientName] = porCli[i.clientName] || []).push(i); });
+        const overlap = (a, b) => !(a.endDate < b.startDate || b.endDate < a.startDate);
+        const grupos = [];
+        Object.keys(porCli).forEach(cli => {
+            const invs = porCli[cli];
+            const n = invs.length;
+            const visto = new Array(n).fill(false);
+            for (let i = 0; i < n; i++) {
+                if (visto[i]) continue;
+                const cola = [i]; visto[i] = true; const comp = [i];
+                while (cola.length) {
+                    const u = cola.pop();
+                    for (let v = 0; v < n; v++) {
+                        if (!visto[v] && overlap(invs[u], invs[v])) { visto[v] = true; cola.push(v); comp.push(v); }
+                    }
+                }
+                if (comp.length >= 2) {
+                    const items = comp.map(idx => invs[idx])
+                        .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || '') || (a.invoiceNumber || 0) - (b.invoiceNumber || 0));
+                    grupos.push({ cliente: cli, facturas: items });
+                }
+            }
+        });
+        return grupos;
+    }
+
+    openRevisarFacturasDuplicadas() {
+        const grupos = this._detectarFacturasDuplicadas();
+        const fmt = f => { if (!f) return ''; const p = String(f).split('-'); return (p.length === 3) ? (p[1] + '/' + p[2] + '/' + p[0]) : f; };
+        const badge = { pendiente: '#e67e22', enviada: '#2980b9', parcial: '#d4a017', pagada: '#27ae60', vencida: '#e74c3c' };
+        let cuerpo;
+        if (!grupos.length) {
+            cuerpo = '<div style="padding:24px; text-align:center; color:#27ae60; font-size:1rem;">✅ No hay facturas duplicadas. Cada cliente tiene una sola factura por período.</div>';
+        } else {
+            cuerpo = '<div style="padding:4px 0; font-size:0.85rem; color:#555; margin-bottom:8px;">Facturas del <b>mismo cliente</b> cuyos <b>períodos se cruzan</b> (posibles duplicados). Se sugiere <b>conservar la PAGADA</b> y se marca la gemela sin pagar. <b>Nunca</b> se cancela sola una pagada, y cancelar <b>no borra</b>: la deja 🚫 Cancelada (conserva número y rastro). Revisa cada bloque antes de cancelar.</div>';
+            grupos.forEach(g => {
+                const pagadas = g.facturas.filter(i => i.status === 'pagada' || i.status === 'parcial');
+                const keep = pagadas.length ? pagadas[0] : null;
+                const keepNum = keep ? String(keep.invoiceNumber).padStart(4, '0') : '';
+                const variasPagadas = pagadas.length >= 2;
+                const per = fmt(g.facturas[0].startDate) + ' – ' + fmt(g.facturas[g.facturas.length - 1].endDate);
+                cuerpo += '<div style="border:1px solid #e0e0e0; border-radius:8px; margin-bottom:10px; overflow:hidden;">';
+                cuerpo += '<div style="background:#fdecea; padding:8px 12px; font-weight:700; color:#c0392b; font-size:0.9rem;">' + g.cliente + ' <span style="font-weight:400;color:#7b241c;">— período ' + per + '</span></div>';
+                if (variasPagadas) cuerpo += '<div style="padding:6px 12px; background:#fff8e1; color:#8a6d3b; font-size:0.8rem;">⚠️ Dos o más están PAGADAS — revísalas tú; no se marca ninguna.</div>';
+                else if (!keep) cuerpo += '<div style="padding:6px 12px; background:#fff8e1; color:#8a6d3b; font-size:0.8rem;">⚠️ Ninguna está pagada — decide cuál conservar; no se marca ninguna.</div>';
+                cuerpo += '<div style="padding:4px 12px;">';
+                g.facturas.forEach(inv => {
+                    const st = inv.status || '';
+                    const esPagLike = st === 'pagada' || st === 'parcial';
+                    const num = String(inv.invoiceNumber).padStart(4, '0');
+                    const preCheck = (keep && !variasPagadas && !esPagLike);
+                    const esKeep = keep && String(inv.id) === String(keep.id);
+                    const pagado = (inv.payments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0) || parseFloat(inv.paidAmount || 0);
+                    cuerpo += '<label style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #f2f2f2; font-size:0.85rem; cursor:pointer;">';
+                    if (esKeep) {
+                        cuerpo += '<span style="width:16px; text-align:center;">🔒</span>';
+                    } else {
+                        cuerpo += '<input type="checkbox" class="dupfac-chk" data-id="' + inv.id + '" data-keep="' + keepNum + '" ' + (preCheck ? 'checked' : '') + '>';
+                    }
+                    cuerpo += '<span style="flex:1;">#' + num + ' <span style="background:' + (badge[st] || '#95a5a6') + ';color:#fff;padding:1px 6px;border-radius:4px;font-size:0.68rem;">' + st + '</span> · ' + fmt(inv.startDate) + '–' + fmt(inv.endDate) + ' · $' + parseFloat(inv.total || 0).toFixed(2) + (pagado > 0 ? (' · pagado $' + pagado.toFixed(2)) : '') + (esKeep ? ' <b style="color:#27ae60;">← conservar</b>' : '') + '</span>';
+                    cuerpo += '</label>';
+                });
+                cuerpo += '</div></div>';
+            });
+        }
+        let ov = document.getElementById('revisarFacDupOverlay');
+        if (ov) ov.remove();
+        ov = document.createElement('div');
+        ov.id = 'revisarFacDupOverlay';
+        ov.style.cssText = 'position:fixed; inset:0; z-index:99999; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; padding:20px;';
+        ov.innerHTML = '<div style="background:#fff; border-radius:12px; max-width:680px; width:100%; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 10px 40px rgba(0,0,0,0.3);">'
+            + '<div style="padding:14px 18px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">'
+            + '<h3 style="margin:0; font-size:1.1rem; color:#2c3e50;">🧾 Revisar facturas duplicadas</h3>'
+            + '<button onclick="document.getElementById(\'revisarFacDupOverlay\').remove()" style="background:#ecf0f1; border:none; border-radius:6px; padding:6px 12px; cursor:pointer; font-size:0.9rem;">Cerrar</button>'
+            + '</div>'
+            + '<div style="padding:14px 18px; overflow-y:auto; flex:1;">' + cuerpo + '</div>'
+            + (grupos.length ? '<div style="padding:12px 18px; border-top:1px solid #eee; display:flex; justify-content:space-between; align-items:center; gap:10px;">'
+                + '<span style="font-size:0.8rem; color:#888;">Marca las gemelas que sobran y cancélalas.</span>'
+                + '<button onclick="app._cancelarFacturasDuplicadasSeleccionadas()" style="background:#c0392b; color:#fff; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:0.9rem; font-weight:600;">🚫 Cancelar seleccionadas</button>'
+                + '</div>' : '')
+            + '</div>';
+        document.body.appendChild(ov);
+    }
+
+    _cancelarFacturasDuplicadasSeleccionadas() {
+        const chks = Array.from(document.querySelectorAll('.dupfac-chk:checked'));
+        if (!chks.length) { alert('No marcaste ninguna factura para cancelar.'); return; }
+        const objetivos = chks
+            .map(c => ({ inv: (this.generatedInvoices || []).find(i => String(i.id) === String(c.dataset.id)), keep: c.dataset.keep }))
+            .filter(x => x.inv);
+        const pagadas = objetivos.filter(x => x.inv.status === 'pagada' || x.inv.status === 'parcial');
+        if (pagadas.length) {
+            alert('⚠️ Marcaste facturas PAGADAS o PARCIALES (#' + pagadas.map(x => String(x.inv.invoiceNumber).padStart(4, '0')).join(', #') + ').\n\nPor seguridad NO se cancelan desde aquí. Si de verdad hay que cancelar una pagada, hazlo a mano con 🗑️ Cancelar.');
+            return;
+        }
+        const nums = objetivos.map(x => '#' + String(x.inv.invoiceNumber).padStart(4, '0')).join(', ');
+        if (!confirm('¿Cancelar ' + objetivos.length + ' factura(s) duplicada(s)?\n' + nums + '\n\nSe conservan las demás. NO se borran: quedan 🚫 Cancelada (conserva número y rastro de auditoría).')) return;
+        const ahora = new Date();
+        objetivos.forEach(({ inv, keep }) => {
+            inv.status = 'cancelada';
+            inv.cancelledReason = 'Duplicada' + (keep ? (' — se conserva #' + keep) : '') + ' (detector de facturas duplicadas)';
+            inv.cancelledAt = ahora.toISOString().split('T')[0];
+            inv.updatedAt = ahora.toISOString();
+        });
+        this.save();
+        this.refreshGeneratedInvoices();
+        if (this.updateCobrosBadge) this.updateCobrosBadge();
+        alert('✅ Cancelada(s): ' + nums + '\nQuedan como 🚫 Cancelada.');
+        this.openRevisarFacturasDuplicadas();
+    }
+
     _detectarDuplicados() {
         const porSemana = { 'semanal':1, '2xsemana':2, '3xsemana':3, 'diario':5 };
         const sospechosos = [];
@@ -5101,7 +5222,7 @@ class Scheduler {
                         String(s.cliId) === String(propCli.id) && !s.cancelled &&
                         s.date >= backlogStartStr && s.date <= todayStr
                     );
-                    const uninvoiced = propServs.filter(s => !alreadyInvoiced(s.date, propCli.id));
+                    const uninvoiced = propServs.filter(s => !alreadyInvoiced(s.date, propCli.id) && !this._servicioEnFacturaGenerada(s));
                     if (uninvoiced.length === 0) return;
 
                     // Reemplazar la pendiente anterior de esta propiedad con la versión
@@ -5176,6 +5297,7 @@ class Scheduler {
                     s.date >= weekStart && s.date <= weekEnd
                 );
                 if (weekServs.length === 0) return;
+                if (weekServs.every(s => this._servicioEnFacturaGenerada(s))) return;
                 const total = weekServs.reduce((sum, s) => {
                     const c = this.clis.find(c => c.id == s.cliId);
                     return sum + parseFloat(c?.price || 0);
@@ -5221,7 +5343,7 @@ class Scheduler {
 
                 weekServs.forEach(svc => {
                     const svcKey = `${clientName}-mensuales-${svc.date}-${svc.id}`;
-                    if ((this.generatedInvoices || []).some(g =>
+                    if (this._servicioEnFacturaGenerada(svc) || (this.generatedInvoices || []).some(g =>
                         g.clientName === clientName && g.status !== 'cancelada' && g.startDate <= svc.date && g.endDate >= svc.date)) return;
                     const total = parseFloat(cli.price || 0);
                     const isToday = svc.date === todayStr;
@@ -5273,6 +5395,15 @@ class Scheduler {
                     s.date >= periodStart && s.date <= periodEnd
                 );
                 if (monthServs.length === 0) return;
+                // Si TODOS los servicios del mes YA están facturados, no re-crear el
+                // pendiente. Antes sólo se revisaba `hasGeneratedInvoice`, que exige que la
+                // factura ARRANQUE el día 1 del mes; una factura MANUAL toma su período de
+                // las fechas de sus líneas (p.ej. 08-07..08-30) y NUNCA arranca el día 1,
+                // así que no se reconocía y los servicios reaparecían en Pendientes (caso
+                // Sherry Williams, que paga por adelantado con factura manual). Se usa la
+                // fuente única de verdad `_isServiceInvoiced` (match por id de servicio en
+                // los items de la factura), que sí reconoce facturas manuales.
+                if (monthServs.every(s => this._servicioEnFacturaGenerada(s))) return;
 
                 let total = 0;
                 // Cada PROPIEDAD aporta su propio precio (multipropiedad con precios mixtos):
@@ -5367,19 +5498,19 @@ class Scheduler {
                 );
                 if (oldServs.length === 0) return;
 
-                const isHandled = (svcDate, svcId) => {
-                    const inGenerated = (this.generatedInvoices || []).some(g =>
+                const isHandled = (s) => {
+                    const inGenerated = this._servicioEnFacturaGenerada(s) || (this.generatedInvoices || []).some(g =>
                         g.clientName === name && g.status !== 'cancelada' &&
-                        g.startDate <= svcDate && g.endDate >= svcDate);
+                        g.startDate <= s.date && g.endDate >= s.date);
                     if (inGenerated) return true;
                     return this.pendingInvoices.some(p =>
                         p.clientName === name &&
-                        ((p.serviceIds && p.serviceIds.includes(svcId)) ||
-                         (p.startDate <= svcDate && p.endDate >= svcDate))
+                        ((p.serviceIds && p.serviceIds.includes(s.id)) ||
+                         (p.startDate <= s.date && p.endDate >= s.date))
                     );
                 };
 
-                const unhandled = oldServs.filter(s => !isHandled(s.date, s.id));
+                const unhandled = oldServs.filter(s => !isHandled(s));
                 if (unhandled.length === 0) return;
 
                 // Agrupar por SEMANA CALENDARIO (lunes-domingo), usando la MISMA clave
@@ -5444,20 +5575,20 @@ class Scheduler {
                 );
                 if (oldServs.length === 0) return;
 
-                const isHandled = (svcDate, svcId) => {
-                    const inGenerated = (this.generatedInvoices || []).some(g =>
+                const isHandled = (s) => {
+                    const inGenerated = this._servicioEnFacturaGenerada(s) || (this.generatedInvoices || []).some(g =>
                         g.clientName === propCli.name && g.status !== 'cancelada' &&
-                        g.startDate <= svcDate && g.endDate >= svcDate);
+                        g.startDate <= s.date && g.endDate >= s.date);
                     if (inGenerated) return true;
                     return this.pendingInvoices.some(p =>
                         p.clientName === propCli.name &&
-                        ((p.serviceIds && p.serviceIds.includes(svcId)) ||
-                         (p.startDate <= svcDate && p.endDate >= svcDate &&
+                        ((p.serviceIds && p.serviceIds.includes(s.id)) ||
+                         (p.startDate <= s.date && p.endDate >= s.date &&
                           (!p.clientIds || p.clientIds.some(id => String(id) === String(propCli.id)))))
                     );
                 };
 
-                const unhandled = oldServs.filter(s => !isHandled(s.date, s.id));
+                const unhandled = oldServs.filter(s => !isHandled(s));
                 if (unhandled.length === 0) return;
 
                 const key = `${propCli.name}-${propCli.id}-backlog-redseguridad`;
@@ -6090,6 +6221,28 @@ class Scheduler {
     // colar duplicados. Esta función centraliza el chequeo para que todas las reglas
     // usen exactamente el mismo criterio.
     //   svc = { id, date, cliId }
+    // Igual que la parte "en factura generada" de _isServiceInvoiced, pero SIN mirar
+    // pendingInvoices — para usar en el generador de Pendientes sin que una tarjeta
+    // pendiente (que aún no es factura real) cuente como "ya facturado" y borre servicios
+    // que se están re-agrupando (construcción). Empata por id de servicio en los items
+    // (facturas nuevas, INCLUYE MANUALES), luego fecha+cliente (facturas viejas con items
+    // sin id), luego rango (facturas muy viejas sin items).
+    _servicioEnFacturaGenerada(svc) {
+        return (this.generatedInvoices || []).some(g => {
+            if (g.status === 'cancelada') return false;
+            if (g.items && g.items.some(it => it && it.id !== undefined && it.id !== null && String(it.id) === String(svc.id))) return true;
+            if (g.items && g.items.length > 0 && g.items.some(it => it && (it.id === undefined || it.id === null) && it.fecha === svc.date)) {
+                if (!g.clientIds || g.clientIds.length === 0) return true;
+                return g.clientIds.some(id => String(id) === String(svc.cliId));
+            }
+            if ((!g.items || g.items.length === 0) && g.startDate && g.endDate && g.startDate <= svc.date && g.endDate >= svc.date) {
+                if (!g.clientIds || g.clientIds.length === 0) return true;
+                return g.clientIds.some(id => String(id) === String(svc.cliId));
+            }
+            return false;
+        });
+    }
+
     _isServiceInvoiced(svc) {
         const inGenerated = (this.generatedInvoices || []).some(g => {
             if (g.status === 'cancelada') return false;
