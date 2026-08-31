@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Brazos Scheduler v59.0</title>
+    <title>Brazos Scheduler v60.0</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://accounts.google.com/gsi/client" async></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -6186,6 +6186,31 @@ class Scheduler {
                         <table style="width:100%;border-collapse:collapse;font-size:12px;background:#0f172a;border-radius:8px;overflow:hidden;">${rowsHist}</table>
                     </div>`;
                 })()}
+                ${(() => {
+                    // 💰 Pagos + sus NOTAS (donde Ranu describe saldo a favor/en contra).
+                    // Sólo lectura: refleja lo mismo que el modal de Cobrar, aquí de un vistazo.
+                    const pays = inv.payments || [];
+                    const orphan = (pays.length === 0 && parseFloat(inv.paidAmount || 0) > 0);
+                    if (pays.length === 0 && !orphan) return '';
+                    const mIcons = {cash:'💵',check:'🏦',credit:'💳',credito:'💳',zelle:'📱',ach:'🏛️',other:'💰'};
+                    const fmtD = (f) => { if(!f) return ''; const t=String(f).split('T')[0]; const [y,m,d]=t.split('-'); return (y&&m&&d)?`${m}/${d}/${y}`:t; };
+                    let filas;
+                    if (orphan) {
+                        filas = `<tr><td style="padding:4px 8px;color:#cbd5e1;">${fmtD(inv.paidAt)}</td><td style="padding:4px 8px;color:#e2e8f0;text-align:right;">$${parseFloat(inv.paidAmount||0).toFixed(2)}</td><td style="padding:4px 8px;color:#94a3b8;">${inv.paymentMethod||''}</td></tr>`;
+                    } else {
+                        filas = pays.map(p => {
+                            const nota = p.notes ? `<tr><td colspan="3" style="padding:0 8px 6px 20px;color:#a5b4c4;font-size:11px;font-style:italic;">📝 ${String(p.notes).replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>` : '';
+                            return `<tr><td style="padding:4px 8px;color:#cbd5e1;">${fmtD(p.date)}</td><td style="padding:4px 8px;color:#4ade80;text-align:right;font-weight:700;">$${parseFloat(p.amount||0).toFixed(2)}</td><td style="padding:4px 8px;color:#94a3b8;">${mIcons[p.method]||''} ${p.method||''}</td></tr>${nota}`;
+                        }).join('');
+                    }
+                    const totalPagado = orphan ? parseFloat(inv.paidAmount||0) : pays.reduce((s,p)=>s+parseFloat(p.amount||0),0);
+                    const saldo = Math.max(0, parseFloat(inv.total||0) - totalPagado);
+                    return `
+                    <div style="margin-top:16px;">
+                        <div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:6px;">💰 Pagos (${orphan?1:pays.length}) — Pagado: $${totalPagado.toFixed(2)} · Saldo: $${saldo.toFixed(2)}</div>
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;background:#0f172a;border-radius:8px;overflow:hidden;">${filas}</table>
+                    </div>`;
+                })()}
                 <button onclick="document.getElementById('_invItemsOverlay').remove()" style="margin-top:16px;width:100%;background:#334155;border:none;color:#fff;padding:10px;border-radius:8px;cursor:pointer;font-weight:600;">Cerrar</button>
             </div>`;
         document.body.appendChild(overlay);
@@ -7493,7 +7518,10 @@ class Scheduler {
                         <button onclick="app.editPayment('${inv.id}',${i})" title="Editar este pago" style="background:none;border:none;color:#e67e22;cursor:pointer;font-size:0.8rem;">✏️</button>
                         <button onclick="app.removePayment('${inv.id}',${i})" title="Borrar este pago" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:0.8rem;">✕</button>
                     </td>
-                </tr>`).join('')}
+                </tr>${p.notes ? `
+                <tr>
+                    <td colspan="5" style="padding:0 6px 6px 24px;color:#555;font-size:0.76rem;font-style:italic;border-bottom:1px solid #f0f0f0;">📝 ${String(p.notes).replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td>
+                </tr>` : ''}`).join('')}
             </table>
             ${this._editingPaymentIndex !== null && this._editingPaymentIndex !== undefined
                 ? `<div style="margin-top:6px;padding:6px 8px;background:#fff7e6;border:1px solid #fde68a;border-radius:6px;font-size:0.76rem;color:#b45309;font-weight:700;">
@@ -7773,6 +7801,8 @@ class Scheduler {
                 // en silencio y sólo se notaba después, al ver el total inflado.
                 const yaPagado = inv.payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
                 const totalFactura = parseFloat(inv.total || 0);
+                let _montoARegistrar = amount;
+                let _creditoBancado = 0;
                 if (Math.round((yaPagado + amount) * 100) > Math.round(totalFactura * 100)) {
                     const exceso = (yaPagado + amount) - totalFactura;
                     const seguir2 = confirm(
@@ -7781,8 +7811,33 @@ class Scheduler {
                         `$${exceso.toFixed(2)} de más.\n\n` +
                         `¿Es correcto?`);
                     if (!seguir2) { this.renderPaymentHistory(inv); return; }
+                    // ── Excedente → CRÉDITO del cliente (para su próxima factura) ──────
+                    // Antes, un sobrepago en UNA sola factura se quedaba pegado a ella
+                    // (paidAmount > total) y no se podía usar después. Ahora, si el pago se
+                    // pasa, se ofrece guardar el excedente como crédito a favor del cliente
+                    // —igual que ya hacía el pago que cubre varias facturas—. Cancelar deja
+                    // el comportamiento de antes (sobrepago en esta factura).
+                    const _cliCred = this._getClienteDeFactura(inv);
+                    if (_cliCred) {
+                        const _guardarCredito = confirm(
+                            `¿Guardar los $${exceso.toFixed(2)} de más como CRÉDITO a favor de ${_cliCred.name}?\n\n` +
+                            `Aceptar = esta factura queda saldada en $${totalFactura.toFixed(2)} y los $${exceso.toFixed(2)} quedan como crédito para su próxima factura.\n` +
+                            `Cancelar = registrar el pago completo de $${amount.toFixed(2)} en esta factura (sobrepago).`);
+                        if (_guardarCredito) {
+                            _creditoBancado = exceso;
+                            _montoARegistrar = Math.max(0, parseFloat((totalFactura - yaPagado).toFixed(2)));
+                            _cliCred.creditBalance = parseFloat((parseFloat(_cliCred.creditBalance || 0) + exceso).toFixed(2));
+                        }
+                    }
                 }
-                inv.payments.push({ date: paidAt, amount, method, ref, notes, updatedAt: new Date().toISOString() });
+                if (_montoARegistrar > 0.009) {
+                    const _notaExc = _creditoBancado > 0
+                        ? ((notes ? notes + ' — ' : '') + `Excedente $${_creditoBancado.toFixed(2)} guardado como crédito`)
+                        : notes;
+                    inv.payments.push({ date: paidAt, amount: _montoARegistrar, method, ref, notes: _notaExc, updatedAt: new Date().toISOString() });
+                } else if (_creditoBancado > 0) {
+                    alert(`✅ $${_creditoBancado.toFixed(2)} guardados como crédito a favor de ${(this._getClienteDeFactura(inv)||{}).name || 'el cliente'}.`);
+                }
             }
             // Calculate total paid
             const totalPaid = inv.payments.reduce((s,p) => s + parseFloat(p.amount||0), 0);
@@ -14236,6 +14291,45 @@ Motivo de cancelación (opcional):`);
         this._facturaHighlight = null;
     }
 
+    // Avisos de saldo para el preview de la factura: (1) crédito a favor del cliente
+    // y (2) saldo pendiente de OTRAS facturas del mismo cliente (faltantes que NO se
+    // suman a esta factura — se cobran aparte). Sólo informativo; no toca ningún monto.
+    _avisosSaldoPreviewHTML(client, invoiceNumber) {
+        if (!client) return '';
+        let html = '';
+        const numActual = parseInt(invoiceNumber);
+        const cli = (this.clis || []).find(c => String(c.id) === String(client.id))
+                 || (this.clis || []).find(c => c.name === client.name);
+        // 1) Crédito a favor (de un sobrepago anterior)
+        const credito = parseFloat(cli && cli.creditBalance || 0);
+        if (credito > 0.009) {
+            const saved = (this.generatedInvoices || []).find(i => parseInt(i.invoiceNumber) === numActual);
+            const accion = saved
+                ? `<button onclick="document.getElementById('pdfPreviewModal').remove(); app.openCobroDetalle('${saved.id}');" style="margin-left:8px;background:#f39c12;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:0.8rem;font-weight:700;cursor:pointer;">Aplicar crédito</button>`
+                : `<span style="color:#7a5c00;">(guarda la factura y ábrela en 💰 Cobrar para aplicarlo)</span>`;
+            html += `<div style="background:#fff8e1;border:1px solid #f0c674;border-radius:8px;padding:9px 14px;margin:10px 20px 0;font-size:0.88rem;color:#7a5c00;">
+                💳 <b>${(cli && cli.name) || client.name}</b> tiene <b>$${credito.toFixed(2)}</b> de crédito a favor. ${accion}
+            </div>`;
+        }
+        // 2) Saldo pendiente de otras facturas (faltantes de pagos anteriores)
+        const abiertas = (this.generatedInvoices || [])
+            .filter(o => o.clientName === client.name
+                && parseInt(o.invoiceNumber) !== numActual
+                && !['pagada', 'cancelada'].includes(o.status))
+            .map(o => { const pag = (o.payments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+                        return { o, saldo: parseFloat(o.total || 0) - pag }; })
+            .filter(x => x.saldo > 0.009)
+            .sort((a, b) => (a.o.invoiceNumber || 0) - (b.o.invoiceNumber || 0));
+        if (abiertas.length) {
+            const totalAb = abiertas.reduce((s, x) => s + x.saldo, 0);
+            const nums = abiertas.map(x => `#${String(x.o.invoiceNumber).padStart(4, '0')} ($${x.saldo.toFixed(2)})`).join(', ');
+            html += `<div style="background:#fdecea;border:1px solid #f5b7b1;border-radius:8px;padding:9px 14px;margin:10px 20px 0;font-size:0.88rem;color:#922b21;">
+                ⚠️ <b>${client.name}</b> tiene <b>$${totalAb.toFixed(2)}</b> de saldo pendiente de otra(s) factura(s): ${nums}. <b>No se incluye</b> en esta factura — se cobra aparte.
+            </div>`;
+        }
+        return html;
+    }
+
    displayPDFPreview(pdfData, client, startDate, endDate, invoiceConfigOverride) {
         // Crear URL del PDF
         const pdfUrl = URL.createObjectURL(pdfData.blob);
@@ -14257,6 +14351,7 @@ Motivo de cancelación (opcional):`);
                     </button>
                 </div>
                 
+                ${this._avisosSaldoPreviewHTML(client, pdfData.invoiceNumber)}
                 <iframe src="${pdfUrl}" style="flex: 1; border: none; margin: 0; padding: 0;"></iframe>
                 
                 <div style="padding: 20px; border-top: 2px solid #ddd; display: flex; gap: 15px; justify-content: center; flex-wrap:wrap;">
