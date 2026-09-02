@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Brazos Scheduler v60.0</title>
+    <title>Brazos Scheduler v63.0</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://accounts.google.com/gsi/client" async></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -6480,6 +6480,8 @@ class Scheduler {
         if (_bNum) _bNum.value = '';
         const _bStatus = document.getElementById('genInvStatus');
         if (_bStatus) _bStatus.value = 'all';
+        const _bPayMethod = document.getElementById('genInvPayMethod');
+        if (_bPayMethod) _bPayMethod.value = 'all';
 
         // Populate period dropdown dynamically (last 12 months)
         const periodSel = document.getElementById('genInvPeriod');
@@ -6503,6 +6505,7 @@ class Scheduler {
             if (_bSearch) _bSearch.value = f.search;
             if (_bNum) _bNum.value = f.numSearch;
             if (_bStatus) _bStatus.value = f.status;
+            if (f.payMethod && _bPayMethod) _bPayMethod.value = f.payMethod;
             if (f.period) periodSel.value = f.period;
             if (f.start) document.getElementById('genInvStart').value = f.start;
             if (f.end) document.getElementById('genInvEnd').value = f.end;
@@ -6555,6 +6558,8 @@ class Scheduler {
         document.getElementById('genInvClient').value = 'all';
         document.getElementById('genInvStatus').value = 'all';
         document.getElementById('genInvPeriod').value = 'all';
+        const _bPayMethod = document.getElementById('genInvPayMethod');
+        if (_bPayMethod) _bPayMethod.value = 'all';
         const dropdown = document.getElementById('genInvClientDropdown');
         if (dropdown) dropdown.style.display = 'none';
         this.refreshGeneratedInvoices();
@@ -6570,7 +6575,13 @@ class Scheduler {
 
         const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
         const statusLabels = { pendiente:'Pendiente', enviada:'Enviada', pagada:'Pagada', vencida:'Vencida', cancelada:'Cancelada', parcial:'Pago Parcial' };
-        const headers = ['# Factura','Cliente','Email','Periodo Inicio','Periodo Fin','Generada','Última vez enviada','Estatus','Total','Monto Pagado','Saldo Pendiente'];
+        const payMethodLabels = { cash:'Cash', check:'Cheque', credit:'Tarjeta de Crédito', zelle:'Zelle', ach:'ACH', other:'Otro' };
+        const fmtPayMethod = (pm) => {
+            if (!pm) return '';
+            if (String(pm).toLowerCase().includes('stripe')) return 'Stripe';
+            return payMethodLabels[pm] || pm;
+        };
+        const headers = ['# Factura','Cliente','Email','Periodo Inicio','Periodo Fin','Generada','Última vez enviada','Estatus','Total','Monto Pagado','Saldo Pendiente','Método de Pago'];
         const rows = list.map(inv => {
             const total = parseFloat(inv.total || 0);
             const pagado = parseFloat(inv.paidAmount || 0);
@@ -6580,7 +6591,7 @@ class Scheduler {
             return [
                 inv.invoiceNumber, inv.clientName, inv.clientEmail || '', inv.startDate, inv.endDate,
                 inv.generatedDate, ultimoEnvio, statusLabels[inv.status] || inv.status,
-                total.toFixed(2), pagado.toFixed(2), saldo.toFixed(2)
+                total.toFixed(2), pagado.toFixed(2), saldo.toFixed(2), fmtPayMethod(inv.paymentMethod)
             ].map(esc).join(',');
         });
         const csv = '\uFEFF' + [headers.map(esc).join(','), ...rows].join('\r\n'); // BOM para que Excel lea acentos bien
@@ -6915,9 +6926,10 @@ class Scheduler {
         const clientFilter = document.getElementById('genInvClient').value;
         const statusFilter = document.getElementById('genInvStatus')?.value || 'all';
         const periodFilter = document.getElementById('genInvPeriod')?.value || 'all';
+        const payMethodFilter = document.getElementById('genInvPayMethod')?.value || 'all';
         const searchTerm = (document.getElementById('genInvSearch')?.value || '').toLowerCase().trim();
         const numSearchTerm = (document.getElementById('genInvNumSearch')?.value || '').trim();
-        
+
         if (!this.generatedInvoices) {
             this.generatedInvoices = [];
         }
@@ -6928,6 +6940,15 @@ class Scheduler {
             if (clientFilter !== 'all' && inv.clientName !== clientFilter) return false;
             if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
             if (numSearchTerm && !String(inv.invoiceNumber).includes(numSearchTerm)) return false;
+            if (payMethodFilter !== 'all') {
+                const pm = inv.paymentMethod || '';
+                const pmLower = pm.toLowerCase();
+                let pmMatches;
+                if (payMethodFilter === 'stripe') pmMatches = pmLower.includes('stripe');
+                else if (payMethodFilter === 'none') pmMatches = !pm;
+                else pmMatches = pmLower === payMethodFilter;
+                if (!pmMatches) return false;
+            }
             if (periodFilter !== 'all') {
                 const invStart = inv.startDate || '';
                 const invEnd = inv.endDate || '';
@@ -8186,6 +8207,7 @@ class Scheduler {
             numSearch: document.getElementById('genInvNumSearch')?.value || '',
             status: document.getElementById('genInvStatus')?.value || 'all',
             period: document.getElementById('genInvPeriod')?.value || 'all',
+            payMethod: document.getElementById('genInvPayMethod')?.value || 'all',
             start: document.getElementById('genInvStart')?.value || '',
             end: document.getElementById('genInvEnd')?.value || ''
         };
@@ -14298,6 +14320,13 @@ Motivo de cancelación (opcional):`);
         // origen: 'enviadas' | 'pendientes' | undefined (preview del PDF, no regresa a lista).
         this._facturaVolverA = origen || null;
 
+        // BUG Ago31: cuando origen==='preview' (se abrió el calendario DESDE el preview de
+        // una factura que a su vez venía de Pendientes), closeInvoice() de abajo borra
+        // this.fromPending → al volver al preview y luego cerrarlo, el modal de facturación
+        // queda oculto para siempre y el usuario no puede regresar a Pendientes. Guardamos
+        // aquí el valor para restaurarlo en _volverDeFacturaCalendario().
+        this._facturaVengoDePendientes = this.fromPending;
+
         // Cerrar cualquier modal de facturación abierto (Pendientes / Enviadas / Generar)
         // y resetear el historial de navegación, para dejar ver el calendario de fondo.
         this.closePendingInvoices();
@@ -14364,6 +14393,18 @@ Motivo de cancelación (opcional):`);
         if (destino === 'enviadas') this.openGeneratedInvoices();
         else if (destino === 'pendientes') this.openPendingInvoices();
         else if (destino === 'preview') {
+            // Si veníamos de Pendientes, restaurar ese estado (closeInvoice() lo había
+            // borrado al entrar al calendario) y volver a mostrar el modal de facturación
+            // detrás del preview, para que su botón "⬅️ Volver a Pendientes" siga
+            // funcionando si el usuario cierra el preview en vez de enviarlo.
+            if (this._facturaVengoDePendientes) {
+                this.fromPending = true;
+                const invModal = document.getElementById('invoiceModal');
+                if (invModal) { invModal.style.display = 'block'; invModal.style.pointerEvents = 'all'; }
+                const backBtn = document.getElementById('btnBackToPending');
+                if (backBtn) backBtn.style.display = 'block';
+            }
+            this._facturaVengoDePendientes = null;
             // Reconstruir el preview del PDF con los datos que quedaron guardados, para
             // que el usuario pueda enviar/imprimir de una vez tras verificar en calendario.
             const d = window.currentPDFData;
@@ -17033,6 +17074,245 @@ Motivo de cancelación (opcional):`);
         }
 
         container.innerHTML = html;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ENVIAR HORAS A NÓMINA (Sep2) — el Scheduler ya calcula las horas de
+    // producción de dos formas: (1) Shop→Shop de BrazosCalendar (fuente
+    // principal, misma lógica que renderWeeklyHoursSummary de arriba). Arma
+    // una lista por empleado+fecha y la sube a Drive para que BrazosNomina la
+    // lea. La decisión de si el Reloj Checador ya cubrió ese día (y por lo
+    // tanto gana sobre lo que mandamos aquí) la toma la propia Nómina al
+    // importar — ella es quien tiene las asistencias ya fusionadas con el
+    // Reloj. "Nómina x %" es una fuente APARTE (ver subirHorasSemanaNominaPct
+    // más abajo): esa no da horas por día, da un total semanal ya convertido
+    // a Regular+Overtime, así que viaja como registro de nómina manual, no
+    // como asistencia diaria.
+    // ══════════════════════════════════════════════════════════════════════
+    _calcularHorasProduccionParaNomina(startStr, endStr) {
+        const entries = [];
+        if (!startStr || !endStr) return entries;
+        const dates = [];
+        let d = new Date(startStr + 'T12:00:00');
+        const end = new Date(endStr + 'T12:00:00');
+        while (d <= end) { dates.push(d.toLocaleDateString('en-CA')); d.setDate(d.getDate() + 1); }
+
+        const excludeKey = (empId) => `${startStr}_${endStr}_${empId}`;
+        const isExcluded = (empId) => !!(this._hoursExcluded && this._hoursExcluded[excludeKey(empId)]);
+
+        // BrazosCalendar (líder del grupo con shopOut/shopBack)
+        dates.forEach(dt => {
+            const dayData = this._prodReports && this._prodReports[dt];
+            if (!dayData) return;
+            const dayByGroup = {};
+            Object.values(dayData).forEach(empData => {
+                const grp = empData.group || 'Sin Grupo';
+                if (!dayByGroup[grp]) dayByGroup[grp] = { shopOut: null, shopBack: null };
+                if (empData.shopOut && empData.shopBack && !dayByGroup[grp].shopOut) {
+                    dayByGroup[grp].shopOut = empData.shopOut;
+                    dayByGroup[grp].shopBack = empData.shopBack;
+                }
+            });
+            Object.keys(dayByGroup).forEach(grp => {
+                const gi = dayByGroup[grp];
+                if (!gi.shopOut || !gi.shopBack) return;
+                const [soh, som] = gi.shopOut.split(':').map(Number);
+                const [sbh, sbm] = gi.shopBack.split(':').map(Number);
+                let minutes = (sbh * 60 + sbm) - (soh * 60 + som);
+                if (minutes < 0) minutes = 0;
+                if (minutes >= 420) minutes -= 30; // break de 30 min si la jornada fue de 7+ horas
+                const memberIds = (this.grupos[grp] || []).filter(id => id);
+                memberIds.forEach(empId => {
+                    if (isExcluded(empId)) return;
+                    const emp = this.emps.find(e => String(e.id) === String(empId));
+                    if (!emp) return;
+                    entries.push({
+                        employeeId: String(empId), employeeName: emp.name, date: dt,
+                        checkIn: gi.shopOut, checkOut: gi.shopBack,
+                        hours: Math.round((minutes / 60) * 100) / 100,
+                        source: 'calendario'
+                    });
+                });
+            });
+        });
+
+        return entries;
+    }
+
+    // Sube/actualiza un JSON en Drive por nombre — busca GLOBAL (no filtra por
+    // carpeta) porque appronto_horas_produccion.json lo lee BrazosNomina desde
+    // su propia carpeta (AppProntoApp), distinta de la del Scheduler
+    // (BrazosCleaningApp); misma cuenta de Google → la búsqueda por nombre
+    // encuentra el archivo sin importar en qué carpeta viva.
+    async _driveUploadJSON(fileName, dataObj) {
+        const searchRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=name='${fileName}'+and+trashed=false&fields=files(id,name)`,
+            { headers: { Authorization: `Bearer ${this.driveToken}` } }
+        );
+        const searchData = await searchRes.json();
+        const fileId = (searchData.files && searchData.files.length) ? searchData.files[0].id : null;
+        const form = new FormData();
+        const metadata = { name: fileName, parents: fileId ? undefined : [this.driveFolderId] };
+        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+        form.append('file', new Blob([JSON.stringify(dataObj, null, 2)], { type: 'application/json' }));
+        const res = await fetch(
+            fileId ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`
+                   : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+            { method: fileId ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${this.driveToken}` }, body: form }
+        );
+        if (!res.ok) throw new Error('Error al subir ' + fileName + ' (' + res.status + ')');
+    }
+
+    // appronto_horas_produccion.json guarda DOS listas independientes:
+    // `entries` (horas por día, de Calendario — ver arriba) y `manualPayroll`
+    // (semanas ya convertidas a Regular+Overtime+Bonus de "Nómina x %").
+    // Este helper baja el archivo completo, para no pisar la lista que el
+    // OTRO botón no está tocando.
+    async _leerArchivoHorasProduccion() {
+        try {
+            const actual = await this.driveReadFile('appronto_horas_produccion.json');
+            return {
+                entries: Array.isArray(actual && actual.entries) ? actual.entries : [],
+                manualPayroll: Array.isArray(actual && actual.manualPayroll) ? actual.manualPayroll : []
+            };
+        } catch(e) { return { entries: [], manualPayroll: [] }; } // no existe aún — se crea de cero
+    }
+
+    // Reemplaza sólo las entradas empleado+fecha que vengan en newEntries
+    // (Calendario) y sube el resultado, preservando manualPayroll intacto.
+    async _mergeYSubirHorasANomina(newEntries) {
+        const actual = await this._leerArchivoHorasProduccion();
+        const porClave = {};
+        actual.entries.forEach(en => { porClave[`${en.employeeId}|${en.date}`] = en; });
+        newEntries.forEach(en => { porClave[`${en.employeeId}|${en.date}`] = en; });
+        const entries = Object.values(porClave);
+        await this._driveUploadJSON('appronto_horas_produccion.json', {
+            generatedAt: new Date().toISOString(),
+            entries, manualPayroll: actual.manualPayroll
+        });
+        return entries;
+    }
+
+    // Reemplaza sólo las semanas empleado+weekStart que vengan en newEntries
+    // ("Nómina x %") y sube el resultado, preservando entries (Calendario) intacto.
+    async _mergeYSubirPayrollManualANomina(newEntries) {
+        const actual = await this._leerArchivoHorasProduccion();
+        const porClave = {};
+        actual.manualPayroll.forEach(en => { porClave[`${en.employeeId}|${en.weekStart}`] = en; });
+        newEntries.forEach(en => { porClave[`${en.employeeId}|${en.weekStart}`] = en; });
+        const manualPayroll = Object.values(porClave);
+        await this._driveUploadJSON('appronto_horas_produccion.json', {
+            generatedAt: new Date().toISOString(),
+            entries: actual.entries, manualPayroll
+        });
+        return manualPayroll;
+    }
+
+    async subirHorasProduccionANomina() {
+        const status = document.getElementById('horasNominaStatus');
+        const startStr = document.getElementById('hoursRangeStart')?.value;
+        const endStr = document.getElementById('hoursRangeEnd')?.value;
+        if (!startStr || !endStr) { alert('Elige el rango "Desde"/"Hasta" primero.'); return; }
+        if (!this.driveConnected || !this.driveToken) {
+            alert('Conecta Google Drive primero (el botón de Sync arriba).');
+            return;
+        }
+        if (status) { status.textContent = '⏳ Calculando...'; status.style.color = '#f39c12'; }
+        try {
+            const entries = this._calcularHorasProduccionParaNomina(startStr, endStr);
+            if (!entries.length) {
+                if (status) { status.textContent = '⚠️ Sin horas Shop→Shop que enviar en este rango.'; status.style.color = '#e74c3c'; }
+                return;
+            }
+            await this._mergeYSubirHorasANomina(entries);
+            if (status) { status.textContent = `✅ Enviado (${entries.length} registros)`; status.style.color = '#27ae60'; }
+            alert(`✅ ${entries.length} registro(s) de horas Shop→Shop enviados a la Nómina.\n\nAbre BrazosNomina y sincroniza con Drive para verlas en Asistencias. Las que el Reloj Checador ya haya registrado NO se tocan.`);
+        } catch(e) {
+            if (status) { status.textContent = '❌ Error: ' + e.message; status.style.color = '#e74c3c'; }
+            alert('Error al enviar horas: ' + e.message);
+        }
+    }
+
+    // Botón dentro de "💰 Nómina x %": toma el MISMO cálculo que ya muestra
+    // el panel "HORAS PARA QUICKBOOKS" (comisión de servicios + horas
+    // directas, convertido a Regular/Overtime con el umbral de 40 hrs, más
+    // el Bonus) y lo manda a la Nómina como una semana de nómina manual —
+    // NO como asistencias por día, porque este módulo nunca calculó horas
+    // por día, calcula un total semanal. Se aplica igual a cada miembro del
+    // grupo, tal como ya hace "🖨️ Imprimir / PDF" al generar un comprobante
+    // por persona con el mismo total.
+    async subirHorasSemanaNominaPct() {
+        const status = document.getElementById('nmHorasStatus');
+        const monStr = document.getElementById('nmWeekStart')?.value;
+        const empGroup = this.nmGetEmpGroup();
+        if (!monStr || !empGroup) { alert('Elige grupo y semana primero.'); return; }
+        if (!this.driveConnected || !this.driveToken) {
+            alert('Conecta Google Drive primero (el botón de Sync arriba).');
+            return;
+        }
+        const memberIds = (this.grupos[empGroup] || []).filter(id => id);
+        if (!memberIds.length) { alert('El grupo "' + empGroup + '" no tiene empleados asignados.'); return; }
+
+        // Mismo cálculo que updateNomina() usa para "HORAS PARA QUICKBOOKS".
+        const rate = parseFloat(document.getElementById('nmRate').value) || 15;
+        const otRate = rate * 1.5;
+        const bonus = parseFloat(document.getElementById('nmBonus').value) || 0;
+        const pct = parseFloat(document.getElementById('nmPct').value) / 100 || 0.60;
+        const tbl = document.getElementById('nmServicesTable');
+        const svcCount = parseInt((tbl && tbl.dataset.svcCount) || 0);
+        let totalEmpPay = 0;
+        for (let i = 0; i < svcCount; i++) {
+            const priceInp = document.getElementById('nmPrice_' + i);
+            if (!priceInp) continue;
+            const soloHrsChk = document.getElementById('nmSoloHrs_' + i);
+            const empInp = document.getElementById('nmEmp_' + i);
+            const precio = parseFloat(priceInp.value) || 0;
+            const isSoloHrs = soloHrsChk && soloHrsChk.checked;
+            const empCount = empInp ? (parseInt(empInp.value) || 1) : 1;
+            const pagoBruto = isSoloHrs ? 0 : precio * pct;
+            totalEmpPay += isSoloHrs ? 0 : pagoBruto / empCount;
+        }
+        let directHrs = 0;
+        for (let i = 0; i < 7; i++) {
+            const inp = document.getElementById('nmHrs_' + i);
+            directHrs += inp ? (parseFloat(inp.value) || 0) : 0;
+        }
+        const directPay = directHrs * rate;
+        const totalToPay = totalEmpPay + directPay;
+        const regularPay40 = Math.min(totalToPay, 40 * rate);
+        const remainderPay = Math.max(0, totalToPay - regularPay40);
+        const regularHours = rate > 0 ? Math.round((regularPay40 / rate) * 100) / 100 : 0;
+        const overtimeHours = (remainderPay > 0 && otRate > 0) ? Math.round((remainderPay / otRate) * 100) / 100 : 0;
+
+        if (regularHours <= 0 && overtimeHours <= 0 && bonus <= 0) {
+            if (status) { status.textContent = '⚠️ Todo en 0 — no hay nada que enviar.'; status.style.color = '#f87171'; }
+            return;
+        }
+
+        const mon = new Date(monStr + 'T12:00:00');
+        const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
+        const weekEnd = sun.toLocaleDateString('en-CA');
+
+        const payrollEntries = memberIds.map(empId => {
+            const emp = this.emps.find(e => String(e.id) === String(empId));
+            if (!emp) return null;
+            return {
+                employeeId: String(empId), employeeName: emp.name,
+                weekStart: monStr, weekEnd,
+                regularHours, overtimeHours, bonus,
+                source: 'nomina_pct'
+            };
+        }).filter(Boolean);
+
+        if (status) { status.textContent = '⏳ Enviando...'; status.style.color = '#fbbf24'; }
+        try {
+            await this._mergeYSubirPayrollManualANomina(payrollEntries);
+            if (status) { status.textContent = `✅ Enviado (${payrollEntries.length} empleado(s))`; status.style.color = '#4ade80'; }
+            alert(`✅ Semana de "${empGroup}" enviada a la Nómina:\n\nReg: ${regularHours.toFixed(2)} hrs · OT: ${overtimeHours.toFixed(2)} hrs · Bonus: $${bonus.toFixed(2)}\n(${payrollEntries.length} empleado(s), mismo total para cada uno)\n\nEn BrazosNomina, abre "✏️ Captura Manual de Horas" con el período ${monStr} a ${weekEnd} y ya estará precargado.`);
+        } catch(e) {
+            if (status) { status.textContent = '❌ Error: ' + e.message; status.style.color = '#f87171'; }
+            alert('Error al enviar horas: ' + e.message);
+        }
     }
 
     closeProductionReport() {
@@ -20160,7 +20440,7 @@ document.addEventListener('click', function(e) {
         
         <!-- Filtros -->
         <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px">
-            <div style="display:grid; grid-template-columns: 150px 150px 1fr 160px 160px; gap:10px; flex-wrap:wrap;">
+            <div style="display:grid; grid-template-columns: 150px 150px 1fr 160px 160px 160px; gap:10px; flex-wrap:wrap;">
                 <div><label style="font-size:0.8rem;font-weight:600;">Generada Desde</label><input type="date" id="genInvStart" onchange="app.refreshGeneratedInvoices()"></div>
                 <div><label style="font-size:0.8rem;font-weight:600;">Generada Hasta</label><input type="date" id="genInvEnd" onchange="app.refreshGeneratedInvoices()"></div>
                 <div style="position:relative;">
@@ -20194,6 +20474,19 @@ document.addEventListener('click', function(e) {
                         <option value="2025-12">Dic 2025</option>
                         <option value="2025-11">Nov 2025</option>
                         <option value="2025-10">Oct 2025</option>
+                    </select>
+                </div>
+                <div><label style="font-size:0.8rem;font-weight:600;">Tipo de Pago</label>
+                    <select id="genInvPayMethod" onchange="app.refreshGeneratedInvoices()" style="width:100%;padding:6px;" title="Filtra por el método del ÚLTIMO pago registrado en la factura">
+                        <option value="all">Todos</option>
+                        <option value="cash">💵 Cash</option>
+                        <option value="check">🏦 Cheque</option>
+                        <option value="stripe">💳 Stripe</option>
+                        <option value="credit">💳 Tarjeta de Crédito</option>
+                        <option value="zelle">📱 Zelle</option>
+                        <option value="ach">🏛️ ACH</option>
+                        <option value="other">💰 Otro</option>
+                        <option value="none">— Sin pago registrado —</option>
                     </select>
                 </div>
             </div>
@@ -20797,6 +21090,8 @@ document.addEventListener('click', function(e) {
               <input type="date" id="hoursRangeEnd" onchange="app.renderWeeklyHoursSummary()" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:0.85rem">
             </div>
             <button onclick="app.printHoursSummary()" style="padding:7px 14px;background:#e65100;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem;font-weight:600;">🖨️ Imprimir Horas</button>
+            <button onclick="app.subirHorasProduccionANomina()" style="padding:7px 14px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem;font-weight:600;" title="Envía a la App Nómina las horas Shop→Shop de este rango (BrazosCalendar). La Nómina respeta lo que ya tenga del Reloj Checador.">📤 Enviar Horas a Nómina</button>
+            <span id="horasNominaStatus" style="font-size:0.78rem;color:#888;"></span>
           </div>
           <div id="weeklyHoursSummary"></div>
         </div>
@@ -20888,6 +21183,10 @@ document.addEventListener('click', function(e) {
     <div style="background:#2d3748;border-radius:8px;padding:16px;margin-bottom:20px;">
       <h3 style="margin:0 0 12px;color:#a78bfa;font-size:1rem;">⏱ Horas por Tiempo</h3>
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;" id="nmDirectHours"></div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:10px;">
+        <button onclick="app.subirHorasSemanaNominaPct()" style="background:#8e44ad;color:white;border:none;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:0.85rem;font-weight:700;" title="Envía el total de la semana (Reg + Overtime + Bonus, igual que el cuadro morado de abajo) a la Captura Manual de la App Nómina para este grupo.">📤 Enviar esta semana a Nómina</button>
+        <span id="nmHorasStatus" style="font-size:0.78rem;color:#94a3b8;"></span>
+      </div>
     </div>
     <div style="display:flex;gap:16px;align-items:center;margin-bottom:20px;flex-wrap:wrap;">
       <div><label style="font-size:0.85rem;color:#94a3b8;">Bonus $</label><input type="number" id="nmBonus" value="0" min="0" step="0.01" style="padding:6px 10px;border:1px solid #4a5568;border-radius:6px;background:#2d3748;color:#e2e8f0;width:100px;margin-left:8px;" oninput="app.updateNomina()"></div>
