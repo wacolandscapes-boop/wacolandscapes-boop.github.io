@@ -17010,6 +17010,43 @@ Motivo de cancelación (opcional):`);
         this.renderClientTimeSection();
     }
 
+    // Costo de MANO DE OBRA de un cliente: cuenta cuántos empleados tiene el
+    // GRUPO que lo atendió en el rango (los slots CONFIGURADOS del grupo —
+    // ej. Grupo B = 3 — no quién fichó ese día específico, así lo pidió
+    // Ranu) y suma sus tarifas por hora (emp.rate, cae a $15/hr si el
+    // empleado no tiene tarifa capturada, igual que en Nómina). Si el
+    // cliente fue atendido por MÁS DE UN grupo distinto en el rango
+    // (cambio de cuadrilla), PROMEDIA el costo entre esos grupos — Ranu lo
+    // pidió así en vez de usar sólo el grupo más reciente. Regresa null si
+    // no hay ningún grupo identificable (servicio sin grupo asignado, o
+    // grupo sin miembros configurados).
+    _laborInfoForClient(cliId, startStr, endStr) {
+        const svs = (this.servs || []).filter(s =>
+            String(s.cliId) === String(cliId) &&
+            !s.cancelled &&
+            (!startStr || s.date >= startStr) &&
+            (!endStr || s.date <= endStr)
+        );
+        const gruposUsados = new Set();
+        svs.forEach(s => { const g = s.grupo || s.empId; if (g) gruposUsados.add(String(g)); });
+        if (!gruposUsados.size) return null;
+
+        let sumaEmpCount = 0, sumaRateHr = 0, n = 0;
+        gruposUsados.forEach(gName => {
+            const memberIds = (this.grupos[gName] || []).filter(id => id && id !== '');
+            if (!memberIds.length) return; // grupo desconocido o sin miembros — se ignora
+            const rateHr = memberIds.reduce((sum, id) => {
+                const emp = (this.emps || []).find(e => String(e.id) === String(id));
+                return sum + (emp && emp.rate ? parseFloat(emp.rate) : 15);
+            }, 0);
+            sumaEmpCount += memberIds.length;
+            sumaRateHr += rateHr;
+            n++;
+        });
+        if (!n) return null;
+        return { empCount: sumaEmpCount / n, rateHr: sumaRateHr / n };
+    }
+
     renderClientTimeSection() {
         const body = document.getElementById('clientTimeBody');
         if (!body) return;
@@ -17026,9 +17063,10 @@ Motivo de cancelación (opcional):`);
             return;
         }
 
-        // Primero se calcula TODO por cliente (precio, tiempos, $/hora); el orden
-        // se decide después según "Ordenar por" — así "$/hora mayor a menor" puede
-        // funcionar como ranking de qué clientes conviene más mantener.
+        // Primero se calcula TODO por cliente (precio, tiempos, mano de obra,
+        // ganancia); el orden se decide después según "Ordenar por" — así
+        // "Ganancia mayor a menor" funciona como ranking de qué clientes
+        // conviene más mantener.
         let datos = activos.map(c => {
             const price = this.pricePerService ? this.pricePerService(c) : this._servicePrice(c, {});
 
@@ -17040,25 +17078,35 @@ Motivo de cancelación (opcional):`);
             const manualTravelMin = c.manualTravelTimeMin || null;
             const usedTravelMin = realTravelMin || manualTravelMin;
 
-            // El total (y el $/hora) sólo se calcula cuando YA se sabe tanto el
-            // tiempo de servicio como el de traslado (real o manual) — sumar con un
-            // 0 implícito donde falta daría un $/hora inflado y engañoso.
+            // El total (y la mano de obra/ganancia) sólo se calcula cuando YA se
+            // sabe tanto el tiempo de servicio como el de traslado (real o
+            // manual) — sumar con un 0 implícito donde falta daría una ganancia
+            // inflada y engañosa.
             const usedTotalMin = (usedSvcMin && usedTravelMin) ? (usedSvcMin + usedTravelMin) : null;
-            const perHour = (usedTotalMin && price) ? (price / (usedTotalMin / 60)) : null;
+
+            // Mano de obra: tarifa/hora del grupo (o promedio de grupos, si lo
+            // atendió más de uno en el rango) × Tiempo Total. Ganancia = Precio
+            // − Mano de Obra. Ambas requieren conocer ya el Tiempo Total Y el
+            // grupo que hizo el servicio.
+            const laborInfo = this._laborInfoForClient(c.id, startStr, endStr);
+            const laborCost = (laborInfo && usedTotalMin) ? (laborInfo.rateHr * (usedTotalMin / 60)) : null;
+            const ganancia = (laborCost !== null && price != null) ? (price - laborCost) : null;
+
             const label = c.propId ? `${c.name} · ${c.propId}` : c.name;
 
-            return { c, price, realSvcMin, manualSvcMin, realTravelMin, manualTravelMin, usedTotalMin, perHour, label };
+            return { c, price, realSvcMin, manualSvcMin, realTravelMin, manualTravelMin, usedTotalMin, laborInfo, laborCost, ganancia, label };
         });
 
         const sortBy = document.getElementById('ctSortBy')?.value || 'name';
-        if (sortBy === 'perHourDesc' || sortBy === 'perHourAsc') {
-            // Los que aún no tienen $/hora (falta capturar tiempo) van siempre al
-            // final — no son "el peor cliente", son datos incompletos.
+        if (sortBy === 'gananciaDesc' || sortBy === 'gananciaAsc') {
+            // Los que aún no tienen ganancia calculable (falta tiempo o grupo)
+            // van siempre al final — no son "el peor cliente", son datos
+            // incompletos.
             datos.sort((a, b) => {
-                if (a.perHour === null && b.perHour === null) return a.label.localeCompare(b.label);
-                if (a.perHour === null) return 1;
-                if (b.perHour === null) return -1;
-                return sortBy === 'perHourDesc' ? (b.perHour - a.perHour) : (a.perHour - b.perHour);
+                if (a.ganancia === null && b.ganancia === null) return a.label.localeCompare(b.label);
+                if (a.ganancia === null) return 1;
+                if (b.ganancia === null) return -1;
+                return sortBy === 'gananciaDesc' ? (b.ganancia - a.ganancia) : (a.ganancia - b.ganancia);
             });
         } else {
             datos.sort((a, b) => a.label.localeCompare(b.label));
@@ -17070,15 +17118,18 @@ Motivo de cancelación (opcional):`);
                  style="width:60px;padding:4px 6px;border:1px solid #ddd;border-radius:5px;font-size:0.85rem;"
                  onchange="app.${saveFn}('${cliId}', this.value)"> min ${manualMin ? '<span title="Manual" style="opacity:0.6;">✍️</span>' : '<span title="Falta capturar" style="opacity:0.6;">⚠️</span>'}`;
 
-        const rows = datos.map(({ c, price, realSvcMin, manualSvcMin, realTravelMin, manualTravelMin, usedTotalMin, perHour, label }) => {
+        const rows = datos.map(({ c, price, realSvcMin, manualSvcMin, realTravelMin, manualTravelMin, usedTotalMin, laborInfo, laborCost, ganancia, label }) => {
+            const empCountLabel = laborInfo ? (Number.isInteger(laborInfo.empCount) ? laborInfo.empCount : laborInfo.empCount.toFixed(1)) : '—';
             return `<tr style="border-bottom:1px solid #f0f0f0;">
                 <td style="padding:6px 8px;">${label}</td>
                 <td style="padding:6px 8px;text-align:right;">$${price.toFixed(2)}</td>
                 <td style="padding:6px 8px;">${timeCell(realSvcMin, manualSvcMin, 'saveManualServiceTime', c.id, 'Más alto real')}</td>
                 <td style="padding:6px 8px;">${timeCell(realTravelMin, manualTravelMin, 'saveManualTravelTime', c.id, 'Promedio real')}</td>
                 <td style="padding:6px 8px;text-align:right;">${usedTotalMin ? this._fmtHM(usedTotalMin) : '—'}</td>
-                <td style="padding:6px 8px;text-align:right;font-weight:${perHour ? '700' : '400'};color:${perHour ? '#0e7490' : '#aaa'};">
-                    ${perHour ? '$' + perHour.toFixed(2) + '/hr' : '—'}
+                <td style="padding:6px 8px;text-align:center;">${empCountLabel}</td>
+                <td style="padding:6px 8px;text-align:right;">${laborCost !== null ? '$' + laborCost.toFixed(2) : '—'}</td>
+                <td style="padding:6px 8px;text-align:right;font-weight:${ganancia !== null ? '700' : '400'};color:${ganancia === null ? '#aaa' : (ganancia >= 0 ? '#27ae60' : '#e74c3c')};">
+                    ${ganancia !== null ? '$' + ganancia.toFixed(2) : '—'}
                 </td>
             </tr>`;
         }).join('');
@@ -17093,7 +17144,9 @@ Motivo de cancelación (opcional):`);
                         <th style="padding:6px 8px;">Tiempo Servicio (máx.)</th>
                         <th style="padding:6px 8px;">Tiempo Traslado</th>
                         <th style="padding:6px 8px;text-align:right;">Tiempo Total</th>
-                        <th style="padding:6px 8px;text-align:right;">$ / hora</th>
+                        <th style="padding:6px 8px;text-align:center;"># Emp.</th>
+                        <th style="padding:6px 8px;text-align:right;">Mano de Obra</th>
+                        <th style="padding:6px 8px;text-align:right;">Ganancia</th>
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -17102,7 +17155,7 @@ Motivo de cancelación (opcional):`);
             <p style="font-size:0.75rem;color:#999;margin-top:8px;">
                 🕐 = real (Tiempo Servicio: el más alto registrado en el rango; Tiempo Traslado: promedio de los huecos capturados) · ✍️ = capturado a mano · ⚠️ = falta capturar.
                 El traslado real se calcula del hueco entre el fin de la visita anterior del mismo grupo y el inicio de esta (no incluye el traslado Shop → primer cliente del día).
-                El $/hora sólo sale cuando YA se conoce servicio + traslado (real o manual) de ese cliente.
+                # Emp. = empleados configurados en el grupo que atendió a este cliente en el rango (si lo atendió más de un grupo, se promedia entre ellos). Mano de Obra = tarifa/hora del grupo × Tiempo Total. Ganancia = Precio − Mano de Obra. Ambas sólo salen cuando YA se conoce el Tiempo Total y el grupo que hizo el servicio.
             </p>`;
     }
 
@@ -17125,28 +17178,32 @@ Motivo de cancelación (opcional):`);
             const fuenteTravel = realTravelMin ? 'Real (promedio)' : (manualTravelMin ? 'Manual' : 'Falta capturar');
 
             const usedTotalMin = (usedSvcMin && usedTravelMin) ? (usedSvcMin + usedTravelMin) : null;
-            const perHour = (usedTotalMin && price) ? (price / (usedTotalMin / 60)) : null;
+
+            const laborInfo = this._laborInfoForClient(c.id, startStr, endStr);
+            const laborCost = (laborInfo && usedTotalMin) ? (laborInfo.rateHr * (usedTotalMin / 60)) : null;
+            const ganancia = (laborCost !== null && price != null) ? (price - laborCost) : null;
+
             const label = (c.propId ? `${c.name} - ${c.propId}` : c.name).replace(/"/g, '""');
-            return { label, price, usedSvcMin, fuenteSvc, usedTravelMin, fuenteTravel, usedTotalMin, perHour };
+            return { label, price, usedSvcMin, fuenteSvc, usedTravelMin, fuenteTravel, usedTotalMin, empCount: laborInfo ? laborInfo.empCount : null, laborCost, ganancia };
         });
 
         // Mismo orden que la tabla en pantalla ("Ordenar por"), para que el CSV
         // exportado coincida con lo que Ranu está viendo.
         const sortBy = document.getElementById('ctSortBy')?.value || 'name';
-        if (sortBy === 'perHourDesc' || sortBy === 'perHourAsc') {
+        if (sortBy === 'gananciaDesc' || sortBy === 'gananciaAsc') {
             filas.sort((a, b) => {
-                if (a.perHour === null && b.perHour === null) return a.label.localeCompare(b.label);
-                if (a.perHour === null) return 1;
-                if (b.perHour === null) return -1;
-                return sortBy === 'perHourDesc' ? (b.perHour - a.perHour) : (a.perHour - b.perHour);
+                if (a.ganancia === null && b.ganancia === null) return a.label.localeCompare(b.label);
+                if (a.ganancia === null) return 1;
+                if (b.ganancia === null) return -1;
+                return sortBy === 'gananciaDesc' ? (b.ganancia - a.ganancia) : (a.ganancia - b.ganancia);
             });
         } else {
             filas.sort((a, b) => a.label.localeCompare(b.label));
         }
 
-        let csv = 'Cliente,Precio por Servicio,Tiempo de Servicio (min),Fuente Servicio,Tiempo de Traslado (min),Fuente Traslado,Tiempo Total (min),$ por Hora\n';
+        let csv = 'Cliente,Precio por Servicio,Tiempo de Servicio (min),Fuente Servicio,Tiempo de Traslado (min),Fuente Traslado,Tiempo Total (min),# Empleados,Mano de Obra,Ganancia\n';
         filas.forEach(f => {
-            csv += `"${f.label}",${f.price.toFixed(2)},${f.usedSvcMin || ''},${f.fuenteSvc},${f.usedTravelMin || ''},${f.fuenteTravel},${f.usedTotalMin || ''},${f.perHour ? f.perHour.toFixed(2) : ''}\n`;
+            csv += `"${f.label}",${f.price.toFixed(2)},${f.usedSvcMin || ''},${f.fuenteSvc},${f.usedTravelMin || ''},${f.fuenteTravel},${f.usedTotalMin || ''},${f.empCount !== null ? f.empCount.toFixed(1) : ''},${f.laborCost !== null ? f.laborCost.toFixed(2) : ''},${f.ganancia !== null ? f.ganancia.toFixed(2) : ''}\n`;
         });
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
@@ -21437,8 +21494,8 @@ document.addEventListener('click', function(e) {
               <label style="display:block;font-size:0.75rem;color:#666;margin-bottom:3px">Ordenar por</label>
               <select id="ctSortBy" onchange="app.renderClientTimeSection()" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:0.85rem">
                 <option value="name">Nombre (A-Z)</option>
-                <option value="perHourDesc">$ / hora (mayor a menor)</option>
-                <option value="perHourAsc">$ / hora (menor a mayor)</option>
+                <option value="gananciaDesc">Ganancia (mayor a menor)</option>
+                <option value="gananciaAsc">Ganancia (menor a mayor)</option>
               </select>
             </div>
             <button onclick="app.exportClientTimeCSV()" style="padding:7px 14px;background:#0e7490;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem;font-weight:600;">📥 Exportar CSV</button>
