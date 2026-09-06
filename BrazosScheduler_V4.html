@@ -16908,12 +16908,15 @@ Motivo de cancelación (opcional):`);
         localStorage.setItem('prodClientTimeSectionCollapsed', isHidden ? 'false' : 'true');
     }
 
-    // Promedio de minutos por servicio de un cliente, usando el CHECK-IN/CHECK-OUT
-    // REAL que las empleadas registran en BrazosCalendar (_getCheckInOut), NO el
+    // Minutos por servicio de un cliente, usando el CHECK-IN/CHECK-OUT REAL que
+    // las empleadas registran en BrazosCalendar (_getCheckInOut), NO el
     // timeStart/timeEnd programado del servicio — ese casi siempre está vacío (es
-    // la MISMA fuente que ya usa la vista semanal/mensual para pintar ▶/✓). Regresa
-    // null si ningún servicio del cliente en ese rango tiene checkin+checkout.
-    _avgServiceMinutesForClient(cliId, startStr, endStr) {
+    // la MISMA fuente que ya usa la vista semanal/mensual para pintar ▶/✓).
+    // Ranu pidió el tiempo MÁS ALTO registrado (no el promedio) — un cliente que
+    // a veces toma más tiempo de lo usual conviene verlo con ese máximo, no
+    // diluido por las visitas más rápidas. Regresa null si ningún servicio del
+    // cliente en ese rango tiene checkin+checkout.
+    _maxServiceMinutesForClient(cliId, startStr, endStr) {
         const svs = (this.servs || []).filter(s =>
             String(s.cliId) === String(cliId) &&
             !s.cancelled &&
@@ -16921,16 +16924,26 @@ Motivo de cancelación (opcional):`);
             (!endStr || s.date <= endStr)
         );
         if (!svs.length) return null;
-        let totalMin = 0, count = 0;
+        let maxMin = null;
         svs.forEach(s => {
             const cio = this._getCheckInOut(s.date, s.id);
             if (!cio || !cio.checkin || !cio.checkout) return;
             const [sh, sm] = cio.checkin.split(':').map(Number);
             const [eh, em] = cio.checkout.split(':').map(Number);
             const d = (eh * 60 + em) - (sh * 60 + sm);
-            if (d > 0) { totalMin += d; count++; }
+            if (d > 0 && (maxMin === null || d > maxMin)) maxMin = d;
         });
-        return count ? Math.round(totalMin / count) : null;
+        return maxMin;
+    }
+
+    // Da formato "1h 25m" / "45m" / "2h" a un número de minutos. null pasa igual.
+    _fmtHM(min) {
+        if (min === null || min === undefined) return null;
+        const h = Math.floor(min / 60);
+        const m = min % 60;
+        if (h > 0 && m > 0) return `${h}h ${m}m`;
+        if (h > 0) return `${h}h`;
+        return `${m}m`;
     }
 
     saveManualServiceTime(cliId, value) {
@@ -16946,7 +16959,7 @@ Motivo de cancelación (opcional):`);
     // terminó el servicio ANTERIOR del mismo grupo el mismo día, y la hora en
     // que empezó el servicio de este cliente — usando el CHECK-IN/CHECK-OUT
     // REAL de BrazosCalendar (_getCheckInOut), la misma fuente que el tiempo de
-    // servicio (ver nota en _avgServiceMinutesForClient; timeStart/timeEnd casi
+    // servicio (ver nota en _maxServiceMinutesForClient; timeStart/timeEnd casi
     // siempre está vacío). Ranu confirmó que el Grupo B trae horas reales de
     // forma consistente; el resto cae al campo manual. NO cuenta el traslado
     // del PRIMER servicio del día (Shop → primer cliente) — ese vive en otra
@@ -17019,7 +17032,7 @@ Motivo de cancelación (opcional):`);
         let datos = activos.map(c => {
             const price = this.pricePerService ? this.pricePerService(c) : this._servicePrice(c, {});
 
-            const realSvcMin = this._avgServiceMinutesForClient(c.id, startStr, endStr);
+            const realSvcMin = this._maxServiceMinutesForClient(c.id, startStr, endStr);
             const manualSvcMin = c.manualServiceTimeMin || null;
             const usedSvcMin = realSvcMin || manualSvcMin;
 
@@ -17051,8 +17064,8 @@ Motivo de cancelación (opcional):`);
             datos.sort((a, b) => a.label.localeCompare(b.label));
         }
 
-        const timeCell = (realMin, manualMin, saveFn, cliId) => realMin
-            ? `${realMin} min <span title="Promedio real" style="opacity:0.6;">🕐</span>`
+        const timeCell = (realMin, manualMin, saveFn, cliId, realLabel) => realMin
+            ? `${this._fmtHM(realMin)} <span title="${realLabel}" style="opacity:0.6;">🕐</span>`
             : `<input type="number" min="0" step="5" value="${manualMin || ''}" placeholder="min"
                  style="width:60px;padding:4px 6px;border:1px solid #ddd;border-radius:5px;font-size:0.85rem;"
                  onchange="app.${saveFn}('${cliId}', this.value)"> min ${manualMin ? '<span title="Manual" style="opacity:0.6;">✍️</span>' : '<span title="Falta capturar" style="opacity:0.6;">⚠️</span>'}`;
@@ -17061,9 +17074,9 @@ Motivo de cancelación (opcional):`);
             return `<tr style="border-bottom:1px solid #f0f0f0;">
                 <td style="padding:6px 8px;">${label}</td>
                 <td style="padding:6px 8px;text-align:right;">$${price.toFixed(2)}</td>
-                <td style="padding:6px 8px;">${timeCell(realSvcMin, manualSvcMin, 'saveManualServiceTime', c.id)}</td>
-                <td style="padding:6px 8px;">${timeCell(realTravelMin, manualTravelMin, 'saveManualTravelTime', c.id)}</td>
-                <td style="padding:6px 8px;text-align:right;">${usedTotalMin ? usedTotalMin + ' min' : '—'}</td>
+                <td style="padding:6px 8px;">${timeCell(realSvcMin, manualSvcMin, 'saveManualServiceTime', c.id, 'Más alto real')}</td>
+                <td style="padding:6px 8px;">${timeCell(realTravelMin, manualTravelMin, 'saveManualTravelTime', c.id, 'Promedio real')}</td>
+                <td style="padding:6px 8px;text-align:right;">${usedTotalMin ? this._fmtHM(usedTotalMin) : '—'}</td>
                 <td style="padding:6px 8px;text-align:right;font-weight:${perHour ? '700' : '400'};color:${perHour ? '#0e7490' : '#aaa'};">
                     ${perHour ? '$' + perHour.toFixed(2) + '/hr' : '—'}
                 </td>
@@ -17077,7 +17090,7 @@ Motivo de cancelación (opcional):`);
                     <tr style="text-align:left;color:#666;font-size:0.75rem;text-transform:uppercase;border-bottom:2px solid #eee;">
                         <th style="padding:6px 8px;">Cliente</th>
                         <th style="padding:6px 8px;text-align:right;">Precio/Servicio</th>
-                        <th style="padding:6px 8px;">Tiempo Servicio</th>
+                        <th style="padding:6px 8px;">Tiempo Servicio (máx.)</th>
                         <th style="padding:6px 8px;">Tiempo Traslado</th>
                         <th style="padding:6px 8px;text-align:right;">Tiempo Total</th>
                         <th style="padding:6px 8px;text-align:right;">$ / hora</th>
@@ -17087,7 +17100,7 @@ Motivo de cancelación (opcional):`);
             </table>
             </div>
             <p style="font-size:0.75rem;color:#999;margin-top:8px;">
-                🕐 = promedio real (servicios/huecos con hora capturada en el rango de arriba) · ✍️ = capturado a mano · ⚠️ = falta capturar.
+                🕐 = real (Tiempo Servicio: el más alto registrado en el rango; Tiempo Traslado: promedio de los huecos capturados) · ✍️ = capturado a mano · ⚠️ = falta capturar.
                 El traslado real se calcula del hueco entre el fin de la visita anterior del mismo grupo y el inicio de esta (no incluye el traslado Shop → primer cliente del día).
                 El $/hora sólo sale cuando YA se conoce servicio + traslado (real o manual) de ese cliente.
             </p>`;
@@ -17101,10 +17114,10 @@ Motivo de cancelación (opcional):`);
         let filas = activos.map(c => {
             const price = this.pricePerService ? this.pricePerService(c) : this._servicePrice(c, {});
 
-            const realSvcMin = this._avgServiceMinutesForClient(c.id, startStr, endStr);
+            const realSvcMin = this._maxServiceMinutesForClient(c.id, startStr, endStr);
             const manualSvcMin = c.manualServiceTimeMin || null;
             const usedSvcMin = realSvcMin || manualSvcMin;
-            const fuenteSvc = realSvcMin ? 'Real (promedio)' : (manualSvcMin ? 'Manual' : 'Falta capturar');
+            const fuenteSvc = realSvcMin ? 'Real (más alto)' : (manualSvcMin ? 'Manual' : 'Falta capturar');
 
             const realTravelMin = this._avgTravelMinutesForClient(c.id, startStr, endStr);
             const manualTravelMin = c.manualTravelTimeMin || null;
