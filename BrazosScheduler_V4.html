@@ -16908,22 +16908,25 @@ Motivo de cancelación (opcional):`);
         localStorage.setItem('prodClientTimeSectionCollapsed', isHidden ? 'false' : 'true');
     }
 
-    // Promedio de minutos por servicio de un cliente, solo con los servicios que
-    // sí tienen timeStart Y timeEnd capturados dentro del rango de fechas. Regresa
-    // null si ninguno del cliente en ese rango tiene ambas horas.
+    // Promedio de minutos por servicio de un cliente, usando el CHECK-IN/CHECK-OUT
+    // REAL que las empleadas registran en BrazosCalendar (_getCheckInOut), NO el
+    // timeStart/timeEnd programado del servicio — ese casi siempre está vacío (es
+    // la MISMA fuente que ya usa la vista semanal/mensual para pintar ▶/✓). Regresa
+    // null si ningún servicio del cliente en ese rango tiene checkin+checkout.
     _avgServiceMinutesForClient(cliId, startStr, endStr) {
         const svs = (this.servs || []).filter(s =>
             String(s.cliId) === String(cliId) &&
             !s.cancelled &&
-            s.timeStart && s.timeEnd &&
             (!startStr || s.date >= startStr) &&
             (!endStr || s.date <= endStr)
         );
         if (!svs.length) return null;
         let totalMin = 0, count = 0;
         svs.forEach(s => {
-            const [sh, sm] = s.timeStart.split(':').map(Number);
-            const [eh, em] = s.timeEnd.split(':').map(Number);
+            const cio = this._getCheckInOut(s.date, s.id);
+            if (!cio || !cio.checkin || !cio.checkout) return;
+            const [sh, sm] = cio.checkin.split(':').map(Number);
+            const [eh, em] = cio.checkout.split(':').map(Number);
             const d = (eh * 60 + em) - (sh * 60 + sm);
             if (d > 0) { totalMin += d; count++; }
         });
@@ -16941,34 +16944,40 @@ Motivo de cancelación (opcional):`);
 
     // Tiempo de TRASLADO real hacia un cliente: el hueco entre la hora en que
     // terminó el servicio ANTERIOR del mismo grupo el mismo día, y la hora en
-    // que empezó el servicio de este cliente. Ranu confirmó que el Grupo B ya
-    // trae horas reales capturadas de forma consistente, así que para esos
-    // clientes este cálculo va a tener datos; para el resto (grupos que no
-    // capturan hora) va a salir null y se cae al campo manual, igual que el
-    // tiempo de servicio. NO cuenta el traslado del PRIMER servicio del día
-    // (Shop → primer cliente) — ese vive en otra fuente de datos (Shop→Shop
-    // de BrazosCalendar) y queda fuera de este cálculo por ahora.
+    // que empezó el servicio de este cliente — usando el CHECK-IN/CHECK-OUT
+    // REAL de BrazosCalendar (_getCheckInOut), la misma fuente que el tiempo de
+    // servicio (ver nota en _avgServiceMinutesForClient; timeStart/timeEnd casi
+    // siempre está vacío). Ranu confirmó que el Grupo B trae horas reales de
+    // forma consistente; el resto cae al campo manual. NO cuenta el traslado
+    // del PRIMER servicio del día (Shop → primer cliente) — ese vive en otra
+    // fuente (Shop→Shop de BrazosCalendar) y queda fuera de este cálculo.
     _avgTravelMinutesForClient(cliId, startStr, endStr) {
         const inRange = (this.servs || []).filter(s =>
-            !s.cancelled && s.timeStart && s.timeEnd &&
+            !s.cancelled &&
             (!startStr || s.date >= startStr) &&
             (!endStr || s.date <= endStr)
         );
+        // Sólo sirven los servicios con checkin+checkout real capturado.
+        const withTimes = inRange.map(s => {
+            const cio = this._getCheckInOut(s.date, s.id);
+            return (cio && cio.checkin && cio.checkout) ? { s, checkin: cio.checkin, checkout: cio.checkout } : null;
+        }).filter(Boolean);
+
         const byDayGroup = {};
-        inRange.forEach(s => {
-            const grp = s.grupo || s.empId || '';
-            const key = s.date + '|' + grp;
-            (byDayGroup[key] = byDayGroup[key] || []).push(s);
+        withTimes.forEach(item => {
+            const grp = item.s.grupo || item.s.empId || '';
+            const key = item.s.date + '|' + grp;
+            (byDayGroup[key] = byDayGroup[key] || []).push(item);
         });
-        Object.values(byDayGroup).forEach(list => list.sort((a, b) => (a.timeStart || '').localeCompare(b.timeStart || '')));
+        Object.values(byDayGroup).forEach(list => list.sort((a, b) => a.checkin.localeCompare(b.checkin)));
 
         let totalMin = 0, count = 0;
         Object.values(byDayGroup).forEach(list => {
             for (let i = 1; i < list.length; i++) {
                 const prev = list[i - 1], cur = list[i];
-                if (String(cur.cliId) !== String(cliId)) continue;
-                const [ph, pm] = prev.timeEnd.split(':').map(Number);
-                const [ch, cm] = cur.timeStart.split(':').map(Number);
+                if (String(cur.s.cliId) !== String(cliId)) continue;
+                const [ph, pm] = prev.checkout.split(':').map(Number);
+                const [ch, cm] = cur.checkin.split(':').map(Number);
                 const gap = (ch * 60 + cm) - (ph * 60 + pm);
                 // Descarta huecos negativos (datos mal capturados) y huecos
                 // absurdamente largos (>3h probablemente es almuerzo u otra
@@ -17779,6 +17788,10 @@ Motivo de cancelación (opcional):`);
             status.textContent = `✅ ${cargados} día(s) cargados`;
             status.style.color = '#27ae60';
             this.renderProductionReport();
+            // Recalcular Precio/Tiempo por Cliente con los horarios recién bajados
+            // de Drive — sin esto, la sección se quedaba con lo que había al abrir
+            // Producción y no reflejaba check-ins/check-outs recién sincronizados.
+            this.renderClientTimeSection();
             this.render();
         } catch(e) { status.textContent = '❌ Error: ' + e.message; status.style.color = '#e74c3c'; }
     }
