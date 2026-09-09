@@ -16912,11 +16912,11 @@ Motivo de cancelación (opcional):`);
     // las empleadas registran en BrazosCalendar (_getCheckInOut), NO el
     // timeStart/timeEnd programado del servicio — ese casi siempre está vacío (es
     // la MISMA fuente que ya usa la vista semanal/mensual para pintar ▶/✓).
-    // Ranu pidió el tiempo MÁS ALTO registrado (no el promedio) — un cliente que
-    // a veces toma más tiempo de lo usual conviene verlo con ese máximo, no
-    // diluido por las visitas más rápidas. Regresa null si ningún servicio del
-    // cliente en ese rango tiene checkin+checkout.
-    _maxServiceMinutesForClient(cliId, startStr, endStr) {
+    // Ranu pidió poder ELEGIR POR CLIENTE entre el PROMEDIO y el MÁS ALTO
+    // registrado (antes era fijo al más alto) — mode: 'avg' | 'max', se guarda
+    // en c.serviceTimeMode (ver saveServiceTimeMode). Regresa null si ningún
+    // servicio del cliente en ese rango tiene checkin+checkout.
+    _serviceMinutesForClient(cliId, startStr, endStr, mode) {
         const svs = (this.servs || []).filter(s =>
             String(s.cliId) === String(cliId) &&
             !s.cancelled &&
@@ -16924,16 +16924,39 @@ Motivo de cancelación (opcional):`);
             (!endStr || s.date <= endStr)
         );
         if (!svs.length) return null;
-        let maxMin = null;
+        const duraciones = [];
         svs.forEach(s => {
             const cio = this._getCheckInOut(s.date, s.id);
             if (!cio || !cio.checkin || !cio.checkout) return;
             const [sh, sm] = cio.checkin.split(':').map(Number);
             const [eh, em] = cio.checkout.split(':').map(Number);
             const d = (eh * 60 + em) - (sh * 60 + sm);
-            if (d > 0 && (maxMin === null || d > maxMin)) maxMin = d;
+            if (d > 0) duraciones.push(d);
         });
-        return maxMin;
+        if (!duraciones.length) return null;
+        if (mode === 'avg') {
+            return Math.round(duraciones.reduce((a, b) => a + b, 0) / duraciones.length);
+        }
+        return Math.max(...duraciones);
+    }
+
+    saveServiceTimeMode(cliId, mode) {
+        const idx = this.clis.findIndex(c => String(c.id) === String(cliId));
+        if (idx === -1) return;
+        this.clis[idx].serviceTimeMode = (mode === 'avg') ? 'avg' : 'max';
+        this.save();
+        this.renderClientTimeSection();
+    }
+
+    saveManualPrice(cliId, value) {
+        const idx = this.clis.findIndex(c => String(c.id) === String(cliId));
+        if (idx === -1) return;
+        const val = parseFloat(value);
+        // Este override sólo afecta ESTE reporte de rentabilidad — NO toca
+        // cli.price ni la facturación real. Se guarda en manualPricePerService.
+        this.clis[idx].manualPricePerService = (!isNaN(val) && val >= 0) ? val : null;
+        this.save();
+        this.renderClientTimeSection();
     }
 
     // Da formato "1h 25m" / "45m" / "2h" a un número de minutos. null pasa igual.
@@ -16959,11 +16982,14 @@ Motivo de cancelación (opcional):`);
     // terminó el servicio ANTERIOR del mismo grupo el mismo día, y la hora en
     // que empezó el servicio de este cliente — usando el CHECK-IN/CHECK-OUT
     // REAL de BrazosCalendar (_getCheckInOut), la misma fuente que el tiempo de
-    // servicio (ver nota en _maxServiceMinutesForClient; timeStart/timeEnd casi
-    // siempre está vacío). Ranu confirmó que el Grupo B trae horas reales de
-    // forma consistente; el resto cae al campo manual. NO cuenta el traslado
-    // del PRIMER servicio del día (Shop → primer cliente) — ese vive en otra
+    // servicio. Ranu confirmó que el Grupo B trae horas reales de forma
+    // consistente; el resto cae al campo manual. NO cuenta el traslado del
+    // PRIMER servicio del día (Shop → primer cliente) — ese vive en otra
     // fuente (Shop→Shop de BrazosCalendar) y queda fuera de este cálculo.
+    // Sep9: Ranu pidió QUITAR el traslado del reporte de Precio/Tiempo por
+    // Cliente (renderClientTimeSection/exportClientTimeCSV ya NO la llaman) —
+    // se deja la función y saveManualTravelTime sin usar por si se reutiliza
+    // en otro lado, no se borraron datos ya capturados (manualTravelTimeMin).
     _avgTravelMinutesForClient(cliId, startStr, endStr) {
         const inRange = (this.servs || []).filter(s =>
             !s.cancelled &&
@@ -17047,54 +17073,67 @@ Motivo de cancelación (opcional):`);
         return { empCount: sumaEmpCount / n, rateHr: sumaRateHr / n };
     }
 
+    // Sep9: Ranu pidió omitir del reporte a los clientes a los que "ya no se
+    // hace servicio" — clientes que siguen marcados activos (no pausados)
+    // pero no tienen NINGÚN servicio real en el rango de fechas elegido.
+    // OJO: esto depende del rango "Desde/Hasta" del reporte — un cliente
+    // mensual o quincenal puede no tener servicio en un rango corto (ej. los
+    // "últimos 30 días" por defecto) sin estar realmente inactivo; conviene
+    // ampliar el rango (ej. 60-90 días) si se quiere ver también a esos.
+    _clientHasServiceInRange(cliId, startStr, endStr) {
+        return (this.servs || []).some(s =>
+            String(s.cliId) === String(cliId) &&
+            !s.cancelled &&
+            (!startStr || s.date >= startStr) &&
+            (!endStr || s.date <= endStr)
+        );
+    }
+
     renderClientTimeSection() {
         const body = document.getElementById('clientTimeBody');
         if (!body) return;
         const startStr = document.getElementById('ctRangeStart')?.value;
         const endStr = document.getElementById('ctRangeEnd')?.value;
 
-        // Solo clientes activos (no pausados) — un cliente suspendido no aporta
-        // nada a la decisión de "a quién mantener".
+        // Solo clientes activos (no pausados) Y con al menos un servicio real
+        // en el rango — así se omiten los que ya no reciben servicio aunque
+        // sigan con la ficha "activa" en el sistema.
         const activos = [...(this.clis || [])]
-            .filter(c => !c.servicePaused);
+            .filter(c => !c.servicePaused)
+            .filter(c => this._clientHasServiceInRange(c.id, startStr, endStr));
 
         if (!activos.length) {
-            body.innerHTML = '<p style="color:#888;font-size:0.85rem;">No hay clientes activos.</p>';
+            body.innerHTML = '<p style="color:#888;font-size:0.85rem;">No hay clientes con servicio en este rango.</p>';
             return;
         }
 
-        // Primero se calcula TODO por cliente (precio, tiempos, mano de obra,
+        // Primero se calcula TODO por cliente (precio, tiempo, mano de obra,
         // ganancia); el orden se decide después según "Ordenar por" — así
         // "Ganancia mayor a menor" funciona como ranking de qué clientes
         // conviene más mantener.
         let datos = activos.map(c => {
-            const price = this.pricePerService ? this.pricePerService(c) : this._servicePrice(c, {});
+            const basePrice = this.pricePerService ? this.pricePerService(c) : this._servicePrice(c, {});
+            // Precio EDITABLE sólo para este reporte — si Ranu escribió un
+            // valor manual (manualPricePerService) se usa ese; NO toca
+            // cli.price ni la facturación real.
+            const price = (c.manualPricePerService !== undefined && c.manualPricePerService !== null) ? c.manualPricePerService : basePrice;
 
-            const realSvcMin = this._maxServiceMinutesForClient(c.id, startStr, endStr);
+            const mode = c.serviceTimeMode === 'avg' ? 'avg' : 'max';
+            const realSvcMin = this._serviceMinutesForClient(c.id, startStr, endStr, mode);
             const manualSvcMin = c.manualServiceTimeMin || null;
             const usedSvcMin = realSvcMin || manualSvcMin;
 
-            const realTravelMin = this._avgTravelMinutesForClient(c.id, startStr, endStr);
-            const manualTravelMin = c.manualTravelTimeMin || null;
-            const usedTravelMin = realTravelMin || manualTravelMin;
-
-            // El total (y la mano de obra/ganancia) sólo se calcula cuando YA se
-            // sabe tanto el tiempo de servicio como el de traslado (real o
-            // manual) — sumar con un 0 implícito donde falta daría una ganancia
-            // inflada y engañosa.
-            const usedTotalMin = (usedSvcMin && usedTravelMin) ? (usedSvcMin + usedTravelMin) : null;
-
             // Mano de obra: tarifa/hora del grupo (o promedio de grupos, si lo
-            // atendió más de uno en el rango) × Tiempo Total. Ganancia = Precio
-            // − Mano de Obra. Ambas requieren conocer ya el Tiempo Total Y el
+            // atendió más de uno en el rango) × Tiempo de Servicio. Ganancia =
+            // Precio − Mano de Obra. Ambas requieren conocer ya el tiempo Y el
             // grupo que hizo el servicio.
             const laborInfo = this._laborInfoForClient(c.id, startStr, endStr);
-            const laborCost = (laborInfo && usedTotalMin) ? (laborInfo.rateHr * (usedTotalMin / 60)) : null;
+            const laborCost = (laborInfo && usedSvcMin) ? (laborInfo.rateHr * (usedSvcMin / 60)) : null;
             const ganancia = (laborCost !== null && price != null) ? (price - laborCost) : null;
 
             const label = c.propId ? `${c.name} · ${c.propId}` : c.name;
 
-            return { c, price, realSvcMin, manualSvcMin, realTravelMin, manualTravelMin, usedTotalMin, laborInfo, laborCost, ganancia, label };
+            return { c, price, mode, realSvcMin, manualSvcMin, laborInfo, laborCost, ganancia, label };
         });
 
         const sortBy = document.getElementById('ctSortBy')?.value || 'name';
@@ -17112,20 +17151,30 @@ Motivo de cancelación (opcional):`);
             datos.sort((a, b) => a.label.localeCompare(b.label));
         }
 
-        const timeCell = (realMin, manualMin, saveFn, cliId, realLabel) => realMin
-            ? `${this._fmtHM(realMin)} <span title="${realLabel}" style="opacity:0.6;">🕐</span>`
-            : `<input type="number" min="0" step="5" value="${manualMin || ''}" placeholder="min"
-                 style="width:60px;padding:4px 6px;border:1px solid #ddd;border-radius:5px;font-size:0.85rem;"
-                 onchange="app.${saveFn}('${cliId}', this.value)"> min ${manualMin ? '<span title="Manual" style="opacity:0.6;">✍️</span>' : '<span title="Falta capturar" style="opacity:0.6;">⚠️</span>'}`;
+        const priceCell = (price, cliId) => `<input type="number" min="0" step="0.01" value="${price.toFixed(2)}"
+             style="width:75px;padding:4px 6px;border:1px solid #ddd;border-radius:5px;font-size:0.85rem;text-align:right;"
+             onchange="app.saveManualPrice('${cliId}', this.value)">`;
 
-        const rows = datos.map(({ c, price, realSvcMin, manualSvcMin, realTravelMin, manualTravelMin, usedTotalMin, laborInfo, laborCost, ganancia, label }) => {
+        const timeCell = (realMin, manualMin, mode, cliId) => {
+            const modeSelect = `<select onchange="app.saveServiceTimeMode('${cliId}', this.value)"
+                 style="font-size:0.7rem;padding:2px 3px;border:1px solid #ddd;border-radius:4px;margin-left:5px;vertical-align:middle;">
+                <option value="max" ${mode === 'max' ? 'selected' : ''}>máx.</option>
+                <option value="avg" ${mode === 'avg' ? 'selected' : ''}>prom.</option>
+            </select>`;
+            const valueHtml = realMin
+                ? `${this._fmtHM(realMin)} <span title="${mode === 'avg' ? 'Promedio real' : 'Más alto real'}" style="opacity:0.6;">🕐</span>`
+                : `<input type="number" min="0" step="5" value="${manualMin || ''}" placeholder="min"
+                     style="width:60px;padding:4px 6px;border:1px solid #ddd;border-radius:5px;font-size:0.85rem;"
+                     onchange="app.saveManualServiceTime('${cliId}', this.value)"> min ${manualMin ? '<span title="Manual" style="opacity:0.6;">✍️</span>' : '<span title="Falta capturar" style="opacity:0.6;">⚠️</span>'}`;
+            return valueHtml + modeSelect;
+        };
+
+        const rows = datos.map(({ c, price, mode, realSvcMin, manualSvcMin, laborInfo, laborCost, ganancia, label }) => {
             const empCountLabel = laborInfo ? (Number.isInteger(laborInfo.empCount) ? laborInfo.empCount : laborInfo.empCount.toFixed(1)) : '—';
             return `<tr style="border-bottom:1px solid #f0f0f0;">
                 <td style="padding:6px 8px;">${label}</td>
-                <td style="padding:6px 8px;text-align:right;">$${price.toFixed(2)}</td>
-                <td style="padding:6px 8px;">${timeCell(realSvcMin, manualSvcMin, 'saveManualServiceTime', c.id, 'Más alto real')}</td>
-                <td style="padding:6px 8px;">${timeCell(realTravelMin, manualTravelMin, 'saveManualTravelTime', c.id, 'Promedio real')}</td>
-                <td style="padding:6px 8px;text-align:right;">${usedTotalMin ? this._fmtHM(usedTotalMin) : '—'}</td>
+                <td style="padding:6px 8px;text-align:right;">${priceCell(price, c.id)}</td>
+                <td style="padding:6px 8px;">${timeCell(realSvcMin, manualSvcMin, mode, c.id)}</td>
                 <td style="padding:6px 8px;text-align:center;">${empCountLabel}</td>
                 <td style="padding:6px 8px;text-align:right;">${laborCost !== null ? '$' + laborCost.toFixed(2) : '—'}</td>
                 <td style="padding:6px 8px;text-align:right;font-weight:${ganancia !== null ? '700' : '400'};color:${ganancia === null ? '#aaa' : (ganancia >= 0 ? '#27ae60' : '#e74c3c')};">
@@ -17141,9 +17190,7 @@ Motivo de cancelación (opcional):`);
                     <tr style="text-align:left;color:#666;font-size:0.75rem;text-transform:uppercase;border-bottom:2px solid #eee;">
                         <th style="padding:6px 8px;">Cliente</th>
                         <th style="padding:6px 8px;text-align:right;">Precio/Servicio</th>
-                        <th style="padding:6px 8px;">Tiempo Servicio (máx.)</th>
-                        <th style="padding:6px 8px;">Tiempo Traslado</th>
-                        <th style="padding:6px 8px;text-align:right;">Tiempo Total</th>
+                        <th style="padding:6px 8px;">Tiempo de Servicio</th>
                         <th style="padding:6px 8px;text-align:center;"># Emp.</th>
                         <th style="padding:6px 8px;text-align:right;">Mano de Obra</th>
                         <th style="padding:6px 8px;text-align:right;">Ganancia</th>
@@ -17153,38 +17200,35 @@ Motivo de cancelación (opcional):`);
             </table>
             </div>
             <p style="font-size:0.75rem;color:#999;margin-top:8px;">
-                🕐 = real (Tiempo Servicio: el más alto registrado en el rango; Tiempo Traslado: promedio de los huecos capturados) · ✍️ = capturado a mano · ⚠️ = falta capturar.
-                El traslado real se calcula del hueco entre el fin de la visita anterior del mismo grupo y el inicio de esta (no incluye el traslado Shop → primer cliente del día).
-                # Emp. = empleados configurados en el grupo que atendió a este cliente en el rango (si lo atendió más de un grupo, se promedia entre ellos). Mano de Obra = tarifa/hora del grupo × Tiempo Total. Ganancia = Precio − Mano de Obra. Ambas sólo salen cuando YA se conoce el Tiempo Total y el grupo que hizo el servicio.
+                Precio: editable por cliente (sólo afecta este reporte, no la facturación real). Tiempo de Servicio: elige por cliente entre "máx." (el más alto registrado) y "prom." (el promedio); 🕐 = real capturado · ✍️ = capturado a mano · ⚠️ = falta capturar.
+                # Emp. = empleados configurados en el grupo que atendió a este cliente en el rango (si lo atendió más de un grupo, se promedia entre ellos). Mano de Obra = tarifa/hora del grupo × Tiempo de Servicio. Ganancia = Precio − Mano de Obra. Ambas sólo salen cuando YA se conoce el tiempo y el grupo que hizo el servicio.
             </p>`;
     }
 
     exportClientTimeCSV() {
         const startStr = document.getElementById('ctRangeStart')?.value;
         const endStr = document.getElementById('ctRangeEnd')?.value;
-        const activos = [...(this.clis || [])].filter(c => !c.servicePaused);
+        const activos = [...(this.clis || [])]
+            .filter(c => !c.servicePaused)
+            .filter(c => this._clientHasServiceInRange(c.id, startStr, endStr));
 
         let filas = activos.map(c => {
-            const price = this.pricePerService ? this.pricePerService(c) : this._servicePrice(c, {});
+            const basePrice = this.pricePerService ? this.pricePerService(c) : this._servicePrice(c, {});
+            const price = (c.manualPricePerService !== undefined && c.manualPricePerService !== null) ? c.manualPricePerService : basePrice;
+            const fuentePrice = (c.manualPricePerService !== undefined && c.manualPricePerService !== null) ? 'Manual' : 'Calculado';
 
-            const realSvcMin = this._maxServiceMinutesForClient(c.id, startStr, endStr);
+            const mode = c.serviceTimeMode === 'avg' ? 'avg' : 'max';
+            const realSvcMin = this._serviceMinutesForClient(c.id, startStr, endStr, mode);
             const manualSvcMin = c.manualServiceTimeMin || null;
             const usedSvcMin = realSvcMin || manualSvcMin;
-            const fuenteSvc = realSvcMin ? 'Real (más alto)' : (manualSvcMin ? 'Manual' : 'Falta capturar');
-
-            const realTravelMin = this._avgTravelMinutesForClient(c.id, startStr, endStr);
-            const manualTravelMin = c.manualTravelTimeMin || null;
-            const usedTravelMin = realTravelMin || manualTravelMin;
-            const fuenteTravel = realTravelMin ? 'Real (promedio)' : (manualTravelMin ? 'Manual' : 'Falta capturar');
-
-            const usedTotalMin = (usedSvcMin && usedTravelMin) ? (usedSvcMin + usedTravelMin) : null;
+            const fuenteSvc = realSvcMin ? (mode === 'avg' ? 'Real (promedio)' : 'Real (más alto)') : (manualSvcMin ? 'Manual' : 'Falta capturar');
 
             const laborInfo = this._laborInfoForClient(c.id, startStr, endStr);
-            const laborCost = (laborInfo && usedTotalMin) ? (laborInfo.rateHr * (usedTotalMin / 60)) : null;
+            const laborCost = (laborInfo && usedSvcMin) ? (laborInfo.rateHr * (usedSvcMin / 60)) : null;
             const ganancia = (laborCost !== null && price != null) ? (price - laborCost) : null;
 
             const label = (c.propId ? `${c.name} - ${c.propId}` : c.name).replace(/"/g, '""');
-            return { label, price, usedSvcMin, fuenteSvc, usedTravelMin, fuenteTravel, usedTotalMin, empCount: laborInfo ? laborInfo.empCount : null, laborCost, ganancia };
+            return { label, price, fuentePrice, usedSvcMin, fuenteSvc, empCount: laborInfo ? laborInfo.empCount : null, laborCost, ganancia };
         });
 
         // Mismo orden que la tabla en pantalla ("Ordenar por"), para que el CSV
@@ -17201,9 +17245,9 @@ Motivo de cancelación (opcional):`);
             filas.sort((a, b) => a.label.localeCompare(b.label));
         }
 
-        let csv = 'Cliente,Precio por Servicio,Tiempo de Servicio (min),Fuente Servicio,Tiempo de Traslado (min),Fuente Traslado,Tiempo Total (min),# Empleados,Mano de Obra,Ganancia\n';
+        let csv = 'Cliente,Precio por Servicio,Fuente Precio,Tiempo de Servicio (min),Fuente Servicio,# Empleados,Mano de Obra,Ganancia\n';
         filas.forEach(f => {
-            csv += `"${f.label}",${f.price.toFixed(2)},${f.usedSvcMin || ''},${f.fuenteSvc},${f.usedTravelMin || ''},${f.fuenteTravel},${f.usedTotalMin || ''},${f.empCount !== null ? f.empCount.toFixed(1) : ''},${f.laborCost !== null ? f.laborCost.toFixed(2) : ''},${f.ganancia !== null ? f.ganancia.toFixed(2) : ''}\n`;
+            csv += `"${f.label}",${f.price.toFixed(2)},${f.fuentePrice},${f.usedSvcMin || ''},${f.fuenteSvc},${f.empCount !== null ? f.empCount.toFixed(1) : ''},${f.laborCost !== null ? f.laborCost.toFixed(2) : ''},${f.ganancia !== null ? f.ganancia.toFixed(2) : ''}\n`;
         });
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
