@@ -17170,7 +17170,11 @@ Motivo de cancelación (opcional):`);
         };
 
         const rows = datos.map(({ c, price, mode, realSvcMin, manualSvcMin, laborInfo, laborCost, ganancia, label }) => {
-            const empCountLabel = laborInfo ? (Number.isInteger(laborInfo.empCount) ? laborInfo.empCount : laborInfo.empCount.toFixed(1)) : '—';
+            // # Emp. se REDONDEA HACIA ARRIBA — no puede ir "media persona" a
+            // trabajar; el promedio fraccional entre grupos distintos sólo se
+            // usa internamente para el costo de mano de obra (rateHr), no para
+            // mostrar personas.
+            const empCountLabel = laborInfo ? Math.ceil(laborInfo.empCount) : '—';
             return `<tr style="border-bottom:1px solid #f0f0f0;">
                 <td style="padding:6px 8px;">${label}</td>
                 <td style="padding:6px 8px;text-align:right;">${priceCell(price, c.id)}</td>
@@ -17247,7 +17251,7 @@ Motivo de cancelación (opcional):`);
 
         let csv = 'Cliente,Precio por Servicio,Fuente Precio,Tiempo de Servicio (min),Fuente Servicio,# Empleados,Mano de Obra,Ganancia\n';
         filas.forEach(f => {
-            csv += `"${f.label}",${f.price.toFixed(2)},${f.fuentePrice},${f.usedSvcMin || ''},${f.fuenteSvc},${f.empCount !== null ? f.empCount.toFixed(1) : ''},${f.laborCost !== null ? f.laborCost.toFixed(2) : ''},${f.ganancia !== null ? f.ganancia.toFixed(2) : ''}\n`;
+            csv += `"${f.label}",${f.price.toFixed(2)},${f.fuentePrice},${f.usedSvcMin || ''},${f.fuenteSvc},${f.empCount !== null ? Math.ceil(f.empCount) : ''},${f.laborCost !== null ? f.laborCost.toFixed(2) : ''},${f.ganancia !== null ? f.ganancia.toFixed(2) : ''}\n`;
         });
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
