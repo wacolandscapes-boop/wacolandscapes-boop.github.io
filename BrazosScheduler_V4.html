@@ -3354,14 +3354,15 @@ class Scheduler {
         if (!cli) return;
         const tipo=document.getElementById('dropTipo').value, grupo=document.getElementById('dropGrupo').value;
         const ts=document.getElementById('dropTimeStart').value, te=document.getElementById('dropTimeEnd').value;
+        const _dropPrice = this.pricePerService(cli);
         if (tipo==='unico'||tipo==='airbnb') {
-            this.servs.push({id:Date.now()+Math.random(),cliId:cli.id,empId:grupo,grupo,date,type:tipo,timeStart:ts,timeEnd:te,priority:0,status:'pending'});
+            this.servs.push({id:Date.now()+Math.random(),cliId:cli.id,empId:grupo,grupo,date,type:tipo,timeStart:ts,timeEnd:te,priority:0,status:'pending',price:_dropPrice});
         } else {
             let cur=new Date(document.getElementById('dropSerieStart').value+'T12:00:00');
             const end=new Date(document.getElementById('dropSerieEnd').value+'T12:00:00');
             let n=0;
             while(cur<=end&&n<500){
-                this.servs.push({id:Date.now()+n+Math.random(),cliId:cli.id,empId:grupo,grupo,date:cur.toLocaleDateString('en-CA'),type:tipo,timeStart:ts,timeEnd:te,priority:0,status:'pending'});
+                this.servs.push({id:Date.now()+n+Math.random(),cliId:cli.id,empId:grupo,grupo,date:cur.toLocaleDateString('en-CA'),type:tipo,timeStart:ts,timeEnd:te,priority:0,status:'pending',price:_dropPrice});
                 n++;
                 if(tipo==='diario')cur.setDate(cur.getDate()+1);
                 else if(tipo==='semanal')cur.setDate(cur.getDate()+7);
@@ -4113,19 +4114,28 @@ class Scheduler {
         const _resolvedCliId = (_propWrap && _propWrap.style.display !== 'none' && _propSel && _propSel.value)
             ? _propSel.value
             : document.getElementById('mCli').value;
-        const data = { 
-            id: this.editing?this.editing.id:Date.now(), 
-            cliId: _resolvedCliId, 
-            empId: document.getElementById('mEmp').value, 
+        // Precio: si se está editando un servicio que YA tenía un precio guardado (snapshot),
+        // se conserva tal cual — no se recalcula con el precio actual del cliente. Si es
+        // servicio nuevo (o edición de uno viejo sin snapshot todavía), se toma el precio
+        // ACTUAL del cliente en este momento y queda fijo desde ahora en adelante.
+        const _priceCli = this.clis.find(x => x.id == _resolvedCliId);
+        const _snapshotPrice = (this.editing && this.editing.price !== undefined && this.editing.price !== null)
+            ? this.editing.price
+            : (_priceCli ? this.pricePerService(_priceCli) : 0);
+        const data = {
+            id: this.editing?this.editing.id:Date.now(),
+            cliId: _resolvedCliId,
+            empId: document.getElementById('mEmp').value,
             date: document.getElementById('mDate').value,
             timeStart: document.getElementById('mTimeStart').value || '',
-            timeEnd: document.getElementById('mTimeEnd').value || '', 
+            timeEnd: document.getElementById('mTimeEnd').value || '',
             name: document.getElementById('taskName').value,
             priority: document.getElementById('mPriority')?.value || '',
             customColor: (document.getElementById('mCustomColorActive')?.checked && document.getElementById('mCustomColor')?.value !== '#ffffff') ? document.getElementById('mCustomColor')?.value : null,
             airbnbNote: document.getElementById('mAirbnbNote')?.value || '',
             cancelled: isCancelled,
-            serieId: this.editing ? (this.editing.serieId || null) : null
+            serieId: this.editing ? (this.editing.serieId || null) : null,
+            price: _snapshotPrice
         };
         if(this.editing) {
             // Eliminar el original primero para evitar duplicados
@@ -4231,7 +4241,7 @@ class Scheduler {
                     empId: data.empId, grupo: data.empId, name: data.name||'',
                     priority: data.priority, timeStart:'', timeEnd:'',
                     cancelled: false, retroactive: true, status:'completed',
-                    serieId: data.serieId
+                    serieId: data.serieId, price: data.price
                 });
                 retCur = stepBack(retCur);
                 retCount++;
@@ -6006,6 +6016,13 @@ class Scheduler {
                     if (document.getElementById('manualInvEmail')) {
                         document.getElementById('manualInvEmail').value = this.getClientEmail(propCli);
                     }
+                    // Sep9: mismo bug que en editarMontosFactura — esta rama (facturar
+                    // construcción desde Pendientes) ponía el cliente en el campo oculto
+                    // directamente y nunca cargaba el checkbox de impuestos, así que
+                    // quedaba con lo que tuviera de la factura anterior en vez de la
+                    // ficha de ESTE cliente. Siempre es una factura NUEVA (viene de un
+                    // pendiente aún no generado), así que se toma del perfil del cliente.
+                    this._cargarImpuestoDelCliente(propCli, 'manualInvApplyTax', 'manualInvTaxRate', 'toggleManualTaxField');
                 }
                 const listEl = document.getElementById('manualInvItemsList');
                 if (listEl) {
@@ -6242,6 +6259,38 @@ class Scheduler {
             }
             return false;
         });
+    }
+
+    // ── Monto REAL ya facturado para un servicio (para reportes financieros históricos) ──
+    // Reusa el mismo criterio de matching que _servicioEnFacturaGenerada (id de item,
+    // luego fecha+cliente, luego rango de fechas) pero en vez de solo confirmar que existe,
+    // devuelve el precio (item.precio) que quedó grabado en esa factura ya generada.
+    // Esto es clave para que Finanzas nunca recalcule con el precio ACTUAL del cliente
+    // un servicio que ya fue facturado con un precio distinto (viejo) en su momento.
+    // Devuelve null si el servicio no está cubierto por ninguna factura generada (no cancelada).
+    _montoRealDelServicio(svc) {
+        for (const g of (this.generatedInvoices || [])) {
+            if (g.status === 'cancelada') continue;
+            if (!g.items || !g.items.length) {
+                // Factura muy vieja sin items: solo sabemos que el servicio cae en su rango,
+                // pero no hay un monto por-servicio individual que extraer.
+                continue;
+            }
+            // 1) Empate exacto por id de servicio (facturas nuevas, incluye manuales)
+            const byId = g.items.find(it => it && it.id !== undefined && it.id !== null && String(it.id) === String(svc.id));
+            if (byId && byId.precio !== undefined && byId.precio !== null) {
+                return { monto: parseFloat(byId.precio) || 0, fuente: 'facturado' };
+            }
+            // 2) Fallback por fecha+cliente (facturas viejas con items sin id)
+            const byFecha = g.items.find(it => it && (it.id === undefined || it.id === null) && it.fecha === svc.date);
+            if (byFecha) {
+                const clienteOk = !g.clientIds || g.clientIds.length === 0 || g.clientIds.some(id => String(id) === String(svc.cliId));
+                if (clienteOk && byFecha.precio !== undefined && byFecha.precio !== null) {
+                    return { monto: parseFloat(byFecha.precio) || 0, fuente: 'facturado' };
+                }
+            }
+        }
+        return null;
     }
 
     _isServiceInvoiced(svc) {
@@ -8498,6 +8547,33 @@ Motivo de cancelación (opcional):`);
             return true;
         });
 
+        // ── Fijar el precio HISTÓRICO de cada servicio antes de regenerar ──────────
+        // Sin esto, createPDFBlob/buildInvoiceItems caen al precio ACTUAL del cliente
+        // para cualquier servicio sin precio propio, y regenerar una factura vieja
+        // le pisaría su total real con el precio de HOY si el cliente cambió de precio
+        // desde que se generó. Prioridad: (1) el monto que YA quedó facturado en esta
+        // misma factura (o cualquier otra) — la fuente más confiable; (2) el precio
+        // guardado en el servicio (snapshot al crearse); (3) si no hay ninguno de los
+        // dos (servicio viejo, nunca facturado con detalle), no se puede recuperar el
+        // precio exacto — se avisa antes de continuar.
+        let _regenEstimados = 0;
+        const servicesConPrecio = services.map(s => {
+            const real = this._montoRealDelServicio(s);
+            if (real) return { ...s, price: real.monto };
+            if (s.price !== undefined && s.price !== null && s.price !== '') return s;
+            _regenEstimados++;
+            return s;
+        });
+        if (_regenEstimados > 0) {
+            const seguir = confirm(
+                `⚠️ ${_regenEstimados} de ${services.length} servicio(s) de esta factura no tienen precio histórico guardado.\n\n` +
+                `Se regenerarán usando el precio ACTUAL de ${client.name} ($${(parseFloat(client.price) || 0).toFixed(2)}), ` +
+                `que puede NO ser el precio que tenían cuando se facturó originalmente.\n\n` +
+                `¿Continuar de todos modos?`
+            );
+            if (!seguir) return;
+        }
+
         // Generar PDF con el mismo número de factura
         // Si invoiceConfig es null, usar la config actual de empresa
         const currentConfig = JSON.parse(localStorage.getItem('invoiceConfig') || '{}');
@@ -8506,7 +8582,7 @@ Motivo de cancelación (opcional):`);
         const hiddenNumEl = document.getElementById('editingInvoiceNumber');
         if (hiddenNumEl) hiddenNumEl.value = invoice.invoiceNumber;
         const pdfData = this.createPDFBlob(
-            client, services,
+            client, servicesConPrecio,
             invoice.startDate, invoice.endDate,
             iCfg.template || currentConfig.template || 'modern',
             iCfg.paymentDue || currentConfig.paymentDue || '',
@@ -8517,7 +8593,7 @@ Motivo de cancelación (opcional):`);
         if (!pdfData || !pdfData.blob) { alert('Error al generar PDF'); return; }
 
         const regenConfig = { template: iCfg.template || 'modern', paymentDue: iCfg.paymentDue || '', showDetails: iCfg.showDetails !== undefined ? iCfg.showDetails : true, applyTax: iCfg.applyTax || false, taxRate: iCfg.taxRate || 0 };
-        window.currentPDFData = { ...pdfData, client, blob: pdfData.blob, serviceCount: services.length, _services: services, invoiceConfig: regenConfig };
+        window.currentPDFData = { ...pdfData, client, blob: pdfData.blob, serviceCount: servicesConPrecio.length, _services: servicesConPrecio, invoiceConfig: regenConfig };
         // Guardar ID de factura existente para reemplazar en lugar de crear nueva
         this._regeneratingInvoiceId = invoice.id;
         this.displayPDFPreview(pdfData, client, invoice.startDate, invoice.endDate, regenConfig);
@@ -11317,7 +11393,8 @@ Motivo de cancelación (opcional):`);
                     grupo: document.getElementById('mEmp')?.value || '',
                     timeStart: document.getElementById('mTimeStart')?.value || '',
                     timeEnd: document.getElementById('mTimeEnd')?.value || '',
-                    cancelled: false
+                    cancelled: false,
+                    price: this.pricePerService(updatedCli)
                 };
                 this.servs.push(baseData);
                 this.genSerie(baseData, updatedCli.type, regenUntil);
@@ -11896,10 +11973,25 @@ Motivo de cancelación (opcional):`);
         const sortType = document.getElementById('finSort') ? document.getElementById('finSort').value : 'date-desc';
         
         // Crear array de servicios con datos del cliente para ordenar
+        // Prioridad para el precio de cada servicio (evita que un cambio de precio HOY
+        // distorsione reportes de periodos PASADOS):
+        //   1) Monto realmente facturado (factura ya generada) — siempre el más exacto.
+        //   2) Precio guardado en el propio servicio al momento de crearse (snapshot).
+        //   3) Fallback: precio ACTUAL del cliente — solo para servicios viejos, sin facturar,
+        //      creados antes de este fix; se marca como "estimado" porque puede no ser exacto.
         const servicesWithClient = filtered.map(s => {
             const c = this.clis.find(x => x.id == s.cliId);
-            const price = c ? this.pricePerService(c) : 0;
-            return { service: s, client: c, price };
+            let price = 0, esEstimado = false;
+            const real = c ? this._montoRealDelServicio(s) : null;
+            if (real) {
+                price = real.monto;
+            } else if (s.price !== undefined && s.price !== null) {
+                price = parseFloat(s.price) || 0;
+            } else {
+                price = c ? this.pricePerService(c) : 0;
+                esEstimado = true;
+            }
+            return { service: s, client: c, price, esEstimado };
         }).filter(item => item.client); // Filtrar servicios sin cliente
         
         // Aplicar ordenamiento
@@ -12117,7 +12209,11 @@ Motivo de cancelación (opcional):`);
         // ✅ Mostrar contador de servicios
         const serviceCount = filtered.length;
         const countText = serviceCount === 1 ? 'servicio' : 'servicios';
-        document.getElementById('finCount').innerHTML = `<b>${serviceCount}</b> ${countText}`;
+        const estimadoCount = servicesWithClient.filter(item => item.esEstimado).length;
+        const avisoEstimado = estimadoCount > 0
+            ? ` <span style="color:#e67e22; font-weight:600;" title="Estos servicios son viejos y nunca fueron facturados, así que no se puede recuperar el precio exacto que tenían en su momento. Se muestran con el precio ACTUAL del cliente, que puede no ser exacto.">⚠️ ${estimadoCount} ${estimadoCount === 1 ? 'servicio' : 'servicios'} con precio estimado</span>`
+            : '';
+        document.getElementById('finCount').innerHTML = `<b>${serviceCount}</b> ${countText}${avisoEstimado}`;
     }
 
     exportar() { 
@@ -13831,6 +13927,23 @@ Motivo de cancelación (opcional):`);
             document.getElementById('manualInvClientSearch').value = client.name;
             const emailEl = document.getElementById('manualInvEmail');
             if (emailEl) emailEl.value = this.getClientEmail(client);
+
+            // Sep9: Ranu reportó (varias veces) que el checkbox de impuestos no
+            // respetaba la ficha del cliente al pasar una factura a Manual desde
+            // este botón — CAUSA: a diferencia de `convertGenerarToManual` (el
+            // botón "✏️ Editar como Manual" de arriba), esta función nunca tocaba
+            // manualInvApplyTax/manualInvTaxRate, así que el checkbox se quedaba
+            // con lo que hubiera quedado de la factura anterior. Mismo criterio
+            // que convertGenerarToManual: si ya se está EDITANDO una factura
+            // guardada (editingInvoiceNumber), manda la decisión de ESA factura;
+            // si es nueva, se toma del perfil del cliente.
+            const _editNumM = parseInt(document.getElementById('editingInvoiceNumber')?.value || '');
+            const _facEditM = _editNumM ? (this.generatedInvoices || []).find(i => i.invoiceNumber === _editNumM) : null;
+            if (_facEditM) {
+                this._cargarImpuestoDeFactura(_facEditM, client, 'manualInvApplyTax', 'manualInvTaxRate', 'toggleManualTaxField');
+            } else {
+                this._cargarImpuestoDelCliente(client, 'manualInvApplyTax', 'manualInvTaxRate', 'toggleManualTaxField');
+            }
 
             const listEl = document.getElementById('manualInvItemsList');
             if (!listEl) return;
