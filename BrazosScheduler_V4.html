@@ -9856,14 +9856,16 @@ Motivo de cancelación (opcional):`);
     }
 
     async driveReadNominaTotales() {
-        // Buscar archivo brazos_nomina_totales.json en Drive
+        // FIX 2026-09-10: buscaba 'brazos_nomina_totales.json', pero BrazosNomina.html
+        // sube 'appronto_nomina_totales.json' (driveUploadTotales). Con el nombre viejo
+        // esto nunca encontraba el archivo real — se corrige al nombre correcto.
         const searchRes = await fetch(
-            `https://www.googleapis.com/drive/v3/files?q=name='brazos_nomina_totales.json'&fields=files(id,name)`,
+            `https://www.googleapis.com/drive/v3/files?q=name='appronto_nomina_totales.json'&fields=files(id,name)`,
             { headers: { Authorization: `Bearer ${this.driveToken}` } }
         );
         const searchData = await searchRes.json();
         if (!searchData.files || searchData.files.length === 0) {
-            throw new Error('Archivo brazos_nomina_totales.json no encontrado en Drive');
+            throw new Error('Archivo appronto_nomina_totales.json no encontrado en Drive');
         }
         const fileId = searchData.files[0].id;
         const fileRes = await fetch(
@@ -16935,7 +16937,8 @@ Motivo de cancelación (opcional):`);
     openProductionReport() {
         // Sync rates from Nomina before opening report
         try {
-            const nominaEmps = JSON.parse(localStorage.getItem('brazos_employees') || '[]');
+            // FIX 2026-09-10: 'brazos_employees' nunca existió — Nómina guarda en 'ap_nomina_employees'.
+            const nominaEmps = JSON.parse(localStorage.getItem('ap_nomina_employees') || '[]');
             if (nominaEmps.length > 0) {
                 let updated = 0;
                 this.emps.forEach(emp => {
@@ -18035,7 +18038,8 @@ Motivo de cancelación (opcional):`);
         const fmtT=t=>{if(!t)return'';const[h24,m]=t.split(':').map(Number),ap=h24>=12?'PM':'AM',h=h24%12||12;return h+':'+(m+'').padStart(2,'0')+' '+ap;};
         const fmtH=h=>h>=1?`${Math.floor(h)}h ${Math.round((h%1)*60)}min`:`${Math.round(h*60)}min`;
         const fmtDate=d=>{const[y,mo,da]=d.split('-');return `${mo}/${da}/${y}`;};
-        const nominaEmps=JSON.parse(localStorage.getItem('brazos_employees')||'[]');
+        // FIX 2026-09-10: 'brazos_employees' nunca existió — Nómina guarda en 'ap_nomina_employees'.
+        const nominaEmps=JSON.parse(localStorage.getItem('ap_nomina_employees')||'[]');
         const getRateForEmp=emp=>{if(!emp)return 15;if(parseFloat(emp.rate)>0)return parseFloat(emp.rate);const ne=nominaEmps.find(n=>n.name&&emp.name&&n.name.trim().toLowerCase()===emp.name.trim().toLowerCase());return parseFloat(ne?.rate||ne?.payRate||ne?.hourlyRate||15);};
 
         let dates=[];
@@ -19132,20 +19136,29 @@ Motivo de cancelación (opcional):`);
     }
 
     async importEmployeesFromNomina() {
-        let empsAdded = 0, empsUpdated = 0, nominasOk = false;
+        let empsAdded = 0, empsUpdated = 0, empsRemoved = 0, removedNames = [], nominasOk = false;
 
         // ── Importar empleados ──
         try {
             let empList = null;
+            let deletedIds = [];
 
             if (this.driveConnected && this.driveFolderId) {
-                // Drive disponible → leer brazos_nomina_sync.json
-                const nominaSync = await this.driveReadFile('brazos_nomina_sync.json');
+                // FIX 2026-09-10: buscaba 'brazos_nomina_sync.json', pero BrazosNomina.html
+                // sube 'appronto_nomina_sync.json' (driveSyncNow) — nombre equivocado,
+                // nunca encontraba el archivo real. Corregido al nombre correcto.
+                const nominaSync = await this.driveReadFile('appronto_nomina_sync.json');
                 empList = nominaSync?.employees || null;
+                deletedIds = nominaSync?.deletedEmployeeIds || [];
             } else {
-                // Fallback: localStorage compartido (mismo navegador)
-                const raw = localStorage.getItem('brazos_employees');
+                // Fallback: localStorage compartido (mismo navegador).
+                // FIX 2026-09-10: BrazosNomina.html guarda sus empleados en
+                // 'ap_nomina_employees', nunca en 'brazos_employees' — esa llave
+                // nunca existió, así que este fallback tampoco funcionaba.
+                const raw = localStorage.getItem('ap_nomina_employees');
                 empList = raw ? JSON.parse(raw) : null;
+                const rawDeleted = localStorage.getItem('ap_nomina_deletedEmployeeIds');
+                deletedIds = rawDeleted ? JSON.parse(rawDeleted) : [];
             }
 
             if (!empList || empList.length === 0)
@@ -19178,7 +19191,24 @@ Motivo de cancelación (opcional):`);
                 }
             });
 
-            if (empsAdded > 0 || empsUpdated > 0) {
+            // FIX 2026-09-10: Nómina es quien registra/edita empleados — Scheduler solo
+            // importa. Si un empleado ya no viene en la lista de Nómina (fue borrado
+            // ahí), se quita también aquí, en vez de quedarse para siempre. Se compara
+            // por NOMBRE (igual que el resto de este import) porque los IDs de Scheduler
+            // y Nómina no siempre coinciden para empleados que ya existían antes de
+            // importar. Además se respeta explícitamente deletedEmployeeIds cuando el ID
+            // sí coincide (empleados nuevos importados ya adoptan el ID de Nómina).
+            const nominaNames = new Set(empList.filter(ne => ne.name).map(ne => ne.name.trim().toLowerCase()));
+            const deadIds = new Set(deletedIds);
+            const before = this.emps.length;
+            this.emps = this.emps.filter(e => {
+                const isDead = deadIds.has(e.id) || !nominaNames.has((e.name||'').trim().toLowerCase());
+                if (isDead) { this._tombstone('emps', e.id); removedNames.push(e.name); }
+                return !isDead;
+            });
+            empsRemoved = before - this.emps.length;
+
+            if (empsAdded > 0 || empsUpdated > 0 || empsRemoved > 0) {
                 this.save();
                 this.renderCat();
                 this.render();
@@ -19204,7 +19234,8 @@ Motivo de cancelación (opcional):`);
         const msg = [];
         if (empsAdded > 0)   msg.push(`✅ ${empsAdded} empleado(s) nuevo(s) importado(s)`);
         if (empsUpdated > 0) msg.push(`🔄 ${empsUpdated} empleado(s) actualizado(s) (tel/dirección)`);
-        if (empsAdded === 0 && empsUpdated === 0) msg.push('ℹ️ Empleados ya al día');
+        if (empsRemoved > 0) msg.push(`🗑️ ${empsRemoved} empleado(s) quitado(s) (ya no están en la Nómina): ${removedNames.join(', ')}`);
+        if (empsAdded === 0 && empsUpdated === 0 && empsRemoved === 0) msg.push('ℹ️ Empleados ya al día');
         if (nominasOk)       msg.push('💰 Totales de nómina actualizados');
         else if (this.driveConnected) msg.push('ℹ️ Sin datos de nómina en Drive aún');
         else                 msg.push('ℹ️ Totales de nómina requieren Google Drive conectado');
