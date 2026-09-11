@@ -18833,6 +18833,14 @@ Motivo de cancelación (opcional):`);
         const duenoOtro = data && data.owner && data.owner !== yo;
         if (fresco && duenoOtro) {
             this._entrarSoloLectura(data.label || 'otra PC');
+            // Sep11: aunque siga en Solo Lectura, refrescar los datos en CADA revisión
+            // del candado (cada 45s) — antes sólo se bajaba una vez al conectar y
+            // luego se quedaba con esa foto mientras el candado siguiera activo (bug
+            // real: alguien viendo en Solo Lectura no veía cambios hechos después de
+            // su primera conexión, aunque el candado sí detectara correctamente que
+            // seguía activo). driveDownloadData() ya compara timestamps y fusiona —
+            // aquí sólo se le pide que lo repita seguido mientras sea solo lectura.
+            try { await this.driveDownloadData(); this.render(); } catch(e) { console.warn('refresco solo lectura', e); }
         } else {
             this._lockFileId = fileId;
             await this._lockEscribir(fileId, yo);
