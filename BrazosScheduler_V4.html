@@ -2507,10 +2507,15 @@ class Scheduler {
         const existing = document.getElementById('grupoEditModal');
         if (existing) existing.remove();
         const slots = this.grupos[nombreGrupo] || [];
-        const assignedElsewhere = new Set();
+        // 2026-09-14: antes esto EXCLUÍA del combo a cualquier empleado ya asignado
+        // a otro grupo — impedía rotar/compartir empleados entre grupos el mismo
+        // día (ej. toda la cuadrilla ayuda a un grupo en la mañana y luego se
+        // reparte). Ahora se permite estar en varios grupos a la vez; solo se
+        // etiqueta con "(también en Grupo X)" para que quede claro al armar.
+        const otherGroupsOf = {};
         Object.entries(this.grupos).forEach(([gName, members]) => {
             if (gName === nombreGrupo) return;
-            members.forEach(id => { if (id) assignedElsewhere.add(String(id)); });
+            members.forEach(id => { if (id) { const k=String(id); (otherGroupsOf[k]=otherGroupsOf[k]||[]).push(gName); } });
         });
         const assignedIds = new Set();
         Object.values(this.grupos).forEach(ms => ms.forEach(id => { if (id) assignedIds.add(String(id)); }));
@@ -2518,8 +2523,11 @@ class Scheduler {
         const selects = Array.from({length:5}, (_,i) => {
             const currentId = String(slots[i] || '');
             const opts = `<option value="">— Vacante —</option>` +
-                this.emps.filter(e => !assignedElsewhere.has(String(e.id)) || String(e.id) === currentId)
-                .map(e => `<option value="${e.id}" ${String(e.id)===currentId?'selected':''}>${e.name}</option>`).join('');
+                this.emps.map(e => {
+                    const eid=String(e.id);
+                    const also=(otherGroupsOf[eid]&&eid!==currentId)?` (también en ${otherGroupsOf[eid].join(', ')})`:'';
+                    return `<option value="${e.id}" ${eid===currentId?'selected':''}>${e.name}${also}</option>`;
+                }).join('');
             return `<div style="margin-bottom:8px;"><label style="font-size:0.8rem;color:#666;">Posición ${i+1}:</label><select id="gEditSlot_${i}" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;">${opts}</select></div>`;
         }).join('');
         const unassignedHtml = unassigned.length > 0
@@ -2574,11 +2582,13 @@ class Scheduler {
         const preview = document.createElement('div'); preview.className = 'group-members-preview';
         const slots = this.grupos[nombreGrupo] || [];
 
-        // Calcular empleados ya asignados en OTROS grupos
-        const assignedElsewhere = new Set();
+        // 2026-09-14: ya no se usa para EXCLUIR del combo (ver openGrupoEditModal) —
+        // solo para etiquetar "(también en Grupo X)" y que se pueda compartir/rotar
+        // al mismo empleado entre varios grupos el mismo día.
+        const otherGroupsOf = {};
         Object.entries(this.grupos).forEach(([gName, members]) => {
             if (gName === nombreGrupo) return;
-            members.forEach(id => { if (id) assignedElsewhere.add(String(id)); });
+            members.forEach(id => { if (id) { const k=String(id); (otherGroupsOf[k]=otherGroupsOf[k]||[]).push(gName); } });
         });
 
         slots.forEach((empId, i) => {
@@ -2603,12 +2613,12 @@ class Scheduler {
         for(let i=0; i<5; i++){
             const sel = document.createElement('select');
             const currentSlotId = String(this.grupos[nombreGrupo][i] || '');
-            // Solo mostrar empleados disponibles + el que ya está en este slot
             sel.innerHTML = `<option value="">- Vacante -</option>` + this.emps
-                .filter(e => !assignedElsewhere.has(String(e.id)) || String(e.id) === currentSlotId)
                 .map(e => {
-                    const selected = String(e.id) === currentSlotId ? 'selected' : '';
-                    return `<option value="${e.id}" ${selected}>${e.name}</option>`;
+                    const eid = String(e.id);
+                    const selected = eid === currentSlotId ? 'selected' : '';
+                    const also = (otherGroupsOf[eid] && eid !== currentSlotId) ? ` (también en ${otherGroupsOf[eid].join(', ')})` : '';
+                    return `<option value="${e.id}" ${selected}>${e.name}${also}</option>`;
                 }).join('');
             sel.onchange = (e) => { this.grupos[nombreGrupo][i]=e.target.value; this.save(); this.render(); };
             panel.appendChild(sel);
@@ -19199,18 +19209,20 @@ Motivo de cancelación (opcional):`);
                 }
             });
 
-            // FIX 2026-09-10: Nómina es quien registra/edita empleados — Scheduler solo
-            // importa. Si un empleado ya no viene en la lista de Nómina (fue borrado
-            // ahí), se quita también aquí, en vez de quedarse para siempre. Se compara
-            // por NOMBRE (igual que el resto de este import) porque los IDs de Scheduler
-            // y Nómina no siempre coinciden para empleados que ya existían antes de
-            // importar. Además se respeta explícitamente deletedEmployeeIds cuando el ID
-            // sí coincide (empleados nuevos importados ya adoptan el ID de Nómina).
-            const nominaNames = new Set(empList.filter(ne => ne.name).map(ne => ne.name.trim().toLowerCase()));
+            // FIX 2026-09-10, CORREGIDO 2026-09-14: la versión anterior quitaba de
+            // Scheduler a CUALQUIER empleado cuyo nombre no apareciera exacto en la
+            // lista de Nómina. Scheduler nunca se habilitó para editar/borrar
+            // empleados (solo los lee para armar grupos y calcular Nómina%/
+            // Producción) y Nómina no necesariamente tiene capturados a TODOS los
+            // empleados que Scheduler maneja — por eso esto borró de golpe empleados
+            // reales que Ranu nunca borró. Ahora SOLO se quita un empleado si su ID
+            // viene explícitamente en deletedEmployeeIds (borrado real hecho en
+            // Nómina, con su lápida) — ya no se infiere un borrado solo por ausencia
+            // de coincidencia de nombre.
             const deadIds = new Set(deletedIds);
             const before = this.emps.length;
             this.emps = this.emps.filter(e => {
-                const isDead = deadIds.has(e.id) || !nominaNames.has((e.name||'').trim().toLowerCase());
+                const isDead = deadIds.has(e.id);
                 if (isDead) { this._tombstone('emps', e.id); removedNames.push(e.name); }
                 return !isDead;
             });
