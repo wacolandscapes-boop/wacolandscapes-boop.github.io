@@ -6192,18 +6192,36 @@ class Scheduler {
             return;
         }
         
-        // Generar todas y registrarlas (excepto construcción)
+        // Generar todas y registrarlas (excepto construcción). 2026-09-15: las que
+        // registerGeneratedInvoice() bloquea por duplicado NO se quitan de Pendientes
+        // — se quedan ahí para que Ranu las revise, en vez de desaparecer en silencio
+        // sin haberse facturado.
+        let generadas = 0;
+        const bloqueadas = [];
         autoGenerables.forEach(pending => {
-            this.registerGeneratedInvoice(pending);
+            const resultado = this.registerGeneratedInvoice(pending);
+            if (resultado && resultado.blocked) {
+                bloqueadas.push({ pending, existente: resultado.existente });
+            } else {
+                generadas++;
+            }
         });
-        
-        const count = autoGenerables.length;
-        this.pendingInvoices = this.pendingInvoices.filter(p => p.type === 'construccion');
+
+        const bloqueadasSet = new Set(bloqueadas.map(b => b.pending));
+        this.pendingInvoices = this.pendingInvoices.filter(p => p.type === 'construccion' || bloqueadasSet.has(p));
         this.updatePendingBadge();
         this.renderPendingInvoices();
         this.save();
+
+        if (bloqueadas.length > 0) {
+            let msg = `✅ Se generaron ${generadas} factura(s).\n\n⛔ ${bloqueadas.length} NO se generaron porque el cliente ya tiene una factura activa que cubre ese período (posible doble cobro):\n\n`;
+            msg += bloqueadas.map(b => `• ${b.pending.clientName} (${b.pending.startDate} a ${b.pending.endDate}) — ya existe #${String(b.existente.invoiceNumber).padStart(4,'0')} (${b.existente.status})`).join('\n');
+            msg += `\n\nSe dejaron en Pendientes para que las revises.`;
+            alert(msg);
+            return;
+        }
         
-        alert(`✅ ${count} facturas generadas correctamente`);
+        alert(`✅ ${generadas} facturas generadas correctamente`);
     }
     
     // ==================== MÓDULO DE FACTURAS GENERADAS ====================
@@ -6429,12 +6447,42 @@ class Scheduler {
         document.body.appendChild(overlay);
     }
 
+    // 2026-09-15: helper compartido — ¿ya existe una factura ACTIVA (pagada o no,
+    // cualquier estatus menos cancelada) para este cliente cuyo período se cruza
+    // con el que se va a facturar? Mismo criterio que _avisoPeriodoYaFacturado()/
+    // auditarDuplicados(), factorizado aquí para poder usarlo también como
+    // BLOQUEO DURO (sin confirm) en los caminos de Pendientes — ver
+    // registerGeneratedInvoice() y _registerInvoiceFromPDF().
+    _facturaActivaExistente(clientName, startDate, endDate) {
+        if (!clientName || !startDate || !endDate) return null;
+        return (this.generatedInvoices || []).find(g =>
+            g.status !== 'cancelada' &&
+            g.clientName === clientName &&
+            g.startDate && g.endDate &&
+            !(String(g.endDate) < String(startDate) || String(endDate) < String(g.startDate))
+        ) || null;
+    }
+
     registerGeneratedInvoice(pending) {
         // Inicializar array si no existe
         if (!this.generatedInvoices) {
             this.generatedInvoices = [];
         }
-        
+
+        // 2026-09-15: BLOQUEO DURO contra doble cobro. Pendientes SIEMPRE representa
+        // trabajo detectado del calendario, nunca una facturación manual deliberada
+        // (eso se hace por "Crear Factura", que conserva su propio aviso con opción
+        // de continuar) — así que si el cliente ya tiene una factura activa que se
+        // cruza de fechas, esto es un doble cobro real y se bloquea sin preguntar,
+        // igual esté pagada o no. Nace de los casos reales de Azar Szantos, Jan
+        // Ohrstrom y Landscape Supply (mayo-julio 2026), donde Pendientes generó dos
+        // veces la misma factura semanas/segundos aparte sin ningún candado.
+        const yaFacturada = this._facturaActivaExistente(pending.clientName, pending.startDate, pending.endDate);
+        if (yaFacturada) {
+            console.warn(`⛔ Factura bloqueada por posible duplicado: ${pending.clientName} (${pending.startDate} a ${pending.endDate}) — ya existe #${yaFacturada.invoiceNumber} (${yaFacturada.status})`);
+            return { blocked: true, existente: yaFacturada };
+        }
+
         // Obtener siguiente número de factura (cruza contador local con lo ya sincronizado)
         let config = JSON.parse(localStorage.getItem('companyConfig') || '{}');
         if (typeof config === 'string') { try { config = JSON.parse(config); } catch(e) { config = {}; } }
@@ -6488,8 +6536,9 @@ class Scheduler {
             localStorage.setItem('lastInvoiceNumber', nextInvoiceNumber.toString());
         }
         this.save();
+        return { blocked: false };
     }
-    
+
     openGeneratedInvoices() {
         this._pausarSync('se abrió Facturas Enviadas');
         this._navToInvoiceModal('generated');
@@ -14978,7 +15027,9 @@ Motivo de cancelación (opcional):`);
     printPDF(pdfUrl) {
         if (this._clicDuplicado('printPDF')) return;
         // Registrar en Enviadas al imprimir (status: enviada — se imprimió para entregar)
-        this._registerInvoiceFromPDF('enviada');
+        // 2026-09-15: si _registerInvoiceFromPDF() bloqueó por duplicado, no seguir —
+        // ni imprimir ni quitar la tarjeta de Pendientes.
+        if (!this._registerInvoiceFromPDF('enviada')) return;
         this.markPendingAsGenerated();
         const printWindow = window.open(pdfUrl);
         printWindow.onload = function() { printWindow.print(); };
@@ -15080,9 +15131,13 @@ Motivo de cancelación (opcional):`);
         );
     }
 
+    // 2026-09-15: devuelve true si la factura quedó registrada/actualizada, o false
+    // si se bloqueó por duplicado (ver bloqueo más abajo) — quien llama (printPDF,
+    // sendInvoiceByGmail) debe revisar esto y NO seguir adelante (no imprimir, no
+    // enviar el correo, no quitar la tarjeta de Pendientes) si viene en false.
     _registerInvoiceFromPDF(status) {
         const pdfData = window.currentPDFData;
-        if (!pdfData || !pdfData.invoiceNumber) return;
+        if (!pdfData || !pdfData.invoiceNumber) return false;
         if (!this.generatedInvoices) this.generatedInvoices = [];
         let invoiceNumber = parseInt(pdfData.invoiceNumber);
         const clientName = pdfData.client?.name || '';
@@ -15127,7 +15182,23 @@ Motivo de cancelación (opcional):`);
             if (pdfData.serviceCount !== undefined) alreadyExists.serviceCount = pdfData.serviceCount;
             if (pdfData.client?.email) alreadyExists.clientEmail = pdfData.client.email;
             this.save();
-            return;
+            return true;
+        }
+        // 2026-09-15: BLOQUEO DURO contra doble cobro, SOLO cuando esta factura nueva
+        // viene de una tarjeta de Pendientes (currentPendingIndex no es null) — nunca
+        // desde "Crear Factura" manual, donde Ranu a veces factura dos veces al mismo
+        // cliente a propósito (ej. 254 Lawns: oficina + casa de Joe Maxwell bajo el
+        // mismo nombre) y ya tiene su propio aviso con opción de continuar
+        // (_avisoPeriodoYaFacturado, dentro de generateInvoice()). Pendientes nunca
+        // tiene esa razón legítima — es trabajo detectado del calendario — así que
+        // aquí se bloquea sin preguntar. Nace de Azar Szantos/#7680 y #7682.
+        if (this.currentPendingIndex !== undefined && this.currentPendingIndex !== null) {
+            const yaFacturada = this._facturaActivaExistente(clientName, pdfData.startDate, pdfData.endDate);
+            if (yaFacturada) {
+                console.warn(`⛔ Factura bloqueada por posible duplicado: ${clientName} (${pdfData.startDate} a ${pdfData.endDate}) — ya existe #${yaFacturada.invoiceNumber} (${yaFacturada.status})`);
+                alert(`⛔ No se generó la factura.\n\n${clientName} ya tiene la factura #${String(yaFacturada.invoiceNumber).padStart(4,'0')} (${yaFacturada.status}) que cubre ${pdfData.startDate} a ${pdfData.endDate}.\n\nSi de verdad es trabajo distinto, factura desde "📄 Crear Factura" en vez de Pendientes.`);
+                return false;
+            }
         }
         this.generatedInvoices.push({
             id: Date.now() + Math.random(),
@@ -15168,12 +15239,15 @@ Motivo de cancelación (opcional):`);
                 this.driveSyncNow().catch(e => console.warn('⚠️ No se pudo sincronizar a Drive:', e));
             }, 500);
         }
+        return true;
     }
 
     async sendInvoiceByGmail(pdfBlob, client, invoiceNumber, total, startDate, endDate) {
         if (this._clicDuplicado('sendInvoiceByGmail', 5000)) return;
         // Registrar en Enviadas con status enviada
-        this._registerInvoiceFromPDF('enviada');
+        // 2026-09-15: si se bloqueó por duplicado, no seguir — ni enviar el correo ni
+        // quitar la tarjeta de Pendientes.
+        if (!this._registerInvoiceFromPDF('enviada')) return;
         this.markPendingAsGenerated();
         try {
             const toEmail = client.email;
@@ -15206,52 +15280,15 @@ Motivo de cancelación (opcional):`);
 
             alert(`✅ Factura enviada exitosamente a ${emails.join(', ')}`);
 
-            // Guardar número de factura en localStorage para que el siguiente incremente
-            const invNum = parseInt(invoiceNum);
-            const currentLast = parseInt(localStorage.getItem('lastInvoiceNumber') || '0');
-            if (invNum > currentLast) {
-                localStorage.setItem('lastInvoiceNumber', invNum.toString());
-            }
-
-            // Marcar factura como "enviada" en generatedInvoices o crearla si no existe
-            if (!this.generatedInvoices) this.generatedInvoices = [];
-            let genInv = this.generatedInvoices.find(i => i.invoiceNumber === invNum && i.clientName === client.name);
-            if (genInv) {
-                if (!this._isInvoiceStatusAdvanced(genInv.status)) {
-                    genInv.status = 'enviada';
-                    genInv.sentAt = new Date().toLocaleDateString('en-CA');
-                }
-                if ((!genInv.items || genInv.items.length === 0) && window.currentPDFData?._services) {
-                    genInv.items = this.buildInvoiceItems(window.currentPDFData._services, client);
-                }
-                this._registerInvoiceFromPDF('enviada');
-            } else {
-                // Crear registro en generadas
-                this.generatedInvoices.push({
-                    id: Date.now(),
-                    invoiceNumber: invNum,
-                    clientName: client.name,
-                    clientEmail: emails.join(', '),
-                    generatedDate: new Date().toLocaleDateString('en-CA'),
-                    startDate: startDate || '',
-                    endDate: endDate || '',
-                    total: total || 0,
-                    serviceCount: window.currentPDFData?.serviceCount || 0,
-                    items: this.buildInvoiceItems(window.currentPDFData?._services, client),
-                    clientIds: client?.id ? [client.id] : [],
-                    type: client.type || 'mensual',
-                    status: 'enviada',
-                    sentAt: new Date().toLocaleDateString('en-CA'),
-                    sentHistory: [{ date: new Date().toISOString(), method: 'email' }],
-                    invoiceConfig: window.currentPDFData?.invoiceConfig || null
-                });
-            }
-            // Eliminar de pendingInvoices
-            if (this.pendingInvoices) {
-                this.pendingInvoices = this.pendingInvoices.filter(p => 
-                    !(p.clientName === client.name)
-                );
-            }
+            // 2026-09-15: se quitó de aquí un segundo bloque que volvía a buscar/crear
+            // el registro de la factura por su cuenta (comparando por un número de
+            // factura potencialmente distinto al que _registerInvoiceFromPDF() ya usó
+            // arriba). Era código muerto duplicado — _registerInvoiceFromPDF('enviada')
+            // al inicio de esta función ya registra/actualiza la factura, guarda el
+            // número en localStorage y quita la tarjeta correcta de Pendientes
+            // (markPendingAsGenerated()). Tener dos caminos que no siempre coincidían
+            // en el número de factura es lo que produjo facturas duplicadas como la
+            // #7680/#7682 de Azar Szantos.
             this.save();
             // Sincronizar a Drive inmediatamente para que el Worker de Stripe
             // pueda encontrar la factura cuando el cliente pague con tarjeta
