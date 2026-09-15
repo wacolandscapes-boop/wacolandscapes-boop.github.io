@@ -7575,7 +7575,16 @@ class Scheduler {
             if (Math.round(suma * 100) !== Math.round(parseFloat(inv.paidAmount || 0) * 100)) {
                 console.warn(`🔧 Resumen de la #${inv.invoiceNumber} desfasado: decía $${inv.paidAmount}, el historial suma $${suma.toFixed(2)}. Corregido.`);
                 inv.paidAmount = suma.toFixed(2);
-                inv.status = this._cubreTotal(suma, inv.total) ? 'pagada' : (suma > 0 ? 'parcial' : 'enviada');
+                // SALVAGUARDA (2026-09-15): una factura ya "pagada" nunca se degrada sola aquí.
+                // Si después de marcarla pagada el TOTAL de la factura se corrigió (línea añadida,
+                // impuesto ajustado), lo pagado deja de "cubrir" el total nuevo y este recálculo
+                // la mandaba a "parcial" con solo ABRIR el detalle de cobro — el bug de
+                // pagada->parcial reportado por Ranu. Mismo candado que ya existe en el merge
+                // de Drive (ver _fusionarPagos/mergeInvoices más abajo): solo puede subir a
+                // pagada, nunca bajar sola por un recálculo.
+                const _yaPagada = inv.status === 'pagada';
+                const _recalculado = this._cubreTotal(suma, inv.total) ? 'pagada' : (suma > 0 ? 'parcial' : 'enviada');
+                inv.status = _yaPagada ? 'pagada' : _recalculado;
                 this.save();
             }
         }
@@ -14893,7 +14902,14 @@ Motivo de cancelación (opcional):`);
                 ? existing.payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0)
                 : parseFloat(existing.paidAmount || 0);
             if (_totalPaid > 0) {
-                existing.status = this._cubreTotal(_totalPaid, existing.total) ? 'pagada' : 'parcial';
+                // SALVAGUARDA (2026-09-15): si esta factura ya estaba "pagada" antes de la
+                // corrección, no se degrada a "parcial" solo porque el TOTAL cambió (por
+                // ejemplo al corregir una línea o un impuesto) y lo ya pagado ya no alcanza
+                // a cubrir el total nuevo. Corregir la factura no debe deshacer un pago real
+                // que el cliente ya hizo — mismo candado que el merge de Drive. Solo puede
+                // subir a pagada, nunca bajar sola por este recálculo.
+                const _yaPagada = existing.status === 'pagada';
+                existing.status = _yaPagada ? 'pagada' : (this._cubreTotal(_totalPaid, existing.total) ? 'pagada' : 'parcial');
             }
             // si no hay pagos (_totalPaid === 0) → el estatus se queda como está
         }
@@ -19556,7 +19572,10 @@ Motivo de cancelación (opcional):`);
                 const driveVersion = driveInvoices.find(d => String(d.id) === String(inv.id));
                 const driveIsStripePayment = driveVersion && (driveVersion.status === 'pagada' || driveVersion.status === 'parcial') &&
                     driveVersion.paymentMethod && driveVersion.paymentMethod.includes('Stripe');
-                if (driveIsStripePayment) {
+                // SALVAGUARDA (2026-09-15): si esta factura ya quedó "pagada" en el merge de
+                // arriba, un pago parcial de Stripe visto en Drive no debe degradarla — mismo
+                // candado que el resto del merge (solo puede subir a pagada, nunca bajar sola).
+                if (driveIsStripePayment && inv.status !== 'pagada') {
                     inv.status = driveVersion.status;
                     inv.paidAt = driveVersion.paidAt;
                     inv.paidAmount = driveVersion.paidAmount;
