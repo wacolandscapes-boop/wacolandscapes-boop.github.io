@@ -1759,6 +1759,10 @@ class Scheduler {
         this.grupos = JSON.parse(localStorage.getItem('v35_grupos')) || {
             "Grupo A":["","","","",""], "Grupo B":["","","","",""]
         };
+        // gruposHistorial = { 'YYYY-MM-DD': { 'Grupo A': [empId,...] } } — para el
+        // tablero de Rotación (misma estructura/lógica que AnaCS). No reemplaza
+        // this.grupos (composición vigente hoy) — es un historial por fecha.
+        this.gruposHistorial = JSON.parse(localStorage.getItem('v35_gruposHistorial')) || {};
         this.gastos = JSON.parse(localStorage.getItem('v35_gastos')) || [];
         this.estimates = JSON.parse(localStorage.getItem('v35_estimates')) || [];
         this.serviceCatalog = JSON.parse(localStorage.getItem('v35_serviceCatalog')) || this.getDefaultServiceCatalog();
@@ -2500,6 +2504,14 @@ class Scheduler {
             chip.onclick = () => this.openGrupoEditModal(gName);
             bar.appendChild(chip);
         });
+        const rotBtn = document.createElement('div');
+        rotBtn.className = 'grupo-bar-chip';
+        rotBtn.style.background = '#34495e';
+        rotBtn.style.cursor = 'pointer';
+        rotBtn.title = 'Rotar empleados entre grupos para una fecha';
+        rotBtn.innerHTML = `<span class="chip-title">🔄 Rotación</span><span class="chip-members">arrastrar / tocar</span>`;
+        rotBtn.onclick = () => this.openRotacionModal();
+        bar.appendChild(rotBtn);
         grid.appendChild(bar);
     }
 
@@ -2564,6 +2576,180 @@ class Scheduler {
     getGrupoColor(nombreGrupo) {
         const colors = { 'Grupo A':'#2980b9','Grupo B':'#27ae60','Grupo C':'#8e44ad','Grupo D':'#e67e22','Grupo E':'#e74c3c' };
         return colors[nombreGrupo] || '#7f8c8d';
+    }
+
+    // ══════════ ROTACIÓN DE GRUPOS POR FECHA (puerto de AnaCS, 2026-09-16) ══════════
+    // Tablero exclusivo (mover, no compartir) para reorganizar cuadrillas completas
+    // entre grupos en una fecha dada, con historial por día (this.gruposHistorial).
+    // Convive con openGrupoEditModal/saveGrupoFromModal de arriba, que se dejan
+    // INTACTOS: ese modal sigue siendo de "hoy" únicamente y sigue permitiendo que
+    // un empleado quede en varios grupos el mismo día (turnos compartidos/split-day).
+    // Si un grupo llega a tener más de 5 integrantes por esta vía y luego se guarda
+    // ese mismo grupo desde el modal manual (5 posiciones fijas), se recorta a 5 —
+    // evita usar ambos caminos sobre el mismo grupo el mismo día.
+
+    // Limpia this.grupos: quita empleados repetidos y vacantes de cada grupo. Persiste si cambió.
+    _dedupGrupos() {
+        if (!this.grupos || typeof this.grupos !== 'object') return;
+        let changed = false;
+        Object.keys(this.grupos).forEach(g => {
+            const arr = this.grupos[g] || [];
+            const seen = new Set(); const out = [];
+            arr.forEach(id => { if (!id) return; const k = String(id); if (seen.has(k)) return; seen.add(k); out.push(id); });
+            if (out.length !== arr.length) changed = true;
+            this.grupos[g] = out;
+        });
+        if (changed) localStorage.setItem('v35_grupos', JSON.stringify(this.grupos));
+    }
+
+    _rosterParaFecha(nombreGrupo, fecha) {
+        const hoy = new Date().toLocaleDateString('en-CA');
+        let base;
+        if (fecha === hoy) {
+            base = this.grupos[nombreGrupo] || [];
+        } else {
+            const hist = this.gruposHistorial || {};
+            if (hist[fecha] && hist[fecha][nombreGrupo]) base = hist[fecha][nombreGrupo];
+            else {
+                const previas = Object.keys(hist).filter(fq => fq < fecha && hist[fq][nombreGrupo]).sort();
+                base = previas.length ? hist[previas[previas.length-1]][nombreGrupo] : (this.grupos[nombreGrupo] || []);
+            }
+        }
+        const seen = new Set(); const out = [];
+        base.forEach(id => { if (!id) return; const k = String(id); if (seen.has(k)) return; seen.add(k); out.push(id); });
+        return out;
+    }
+
+    openRotacionModal() {
+        document.getElementById('rotacionModal')?.remove();
+        this._dedupGrupos();
+        const fecha = new Date().toLocaleDateString('en-CA');
+        this._rotFecha = fecha;
+        this._rotSelected = null;
+        this._rotBuildState(fecha);
+        const modal = document.createElement('div');
+        modal.id = 'rotacionModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px;';
+        modal.innerHTML = `<div style="background:white;border-radius:12px;padding:20px;max-width:900px;width:100%;max-height:92vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3 style="margin:0;color:#2c3e50;">🔄 Rotación de Grupos</h3>
+                <button onclick="document.getElementById('rotacionModal').remove()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:#999;">✕</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;justify-content:center;margin-bottom:6px;background:#f8f9fa;border-radius:8px;padding:8px;">
+                <button onclick="app._rotNav(-1)" style="background:#34495e;color:white;border:none;width:34px;height:34px;border-radius:6px;cursor:pointer;font-size:1rem;">◀</button>
+                <input type="date" id="rotFecha" value="${fecha}" onchange="app._rotSetFecha(this.value)" style="padding:7px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem;">
+                <button onclick="app._rotNav(1)" style="background:#34495e;color:white;border:none;width:34px;height:34px;border-radius:6px;cursor:pointer;font-size:1rem;">▶</button>
+            </div>
+            <div id="rotMsg" style="text-align:center;font-size:0.75rem;color:#888;margin-bottom:10px;"></div>
+            <div id="rotBoard"></div>
+            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+                <button onclick="document.getElementById('rotacionModal').remove()" style="background:#95a5a6;color:white;border:none;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:bold;">Cancelar</button>
+                <button onclick="app.guardarRotacion()" style="background:#27ae60;color:white;border:none;padding:10px 22px;border-radius:8px;cursor:pointer;font-weight:bold;">💾 Guardar rotación</button>
+            </div>
+        </div>`;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+        this._rotRender();
+        this._rotUpdateMsg();
+    }
+
+    _rotBuildState(fecha) {
+        const state = {};
+        Object.keys(this.grupos).forEach(g => {
+            state[g] = this._rosterParaFecha(g, fecha).filter(id => id && id !== '').map(String);
+        });
+        const asignados = new Set();
+        Object.values(state).forEach(arr => arr.forEach(id => asignados.add(String(id))));
+        state['__sin__'] = this.emps.filter(e => !asignados.has(String(e.id))).map(e => String(e.id));
+        this._rotState = state;
+    }
+
+    _rotUpdateMsg() {
+        const msg = document.getElementById('rotMsg');
+        if (!msg) return;
+        const hoy = new Date().toLocaleDateString('en-CA');
+        const tiene = this.gruposHistorial[this._rotFecha] && Object.keys(this.gruposHistorial[this._rotFecha]).length;
+        msg.innerHTML = this._rotFecha === hoy
+            ? 'Rotación de <b>HOY</b> (al guardar actualiza los grupos actuales + historial). Toca un empleado y luego el grupo destino, o arrástralo.'
+            : (tiene ? '📅 Editando la rotación de esta fecha (solo historial).' : '📅 Sin registro este día — base: última agrupación previa. Al guardar queda en el historial de esta fecha.');
+    }
+
+    _rotRender() {
+        const board = document.getElementById('rotBoard');
+        if (!board) return;
+        const cols = [...Object.keys(this.grupos), '__sin__'];
+        board.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;';
+        board.innerHTML = cols.map(g => {
+            const esSin = g === '__sin__';
+            const color = esSin ? '#95a5a6' : this.getGrupoColor(g);
+            const titulo = esSin ? '🚫 Sin grupo' : g;
+            const chips = (this._rotState[g] || []).map(id => {
+                const e = this.emps.find(x => String(x.id) === String(id));
+                const nombre = e ? e.name : '¿?';
+                const sel = String(this._rotSelected) === String(id);
+                return `<div draggable="true" ondragstart="app._rotDragStart(event,'${id}')" onclick="event.stopPropagation(); app._rotTapChip('${id}')" style="background:${sel?'#f1c40f':'#fff'};border:2px solid ${sel?'#f39c12':color};border-radius:8px;padding:7px 10px;margin:4px 0;cursor:pointer;font-size:0.85rem;color:#2c3e50;user-select:none;">${sel?'✋ ':''}${nombre}</div>`;
+            }).join('') || `<div style="font-size:0.75rem;color:#bbb;padding:6px;">— vacío —</div>`;
+            return `<div ondragover="event.preventDefault()" ondrop="app._rotDrop(event,'${g}')" onclick="app._rotTapColumn('${g}')" style="flex:1;min-width:150px;background:#f8f9fa;border-top:4px solid ${color};border-radius:8px;padding:8px;min-height:90px;">
+                <div style="font-weight:700;color:${color};font-size:0.9rem;margin-bottom:6px;text-align:center;">${titulo} <span style="color:#999;font-weight:400;">(${(this._rotState[g]||[]).length})</span></div>
+                ${chips}
+            </div>`;
+        }).join('');
+    }
+
+    _rotMove(empId, destGrupo) {
+        if (!this._rotState) return;
+        Object.keys(this._rotState).forEach(g => {
+            this._rotState[g] = this._rotState[g].filter(id => String(id) !== String(empId));
+        });
+        if (!this._rotState[destGrupo]) this._rotState[destGrupo] = [];
+        this._rotState[destGrupo].push(String(empId));
+        this._rotSelected = null;
+        this._rotRender();
+    }
+
+    _rotDragStart(ev, empId) { ev.dataTransfer.setData('text/plain', empId); this._rotSelected = null; }
+    _rotDrop(ev, destGrupo) { ev.preventDefault(); const empId = ev.dataTransfer.getData('text/plain'); if (empId) this._rotMove(empId, destGrupo); }
+    _rotTapChip(empId) { this._rotSelected = (String(this._rotSelected) === String(empId)) ? null : String(empId); this._rotRender(); }
+    _rotTapColumn(destGrupo) { if (this._rotSelected) this._rotMove(this._rotSelected, destGrupo); }
+
+    _rotSetFecha(fecha) {
+        if (!fecha) return;
+        this._rotFecha = fecha;
+        this._rotSelected = null;
+        this._rotBuildState(fecha);
+        const inp = document.getElementById('rotFecha'); if (inp && inp.value !== fecha) inp.value = fecha;
+        this._rotRender();
+        this._rotUpdateMsg();
+    }
+    _rotNav(dir) {
+        const base = this._rotFecha || new Date().toLocaleDateString('en-CA');
+        const d = new Date(base + 'T00:00:00'); d.setDate(d.getDate() + dir);
+        this._rotSetFecha(d.toLocaleDateString('en-CA'));
+    }
+
+    guardarRotacion() {
+        const fecha = this._rotFecha || new Date().toLocaleDateString('en-CA');
+        const hoy = new Date().toLocaleDateString('en-CA');
+        if (!this.gruposHistorial) this.gruposHistorial = {};
+        if (!this.gruposHistorial[fecha]) this.gruposHistorial[fecha] = {};
+        Object.keys(this.grupos).forEach(g => {
+            const seen = new Set();
+            const roster = (this._rotState[g] || []).filter(id => { if (!id) return false; const k = String(id); if (seen.has(k)) return false; seen.add(k); return true; });
+            this.gruposHistorial[fecha][g] = roster;
+            if (fecha === hoy) this.grupos[g] = roster.slice();
+        });
+        localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial));
+        if (fecha === hoy) localStorage.setItem('v35_grupos', JSON.stringify(this.grupos));
+        this.save();
+        document.getElementById('rotacionModal')?.remove();
+        this.render();
+    }
+
+    mergeGruposHistorial(w = {}, l = {}) {
+        const out = {};
+        const fechas = new Set([...Object.keys(w||{}), ...Object.keys(l||{})]);
+        fechas.forEach(fq => { out[fq] = Object.assign({}, (l && l[fq]) || {}, (w && w[fq]) || {}); });
+        return out;
     }
 
     // ── Helper: construir sidebar de grupo ──────────────────────────
@@ -7142,7 +7328,7 @@ class Scheduler {
             html += `<tr style="${rowStyle}${isDuplicate ? 'background:#fff3cd;' : ''}">
                 <td><strong>#${invoiceNumberFormatted}</strong>${isDuplicate ? ' <span title="Número duplicado" style="color:#e74c3c;font-size:0.8rem;">⚠️</span>' : ''}</td>
                 <td>${genFormatted}</td>
-                <td>${inv.clientName}${isCancelled ? `<br><small style="color:#c0392b;font-style:italic;text-decoration:none">${inv.cancelledReason||'Cancelada'}</small>` : ''}</td>
+                <td>${inv.clientName}${isCancelled ? `<br><small style="color:#c0392b;font-style:italic;text-decoration:none;display:inline-block;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;" title="${(inv.cancelledReason||'Cancelada').replace(/"/g,'&quot;')}">${inv.cancelledReason||'Cancelada'}</small> <a href="#" onclick="event.preventDefault();app.editarMotivoCancelacion('${inv.id}')" title="Editar motivo de cancelación" style="text-decoration:none;font-size:0.7rem;">✏️</a>` : ''}</td>
                 <td style="font-size: 0.85rem;">${periodFormatted}</td>
                 <td><span style="background:${isCancelled?'#95a5a6':'var(--color-'+inv.type+')'}; color:white; padding:3px 8px; border-radius:4px; font-size:0.7rem">${isCancelled?'CANCELADA':inv.type.toUpperCase()}</span></td>
                 <td style="text-align: center;">${(inv.items && inv.items.length > 0) ? inv.items.length : (inv.serviceCount || '—')}</td>
@@ -7592,7 +7778,10 @@ class Scheduler {
         document.getElementById('cobroDetalleId').value = id;
         const num = inv.invoiceNumber?.toString().padStart(4,'0');
         const totalPaid = (inv.payments||[]).reduce((s,p) => s + parseFloat(p.amount||0), 0);
-        const balance = (inv.total||0) - totalPaid;
+        // Mismo redondeo hacia arriba que el campo de monto (ver nota 2026-09-16 abajo) —
+        // así el "Balance:" que se ve en pantalla siempre coincide con lo que hay que pagar
+        // para que la factura quede realmente cubierta, sin quedarse corto por centavos.
+        const balance = Math.max(0, Math.ceil(((inv.total||0) - totalPaid) * 100) / 100);
         document.getElementById('cobroDetalleTitle').textContent = `💰 #${num} — ${inv.clientName}`;
         document.getElementById('cobroDetalleStatus').value = inv.status || 'pendiente';
         document.getElementById('cobroDetalleSentAt').value = inv.sentAt || '';
@@ -7608,7 +7797,15 @@ class Scheduler {
         // Ahora vuelve, pero con tres protecciones: (1) tras borrar un pago NO se precarga
         // (bandera _skipAutofill); (2) si la factura ya está cubierta el formulario viene
         // colapsado; (3) hay aviso de sobrepago antes de guardar.
-        const _saldo = Math.max(0, parseFloat(inv.total || 0) - totalPaid);
+        // 2026-09-16: redondear el saldo SIEMPRE hacia ARRIBA (nunca hacia abajo) antes de
+        // mostrarlo/precargarlo. El total interno de una factura a veces trae más de 2
+        // decimales (viene de %/impuestos, ej. $451.75972500000006) y un redondeo normal
+        // podía dejar el saldo mostrado unas fracciones de centavo CORTO (ej. $118.03 en vez
+        // de $118.04 real). Si Ranu pagaba exactamente ese monto —el que la app le mostraba—
+        // la factura se quedaba en "Parcial" por centavos, aunque el pago "cubriera" lo que
+        // se veía en pantalla. Con el redondeo hacia arriba, pagar el monto mostrado siempre
+        // alcanza para cubrir la factura completa.
+        const _saldo = Math.max(0, Math.ceil((parseFloat(inv.total || 0) - totalPaid) * 100) / 100);
         const _amtEl = document.getElementById('cobroDetallePaidAmount');
         if (this._skipAutofill) {
             _amtEl.value = '';
@@ -8068,6 +8265,18 @@ class Scheduler {
             }
 
             if (editando) {
+                // 2026-09-16: confirmar antes de SOBRESCRIBIR — si Ranu le dio ✏️ a un pago
+                // viejo para revisarlo y luego captura un cheque NUEVO sin darse cuenta de que
+                // sigue en modo "editar", esto reemplazaba el pago anterior en silencio en vez
+                // de agregar uno nuevo, dejando la factura corta por el monto del pago borrado
+                // (se veía como "Parcial" aunque el cheque nuevo sí alcanzaba). Ahora se avisa.
+                const _pagoViejo = inv.payments[this._editingPaymentIndex];
+                const _seguirEdit = confirm(
+                    `✏️ Vas a ACTUALIZAR el pago del ${this.formatDateUS ? this.formatDateUS(_pagoViejo.date) : _pagoViejo.date} ` +
+                    `por $${parseFloat(_pagoViejo.amount||0).toFixed(2)}, reemplazándolo con: $${amount.toFixed(2)} (${paidAt}).\n\n` +
+                    `Si en realidad quieres AGREGAR este cheque como un pago NUEVO (sin borrar el anterior), cancela aquí y da clic en "Cancelar edición" antes de guardar.\n\n` +
+                    `¿Actualizar el pago existente?`);
+                if (!_seguirEdit) { this.renderPaymentHistory(inv); return; }
                 // ACTUALIZA el pago existente — no agrega otro
                 inv.payments[this._editingPaymentIndex] = { date: paidAt, amount, method, ref, notes, updatedAt: new Date().toISOString() };
                 this._editingPaymentIndex = null;
@@ -8158,6 +8367,20 @@ class Scheduler {
             if (this._cubreTotal(totalPaid, inv.total)) {
                 inv.status = 'pagada';
             } else {
+                // 2026-09-16: si quedó MUY cerca de cubrirse (menos de $1 de diferencia),
+                // avisar con los números exactos en vez de marcar "Parcial" en silencio —
+                // Ranu reportó casos donde el cheque "debía" cubrir el total completo y la
+                // factura quedó Parcial de todas formas. Esto muestra la cifra real ahí
+                // mismo para detectar la causa (un pago que no se sumó, un centavo, etc.)
+                // en el momento, en vez de tener que adivinarlo después.
+                const _faltante = parseFloat(inv.total || 0) - totalPaid;
+                if (_faltante > 0 && _faltante <= 1) {
+                    alert(`⚠️ Esta factura quedó MUY cerca de cubrirse, pero no llegó completa:\n\n` +
+                          `Facturado: $${parseFloat(inv.total || 0).toFixed(2)}\n` +
+                          `Pagado en total (todos los pagos registrados): $${totalPaid.toFixed(2)}\n` +
+                          `Falta: $${_faltante.toFixed(2)}\n\n` +
+                          `Se guardó como "Parcial". Si esperabas que quedara "Pagada", revisa el historial de pagos de esta factura — puede faltar un pago anterior o haberse capturado con un error de centavos.`);
+                }
                 inv.status = 'parcial';
             }
         } else {
@@ -8538,6 +8761,23 @@ Motivo de cancelación (opcional):`);
         this.save();
         this.refreshGeneratedInvoices();
         this.updateCobrosBadge();
+    }
+
+    // 2026-09-16: permite acortar/corregir el motivo de cancelación ya guardado —
+    // un motivo muy largo (p.ej. el que deja la auditoría de duplicados) rompía el
+    // layout de la columna Cliente en Historial de Facturas Enviadas. El texto ya
+    // se trunca visualmente con "..." (el motivo completo queda en el tooltip), pero
+    // además se puede editar aquí para dejarlo corto de una vez.
+    editarMotivoCancelacion(id) {
+        const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(id));
+        if (!inv) return;
+        const num = inv.invoiceNumber?.toString().padStart(4, '0');
+        const nuevo = prompt(`Motivo de cancelación — factura #${num} (${inv.clientName}):`, inv.cancelledReason || '');
+        if (nuevo === null) return; // canceló el prompt, no tocar nada
+        inv.cancelledReason = nuevo.trim() || 'Cancelada';
+        inv.updatedAt = new Date().toISOString();
+        this.save();
+        this.refreshGeneratedInvoices();
     }
 
     returnInvoiceToPending(index) {
@@ -12295,6 +12535,7 @@ Motivo de cancelación (opcional):`);
             clis: this.clis,
             servs: this.servs,
             grupos: this.grupos,
+            gruposHistorial: this.gruposHistorial || {},
             gastos: this.gastos || [],
             gastosCategories: this.gastosCategories || {},
             generatedInvoices: this.generatedInvoices || [],
@@ -12365,6 +12606,7 @@ Motivo de cancelación (opcional):`);
                             this.clis  = d.clis  || [];
                             this.servs = d.servs || [];
                             this.grupos = d.grupos || [];
+                            if (d.gruposHistorial) { this.gruposHistorial = d.gruposHistorial; localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial)); }
                             this.gastos = d.gastos || [];
                             this.gastosCategories = d.gastosCategories || {};
                             this.generatedInvoices = d.generatedInvoices || [];
@@ -18093,6 +18335,167 @@ Motivo de cancelación (opcional):`);
         } catch(e) { status.textContent = '❌ Error: ' + e.message; status.style.color = '#e74c3c'; }
     }
 
+    switchProdTab(tab) {
+        this._prodActiveTab = tab;
+        const btnDet=document.getElementById('prodTabDetalleBtn'), btnBvl=document.getElementById('prodTabBvlBtn');
+        const contDet=document.getElementById('prodTabDetalleContent'), contBvl=document.getElementById('prodTabBvlContent');
+        if(btnDet) btnDet.style.opacity = tab==='detalle' ? '1' : '0.55';
+        if(btnBvl) btnBvl.style.opacity = tab==='bvl' ? '1' : '0.55';
+        if(contDet) contDet.style.display = tab==='detalle' ? '' : 'none';
+        if(contBvl) contBvl.style.display = tab==='bvl' ? '' : 'none';
+        if(tab==='bvl'){
+            const startEl=document.getElementById('bvlStart'), endEl=document.getElementById('bvlEnd');
+            if(startEl && !startEl.value){
+                const hoy=new Date();
+                const inicioMes=new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+                startEl.value = inicioMes.toLocaleDateString('en-CA');
+                endEl.value = hoy.toLocaleDateString('en-CA');
+            }
+            this.renderBilledVsLaborSummary();
+        }
+    }
+
+    // Calcula Facturado y Costo de Mano de Obra de UN día, usando la misma
+    // lógica de tarifas/fallback de precio que renderProductionReport(), pero
+    // sin desglosar por grupo — pensado para el resumen Facturado vs Mano de
+    // Obra (tab nuevo, agrupable por día/semana/mes).
+    _calcDayBilledLabor(dt) {
+        let billed=0, cost=0;
+        const dayData = this._prodReports && this._prodReports[dt];
+        if(!dayData) return {billed, cost};
+        const nominaEmps=JSON.parse(localStorage.getItem('ap_nomina_employees')||'[]');
+        const getRateForEmp=emp=>{if(!emp)return 15;if(parseFloat(emp.rate)>0)return parseFloat(emp.rate);const ne=nominaEmps.find(n=>n.name&&emp.name&&n.name.trim().toLowerCase()===emp.name.trim().toLowerCase());return parseFloat(ne?.rate||ne?.payRate||ne?.hourlyRate||15);};
+        Object.values(dayData).forEach(empData=>{
+            const emp=this.emps.find(e=>String(e.id)===String(empData.empId));
+            const rate = emp ? getRateForEmp(emp) : 15;
+            (empData.services||[]).forEach(svc=>{
+                if(svc.status!=='done') return;
+                let hrs=0;
+                if(svc.checkin&&svc.checkout){const[sh,sm]=svc.checkin.split(':').map(Number),[eh,em]=svc.checkout.split(':').map(Number);hrs=Math.max(0,((eh*60+em)-(sh*60+sm))/60);}
+                cost += rate*hrs;
+                let svcPrice=parseFloat(svc.price||0);
+                if(!svcPrice){
+                    const matchCli=this.clis.find(c=>c.name===svc.clientName||(svc.clientName&&svc.clientName.startsWith(c.name)));
+                    if(matchCli){
+                        const pfm=parseFloat(matchCli.price||matchCli.fee||0);
+                        if(matchCli.invoicingType==='fixed_monthly'){
+                            const freq=matchCli.type||'mensual';
+                            if(freq==='semanal') svcPrice=(pfm*12)/52;
+                            else if(freq==='quincenal'||freq==='cada3semanas') svcPrice=(pfm*12)/26;
+                            else if(freq==='2xsemana') svcPrice=(pfm*12)/104;
+                            else if(freq==='diario') svcPrice=(pfm*12)/260;
+                            else svcPrice=pfm;
+                        } else { svcPrice=pfm; }
+                    }
+                }
+                billed += svcPrice;
+            });
+        });
+        return {billed, cost};
+    }
+
+    renderBilledVsLaborSummary() {
+        const groupByEl=document.getElementById('bvlGroupBy'), startEl=document.getElementById('bvlStart'), endEl=document.getElementById('bvlEnd');
+        const tbody=document.getElementById('bvlTableBody'), chartCv=document.getElementById('bvlChart');
+        if(!groupByEl||!tbody) return;
+        const groupBy=groupByEl.value, startStr=startEl.value, endStr=endEl.value;
+        if(!this._prodReports){ tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:#888;padding:20px">Toca 🔄 Recargar Drive (pestaña Detalle por Grupo).</td></tr>'; this._drawBvLChart(chartCv, []); return; }
+        if(!startStr||!endStr||startStr>endStr){ tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:#888;padding:20px">Selecciona un rango de fechas válido.</td></tr>'; this._drawBvLChart(chartCv, []); return; }
+
+        const dates=[];
+        let cur=new Date(startStr+'T12:00:00'); const fin=new Date(endStr+'T12:00:00');
+        while(cur<=fin){ dates.push(cur.toLocaleDateString('en-CA')); cur.setDate(cur.getDate()+1); }
+
+        const bucketOf=dt=>{
+            if(groupBy==='day') return dt;
+            const d=new Date(dt+'T12:00:00');
+            if(groupBy==='week'){
+                const day=d.getDay(), diff=day===0?-6:1-day;
+                d.setDate(d.getDate()+diff);
+                return 'w_'+d.toLocaleDateString('en-CA');
+            }
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        };
+        const meses=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+        const labelOf=key=>{
+            if(groupBy==='day'){ const[y,m,dd]=key.split('-'); return `${m}/${dd}/${y}`; }
+            if(groupBy==='week'){ const[y,m,dd]=key.replace('w_','').split('-'); return `Sem. ${m}/${dd}`; }
+            const[y,m]=key.split('-'); return `${meses[parseInt(m,10)-1]} ${y}`;
+        };
+
+        const buckets={};
+        dates.forEach((dt,idx)=>{
+            const key=bucketOf(dt);
+            if(!buckets[key]) buckets[key]={billed:0,cost:0,order:idx};
+            const {billed,cost}=this._calcDayBilledLabor(dt);
+            buckets[key].billed+=billed; buckets[key].cost+=cost;
+        });
+
+        const keys=Object.keys(buckets).sort((a,b)=>buckets[a].order-buckets[b].order);
+        if(!keys.length){ tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:#888;padding:20px">Sin datos para este rango.</td></tr>'; this._drawBvLChart(chartCv, []); return; }
+
+        const fmt=n=>n.toFixed(2);
+        let grandBilled=0, grandCost=0;
+        let rowsHtml=keys.map(k=>{
+            const b=buckets[k]; grandBilled+=b.billed; grandCost+=b.cost;
+            const net=b.billed-b.cost;
+            const pct=b.billed>0?((net/b.billed)*100).toFixed(1)+'%':'—';
+            return `<tr>
+              <td style="padding:6px 10px;">${labelOf(k)}</td>
+              <td style="padding:6px 10px;text-align:right;color:#0e7490;font-weight:600">$${fmt(b.billed)}</td>
+              <td style="padding:6px 10px;text-align:right;color:#b45309;font-weight:600">$${fmt(b.cost)}</td>
+              <td style="padding:6px 10px;text-align:right;font-weight:700;color:${net>=0?'#15803d':'#dc2626'}">$${fmt(net)}</td>
+              <td style="padding:6px 10px;text-align:right;color:#666">${pct}</td>
+            </tr>`;
+        }).join('');
+        const grandNet=grandBilled-grandCost;
+        rowsHtml += `<tr style="border-top:2px solid #0e7490;background:#f0fdfa;font-weight:700">
+          <td style="padding:8px 10px;">TOTAL</td>
+          <td style="padding:8px 10px;text-align:right;color:#0e7490;">$${fmt(grandBilled)}</td>
+          <td style="padding:8px 10px;text-align:right;color:#b45309;">$${fmt(grandCost)}</td>
+          <td style="padding:8px 10px;text-align:right;color:${grandNet>=0?'#15803d':'#dc2626'};">$${fmt(grandNet)}</td>
+          <td style="padding:8px 10px;text-align:right;color:#666;">${grandBilled>0?((grandNet/grandBilled)*100).toFixed(1)+'%':'—'}</td>
+        </tr>`;
+        tbody.innerHTML=rowsHtml;
+
+        this._drawBvLChart(chartCv, keys.map(k=>({label:labelOf(k), billed:buckets[k].billed, cost:buckets[k].cost})));
+    }
+
+    _drawBvLChart(cv, data) {
+        if(!cv || !cv.getContext) return;
+        const dpr=window.devicePixelRatio||1;
+        const cssW=(cv.parentElement && cv.parentElement.clientWidth) || 760, cssH=240;
+        cv.style.width=cssW+'px'; cv.style.height=cssH+'px';
+        cv.width=Math.round(cssW*dpr); cv.height=Math.round(cssH*dpr);
+        const ctx=cv.getContext('2d');
+        ctx.setTransform(dpr,0,0,dpr,0,0);
+        ctx.clearRect(0,0,cssW,cssH);
+        if(!data.length) return;
+        const padL=55, padB=36, padT=18, padR=14;
+        const plotW=cssW-padL-padR, plotH=cssH-padT-padB;
+        const maxVal=Math.max(1, ...data.map(d=>Math.max(d.billed,d.cost)));
+        const n=data.length, groupW=plotW/n, barW=Math.min(24, groupW*0.32);
+        ctx.strokeStyle='#e5e7eb'; ctx.fillStyle='#888'; ctx.font='10px sans-serif'; ctx.textAlign='right';
+        for(let i=0;i<=4;i++){
+            const v=maxVal*i/4, y=padT+plotH-(v/maxVal)*plotH;
+            ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(cssW-padR,y); ctx.stroke();
+            ctx.fillText('$'+Math.round(v), padL-6, y+3);
+        }
+        data.forEach((d,i)=>{
+            const cx=padL+groupW*i+groupW/2;
+            const bH=(d.billed/maxVal)*plotH, cH=(d.cost/maxVal)*plotH;
+            ctx.fillStyle='#0e7490'; ctx.fillRect(cx-barW-2, padT+plotH-bH, barW, bH);
+            ctx.fillStyle='#f59e0b'; ctx.fillRect(cx+2, padT+plotH-cH, barW, cH);
+            ctx.fillStyle='#555'; ctx.font='9px sans-serif'; ctx.textAlign='center';
+            ctx.fillText(d.label.length>10?d.label.slice(0,9)+'…':d.label, cx, cssH-padB+14);
+        });
+        ctx.textAlign='left';
+        ctx.fillStyle='#0e7490'; ctx.fillRect(padL,2,10,10);
+        ctx.fillStyle='#333'; ctx.font='10px sans-serif'; ctx.fillText('Facturado', padL+14, 11);
+        ctx.fillStyle='#f59e0b'; ctx.fillRect(padL+88,2,10,10);
+        ctx.fillStyle='#333'; ctx.fillText('Mano de Obra', padL+102, 11);
+    }
+
     renderProductionReport() {
         const view=document.getElementById('prodView').value, dateStr=document.getElementById('prodDate').value;
         const groupFilt=document.getElementById('prodGroup').value, content=document.getElementById('prodContent');
@@ -18107,6 +18510,11 @@ Motivo de cancelación (opcional):`);
 
         let dates=[];
         if (view==='day') { dates=[dateStr]; }
+        else if (view==='month') {
+            const [yy,mm]=dateStr.split('-').map(Number);
+            const lastDay=new Date(yy, mm, 0).getDate();
+            for(let i=1;i<=lastDay;i++){ dates.push(`${yy}-${String(mm).padStart(2,'0')}-${String(i).padStart(2,'0')}`); }
+        }
         else {
             const d=new Date(dateStr+'T12:00:00'), day=d.getDay(), diff=day===0?-6:1-day;
             d.setDate(d.getDate()+diff);
@@ -19138,6 +19546,7 @@ Motivo de cancelación (opcional):`);
                 clis: this.clis,
                 servs: this.servs,
                 grupos: this.grupos,
+                gruposHistorial: this.gruposHistorial || {},
                 gastos: this.gastos || [],
                 gastosCategories: this.gastosCategories || {},
                 generatedInvoices: this.generatedInvoices || [],
@@ -19402,6 +19811,7 @@ Motivo de cancelación (opcional):`);
                 if (data.clis)             { this.clis = data.clis; localStorage.setItem('v35_clis', JSON.stringify(this.clis)); }
                 if (data.servs)            { this.servs = data.servs; localStorage.setItem('v35_servs', JSON.stringify(this.servs)); }
                 if (data.grupos)           { this.grupos = data.grupos; localStorage.setItem('v35_grupos', JSON.stringify(this.grupos)); }
+                if (data.gruposHistorial)  { this.gruposHistorial = data.gruposHistorial; localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial)); }
                 if (data.gastos)           { this.gastos = data.gastos; localStorage.setItem('v35_gastos', JSON.stringify(this.gastos)); }
                 if (data.gastosCategories) { this.gastosCategories = data.gastosCategories; localStorage.setItem('v35_gastosCategories', JSON.stringify(this.gastosCategories)); }
                 if (data.generatedInvoices){ this.generatedInvoices = data.generatedInvoices; localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices)); }
@@ -19613,6 +20023,14 @@ Motivo de cancelación (opcional):`);
                 localWins ? this.grupos : (data.grupos || {}),
                 localWins ? (data.grupos || {}) : this.grupos
             );
+            // gruposHistorial (tablero de Rotación): merge por fecha — para cada día,
+            // el lado ganador manda sobre los mismos grupos, pero un grupo/fecha que
+            // solo exista del otro lado se conserva igual.
+            this.gruposHistorial = this.mergeGruposHistorial(
+                localWins ? (this.gruposHistorial || {}) : (data.gruposHistorial || {}),
+                localWins ? (data.gruposHistorial || {}) : (this.gruposHistorial || {})
+            );
+            localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial));
 
             const winnerNomina = localWins ? (this.nominaTotales || []) : (data.nominaTotales || []);
             const loserNomina  = localWins ? (data.nominaTotales || []) : (this.nominaTotales || []);
@@ -21695,12 +22113,18 @@ document.addEventListener('click', function(e) {
       </div>
     </div>
     <div style="padding:20px">
+      <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:2px solid #e9ecef;">
+        <button id="prodTabDetalleBtn" onclick="app.switchProdTab('detalle')" style="padding:9px 16px;border:none;background:none;border-bottom:3px solid #0e7490;font-weight:700;font-size:0.88rem;color:#0e7490;cursor:pointer;opacity:1;">📋 Detalle por Grupo</button>
+        <button id="prodTabBvlBtn" onclick="app.switchProdTab('bvl')" style="padding:9px 16px;border:none;background:none;border-bottom:3px solid #0e7490;font-weight:700;font-size:0.88rem;color:#0e7490;cursor:pointer;opacity:0.55;">💵 Facturado vs Mano de Obra</button>
+      </div>
+      <div id="prodTabDetalleContent">
       <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:20px;padding:16px;background:#f8f9fa;border-radius:10px;border:1px solid #e9ecef">
         <div>
           <label style="display:block;font-size:0.8rem;color:#666;margin-bottom:4px">Vista</label>
           <select id="prodView" onchange="app.renderProductionReport()" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem">
             <option value="day">Por día</option>
             <option value="week">Por semana</option>
+            <option value="month">Por mes</option>
           </select>
         </div>
         <div>
@@ -21781,6 +22205,50 @@ document.addEventListener('click', function(e) {
       </div>
       <div id="prodStatus" style="font-size:0.85rem;color:#888;margin-bottom:12px"></div>
       <div id="prodContent"></div>
+      </div>
+
+      <!-- ══ Facturado vs Mano de Obra (tab) ══ -->
+      <div id="prodTabBvlContent" style="display:none">
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:18px;padding:16px;background:#f8f9fa;border-radius:10px;border:1px solid #e9ecef">
+          <div>
+            <label style="display:block;font-size:0.8rem;color:#666;margin-bottom:4px">Agrupar por</label>
+            <select id="bvlGroupBy" onchange="app.renderBilledVsLaborSummary()" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem">
+              <option value="day">Día</option>
+              <option value="week">Semana</option>
+              <option value="month" selected>Mes</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:0.8rem;color:#666;margin-bottom:4px">Desde</label>
+            <input type="date" id="bvlStart" onchange="app.renderBilledVsLaborSummary()" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem">
+          </div>
+          <div>
+            <label style="display:block;font-size:0.8rem;color:#666;margin-bottom:4px">Hasta</label>
+            <input type="date" id="bvlEnd" onchange="app.renderBilledVsLaborSummary()" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem">
+          </div>
+          <div style="margin-left:auto">
+            <button onclick="app.renderBilledVsLaborSummary()" style="padding:8px 16px;background:#0e7490;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">🔄 Actualizar</button>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #e9ecef;border-radius:10px;padding:12px;margin-bottom:16px;">
+          <canvas id="bvlChart" style="width:100%;display:block;"></canvas>
+        </div>
+        <div style="overflow-x:auto;border:1px solid #e9ecef;border-radius:10px;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+            <thead>
+              <tr style="background:#f8f9fa;text-align:left;">
+                <th style="padding:8px 10px;">Periodo</th>
+                <th style="padding:8px 10px;text-align:right;">💰 Facturado</th>
+                <th style="padding:8px 10px;text-align:right;">👷 Mano de Obra</th>
+                <th style="padding:8px 10px;text-align:right;">Neto</th>
+                <th style="padding:8px 10px;text-align:right;">% Margen</th>
+              </tr>
+            </thead>
+            <tbody id="bvlTableBody"></tbody>
+          </table>
+        </div>
+        <p style="font-size:0.75rem;color:#999;margin-top:10px;">Nota: por ahora compara Facturado contra Mano de Obra únicamente. Más adelante se pueden sumar gastos de materiales y operación a este mismo resumen.</p>
+      </div>
     </div>
   </div>
 </div>
