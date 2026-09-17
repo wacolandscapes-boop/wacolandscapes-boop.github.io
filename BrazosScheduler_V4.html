@@ -1075,6 +1075,13 @@
         </form>
     
 
+<div id="delServModal" class="modal">
+    <div class="modal-content" style="max-width:420px;">
+        <div id="delServMsg" style="font-size:0.95rem; line-height:1.5; white-space:pre-line; margin-bottom:18px;"></div>
+        <div id="delServBtns" style="display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+</div>
+
 <div id="customizeModal" class="modal">
     <div class="modal-content" style="max-width:480px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -4129,51 +4136,78 @@ class Scheduler {
         const cid = this.editing.cliId;
         const dLimit = this.editing.date;
         const today = new Date().toLocaleDateString('en-CA');
-        
-        // ✅ PERMITIR BORRAR SERVICIOS PASADOS CON DOBLE CONFIRMACIÓN
-        if (dLimit < today) {
-            const confirmPast = confirm('⚠️ ADVERTENCIA: Este servicio es del PASADO\n\nFecha: ' + dLimit + '\n\n¿Estás SEGURO que quieres eliminarlo?');
-            if(!confirmPast) return;
-            
-            const doubleConfirm = confirm('🚨 ÚLTIMA CONFIRMACIÓN\n\n¿REALMENTE quieres borrar este servicio pasado?\n\nEsta acción NO se puede deshacer.');
-            if(!doubleConfirm) return;
+        // ✅ Modal propio (en vez de confirm() nativos encadenados): evita que
+        // antivirus/extensiones (p.ej. Malwarebytes "confirm dialog abuse") o el
+        // propio navegador (bloqueo silencioso de diálogos tras varios seguidos)
+        // interrumpan o dejen el botón ELIMINAR sin responder.
+        this._delServCtx = { cid, dLimit };
+        this._delServStep = (dLimit < today) ? 'pastWarning' : 'choice';
+        this._renderDelServModal();
+        document.getElementById('delServModal').style.display = 'block';
+    }
+    _renderDelServModal() {
+        const msg = document.getElementById('delServMsg');
+        const btns = document.getElementById('delServBtns');
+        if (!msg || !btns) return;
+        btns.innerHTML = '';
+        if (this._delServStep === 'pastWarning') {
+            msg.innerHTML = '⚠️ <b>ADVERTENCIA: Este servicio es del PASADO</b><br><br>Fecha: ' + this._delServCtx.dLimit + '<br><br>Esta acción NO se puede deshacer. ¿Seguro que quieres continuar?';
+            btns.innerHTML =
+                '<button type="button" class="btn" style="background:var(--danger)" onclick="app._delServChoice(\'continuePast\')">🚨 Sí, continuar</button>' +
+                '<button type="button" class="btn" style="background:#bdc3c7; color:black" onclick="app._delServChoice(\'cancel\')">Cancelar</button>';
+        } else if (this._delServStep === 'choice') {
+            msg.innerHTML = '¿Qué deseas borrar?';
+            btns.innerHTML =
+                '<button type="button" class="btn" style="background:var(--danger)" onclick="app._delServChoice(\'only\')">✅ Solo este servicio</button>' +
+                '<button type="button" class="btn" style="background:var(--danger)" onclick="app._delServChoice(\'series\')">🗑️ Toda la serie futura (desde ' + this._delServCtx.dLimit + ')</button>' +
+                '<button type="button" class="btn" style="background:#bdc3c7; color:black" onclick="app._delServChoice(\'cancel\')">Cancelar</button>';
         }
-        const opcion = confirm("¿Borrar SOLO este servicio?\n\n✅ Aceptar = Solo este\n❌ Cancelar = Ver más opciones");
-        if (opcion) {
+    }
+    _closeDelServModal() {
+        const m = document.getElementById('delServModal');
+        if (m) m.style.display = 'none';
+        this._delServCtx = null;
+        this._delServStep = null;
+    }
+    _delServChoice(action) {
+        if (action === 'cancel') { this._closeDelServModal(); return; }
+        if (action === 'continuePast') { this._delServStep = 'choice'; this._renderDelServModal(); return; }
+        if (!this._delServCtx) { this._closeDelServModal(); return; }
+        const { cid, dLimit } = this._delServCtx;
+        if (action === 'only') {
             this._tombstone('servs', this.editing.id);
             this.servs = this.servs.filter(s => String(s.id) !== String(this.editing.id));
             this.save();
             this.reorderPriorityByTime(document.getElementById('mEmp').value, document.getElementById('mDate').value);
-            this.closeModal(); 
+            this._closeDelServModal();
+            this.closeModal();
             this.render();
             // ✅ Actualizar Finanzas si está abierto
             if(document.getElementById('financeModal').style.display === 'block') {
                 this.refreshFinance();
             }
-        } else {
-            const borrarSerie = confirm("¿Borrar toda la serie FUTURA?\n(Desde " + dLimit + " en adelante)");
-            if (borrarSerie) {
-                const serieId = this.editing.serieId;
-                let _borrados;
-                if (serieId) {
-                    // Borrar solo los de la misma serie
-                    _borrados = this.servs.filter(s => (s.serieId === serieId && s.date >= dLimit));
-                    this.servs = this.servs.filter(s => !(s.serieId === serieId && s.date >= dLimit));
-                } else {
-                    // Fallback: borrar por cliId + fecha
-                    _borrados = this.servs.filter(s => (s.cliId == cid && s.date >= dLimit));
-                    this.servs = this.servs.filter(s => !(s.cliId == cid && s.date >= dLimit));
-                }
-                // Dejar lápida de cada servicio borrado, para que la eliminación se
-                // propague a las otras PCs y el merge no los reviva desde Drive.
-                (_borrados || []).forEach(s => this._tombstone('servs', s.id));
-                this.save(); 
-                this.closeModal(); 
-                this.render();
-                // ✅ Actualizar Finanzas si está abierto
-                if(document.getElementById('financeModal').style.display === 'block') {
-                    this.refreshFinance();
-                }
+        } else if (action === 'series') {
+            const serieId = this.editing.serieId;
+            let _borrados;
+            if (serieId) {
+                // Borrar solo los de la misma serie
+                _borrados = this.servs.filter(s => (s.serieId === serieId && s.date >= dLimit));
+                this.servs = this.servs.filter(s => !(s.serieId === serieId && s.date >= dLimit));
+            } else {
+                // Fallback: borrar por cliId + fecha
+                _borrados = this.servs.filter(s => (s.cliId == cid && s.date >= dLimit));
+                this.servs = this.servs.filter(s => !(s.cliId == cid && s.date >= dLimit));
+            }
+            // Dejar lápida de cada servicio borrado, para que la eliminación se
+            // propague a las otras PCs y el merge no los reviva desde Drive.
+            (_borrados || []).forEach(s => this._tombstone('servs', s.id));
+            this.save();
+            this._closeDelServModal();
+            this.closeModal();
+            this.render();
+            // ✅ Actualizar Finanzas si está abierto
+            if(document.getElementById('financeModal').style.display === 'block') {
+                this.refreshFinance();
             }
         }
     }
@@ -8293,16 +8327,34 @@ class Scheduler {
                     this.renderPaymentHistory(inv);
                     return;
                 }
-                // ── Candado CRUZADO: ¿esa misma referencia ya está en OTRA factura? ─────
+                // ── Candado CRUZADO: ¿esa misma referencia ya está en OTRA factura DEL
+                // MISMO CLIENTE? ─────────────────────────────────────────────────────
                 // El de arriba solo mira dentro de ESTA factura. Pero una referencia de
                 // Stripe (pi_...) o un número de cheque identifican UN pago único: si ya
-                // está acreditado en otra factura, registrarlo aquí lo cobra dos veces en
-                // los libros. Pasó con el #7550: dos pagos del mismo link quedaron en la
-                // misma factura cuando uno era de la #7548.
+                // está acreditado en otra factura del MISMO cliente, registrarlo aquí lo
+                // cobra dos veces en los libros. Pasó con el #7550: dos pagos del mismo
+                // link quedaron en la misma factura cuando uno era de la #7548 (mismo
+                // cliente, JGM).
+                // FIX 2026-09-17: antes comparaba contra TODAS las facturas sin importar
+                // el cliente — un número de cheque solo es único dentro de la chequera de
+                // esa persona, así que dos clientes distintos coincidiendo en el mismo
+                // número (ej. cheque "2090" de Hall, Andrew y de Shelby Cefaratti-Bertin,
+                // pura coincidencia) disparaba una falsa alarma de "pago duplicado". Ahora
+                // solo avisa cuando la referencia repetida es del MISMO cliente — se sigue
+                // cachando el caso real que motivó este candado, sin falsos positivos entre
+                // clientes distintos.
                 const refLimpia = String(ref || '').trim();
                 if (refLimpia) {
+                    const _invClienteIds = (inv.clientIds && inv.clientIds.length > 0) ? inv.clientIds.map(String) : null;
+                    const _mismoCliente = (o) => {
+                        if (_invClienteIds && o.clientIds && o.clientIds.length > 0) {
+                            return _invClienteIds.some(id => o.clientIds.map(String).includes(id));
+                        }
+                        return o.clientName === inv.clientName;
+                    };
                     const otra = (this.generatedInvoices || []).find(o =>
                         String(o.id) !== String(inv.id) &&
+                        _mismoCliente(o) &&
                         (o.payments || []).some(p => String(p.ref || '').trim() === refLimpia));
                     if (otra) {
                         const seguir = confirm(
