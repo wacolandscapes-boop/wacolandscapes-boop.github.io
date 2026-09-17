@@ -2575,6 +2575,16 @@ class Scheduler {
             const sel = document.getElementById(`gEditSlot_${i}`);
             if (sel) this.grupos[nombreGrupo][i] = sel.value;
         }
+        // 2026-09-17: dejar rastro en el historial por día (gruposHistorial), con la
+        // fecha de HOY, aunque el cambio se haga desde este modal clásico y no desde
+        // el tablero de Rotación — así Producción de fechas pasadas puede reconstruir
+        // correctamente quién estaba en cada grupo día por día, sin importar por cuál
+        // de los dos modales se hizo el cambio.
+        const hoy = new Date().toLocaleDateString('en-CA');
+        if (!this.gruposHistorial) this.gruposHistorial = {};
+        if (!this.gruposHistorial[hoy]) this.gruposHistorial[hoy] = {};
+        this.gruposHistorial[hoy][nombreGrupo] = (this.grupos[nombreGrupo] || []).filter(Boolean);
+        localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial));
         this.save();
         document.getElementById('grupoEditModal')?.remove();
         this.render();
@@ -18588,7 +18598,17 @@ Motivo de cancelación (opcional):`);
                 if(groupFilt!=='all'&&grp!==groupFilt)return;
                 const gd = empData;
                 if(!groupRows[grp]){
-                    const mIds=(this.grupos[grp]||[]).map(String);
+                    // 2026-09-17: antes usaba this.grupos[grp] (composición de HOY) sin
+                    // importar qué fecha se estuviera viendo — un cambio de grupo reciente
+                    // aparecía retroactivamente en semanas pasadas. Ahora se toma la UNIÓN
+                    // de quién estuvo asignado al grupo en CUALQUIER día del rango que se
+                    // está viendo (vía _rosterParaFecha/gruposHistorial), así un cambio a
+                    // media semana muestra a ambas personas (la de antes y la de después)
+                    // en vez de solo la actual — las horas reales de cada quien se siguen
+                    // atribuyendo por día más abajo, sin cambios.
+                    const mIdsSet = new Set();
+                    dates.forEach(dd => (this._rosterParaFecha(grp, dd) || []).forEach(id => { if (id) mIdsSet.add(String(id)); }));
+                    const mIds = Array.from(mIdsSet);
                     const mEmps=mIds.map(id=>this.emps.find(e=>String(e.id)===id)).filter(Boolean);
                     groupRows[grp]={services:[],totalHrs:0,totalCost:0,totalBilled:0,doneCount:0,members:mEmps,empHrs:{}};
                     mEmps.forEach(e=>{groupRows[grp].empHrs[e.id]={name:e.name,hrs:0,cost:0,rate:getRateForEmp(e)};});
