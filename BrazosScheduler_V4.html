@@ -17855,13 +17855,20 @@ Motivo de cancelación (opcional):`);
                     breakApplied = true;
                 }
 
-                // Usar la lista oficial de miembros del grupo (this.grupos), no solo quienes tienen registro
-                const officialMemberIds = (this.grupos[grp] || []).filter(id => id);
+                // FIX 2026-09-18: usar la composición del grupo PARA ESE DÍA (dt) vía
+                // _rosterParaFecha — igual que ya hace renderProductionReport() desde el
+                // fix del 17-sep — en vez de siempre la lista VIGENTE (this.grupos[grp]).
+                // Antes, si el grupo cambiaba de integrantes después de esa fecha, este
+                // resumen de Horas seguía aplicando la composición de HOY a fechas
+                // pasadas — mostrando a alguien que no trabajó ese día, o un ID que ya no
+                // corresponde a ningún empleado actual ("Empleado: Desconocido").
+                const officialMemberIds = this._rosterParaFecha(grp, dt).filter(id => id);
                 const memberIds = officialMemberIds.length > 0 ? officialMemberIds : [...groupInfo.memberEmpIds];
 
                 memberIds.forEach(empId => {
                     const emp = this.emps.find(e => String(e.id) === String(empId));
-                    const empName = emp ? emp.name : 'Desconocido';
+                    if (!emp) return; // ID de un empleado ya borrado/no encontrado — se omite en vez de mostrar "Desconocido"
+                    const empName = emp.name;
                     if (!empHours[empId]) empHours[empId] = { empId, name: empName, totalMin: 0, days: [] };
                     empHours[empId].totalMin += minutes;
                     empHours[empId].days.push({
