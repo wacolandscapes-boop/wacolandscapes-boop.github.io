@@ -17323,13 +17323,12 @@ Motivo de cancelación (opcional):`);
             }
         } catch(e) {}
         document.getElementById('productionModal').style.display = 'block';
-        document.getElementById('prodDate').value = new Date().toLocaleDateString('en-CA');
         const sel = document.getElementById('prodGroup');
         sel.innerHTML = '<option value="all">Todos los grupos</option>';
         Object.keys(this.grupos).forEach(g => {
             const o = document.createElement('option'); o.value = g; o.textContent = g; sel.appendChild(o);
         });
-        // Inicializar rango de fechas para resumen de horas: semana pasada (Lun-Dom)
+        // Inicializar rango de fechas: semana pasada (Lun-Dom)
         const today = new Date();
         const dow = today.getDay(); // 0=Dom
         const diffToMon = (dow === 0) ? -6 : 1 - dow;
@@ -17341,6 +17340,16 @@ Motivo de cancelación (opcional):`);
         lastSunday.setDate(lastMonday.getDate() + 6);
         document.getElementById('hoursRangeStart').value = lastMonday.toLocaleDateString('en-CA');
         document.getElementById('hoursRangeEnd').value = lastSunday.toLocaleDateString('en-CA');
+        // FIX 2026-09-18: el resumen principal de Producción (tarjetas por grupo) se
+        // quedaba en "Por día" con la fecha de HOY cada vez que se abría el modal — si
+        // hoy no hay servicios/actividad para un grupo, el resumen salía vacío/en $0 y,
+        // como "hoy" toma la composición VIGENTE del grupo (this.grupos), parecía
+        // mostrar "el último empleado registrado" en vez de respetar quién estuvo
+        // asignado esa semana pasada. Ahora arranca en "Por semana"/semana pasada,
+        // igual que ya hacía el resumen de horas de abajo — Ranu puede cambiarlo
+        // manualmente si quiere ver otro rango.
+        document.getElementById('prodView').value = 'week';
+        document.getElementById('prodDate').value = lastMonday.toLocaleDateString('en-CA');
 
         // Restaurar estado colapsado/expandido de la sección de horas
         const wasCollapsed = localStorage.getItem('prodHoursSectionCollapsed') === 'true';
