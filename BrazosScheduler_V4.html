@@ -15051,8 +15051,12 @@ Motivo de cancelación (opcional):`);
                 
                 ${this._avisosSaldoPreviewHTML(client, pdfData.invoiceNumber)}
                 <iframe src="${pdfUrl}" style="flex: 1; border: none; margin: 0; padding: 0;"></iframe>
-                
-                <div style="padding: 20px; border-top: 2px solid #ddd; display: flex; gap: 15px; justify-content: center; flex-wrap:wrap;">
+                ${client.email ? `
+                <div style="padding: 10px 20px 0; border-top: 2px solid #ddd;">
+                    <label for="previewCustomNote" style="display:block;font-size:0.85rem;font-weight:700;color:#555;margin-bottom:4px;">📝 Nota para el cliente (opcional, se incluye en el correo)</label>
+                    <textarea id="previewCustomNote" rows="2" placeholder="Ej: Notamos que el pago de Julio no llegó junto con el de Agosto..." style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+                </div>` : ''}
+                <div style="padding: 20px; border-top: ${client.email ? '0' : '2px solid #ddd'}; display: flex; gap: 15px; justify-content: center; flex-wrap:wrap;">
                     <!-- Tax controls in preview -->
                     <div style="display:flex;align-items:center;gap:8px;background:#f8f9fa;padding:10px 15px;border-radius:8px;border:1px solid #ddd;">
                         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;font-size:0.9rem;">
@@ -15595,6 +15599,12 @@ Motivo de cancelación (opcional):`);
             const invoiceNum = invoiceNumber.toString().padStart(4,'0');
             const fileName = `Invoice_${invoiceNum}_${client.name.replace(/[^a-zA-Z0-9]/g,'_')}.pdf`;
 
+            // Nota personalizada opcional (campo del preview) — se incluye en el correo
+            // solo si el usuario escribió algo; si se deja vacío, el placeholder
+            // {{custom_note}} de la plantilla queda en blanco sin afectar el resto.
+            const _notaCliente = (document.getElementById('previewCustomNote')?.value || '').trim();
+            const customNote = _notaCliente ? `\n${_notaCliente}\n` : '';
+
             // Enviar a cada email
             for (const email of emails) {
                 const templateParams = {
@@ -15602,7 +15612,8 @@ Motivo de cancelación (opcional):`);
                     invoice_number: invoiceNum,
                     to_email: email,
                     pdf_content: base64PDF,
-                    pdf_name: fileName
+                    pdf_name: fileName,
+                    custom_note: customNote
                 };
                 await emailjs.send('service_mamjtia', 'template_ygaa3xa', templateParams);
             }
