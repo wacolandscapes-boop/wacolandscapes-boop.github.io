@@ -15501,6 +15501,15 @@ Motivo de cancelación (opcional):`);
             if (pdfData.total !== undefined && pdfData.total !== null) alreadyExists.total = pdfData.total;
             if (pdfData.serviceCount !== undefined) alreadyExists.serviceCount = pdfData.serviceCount;
             if (pdfData.client?.email) alreadyExists.clientEmail = pdfData.client.email;
+            // FIX 2026-09-21: al reenviar/reeditar una factura YA EXISTENTE, esta rama
+            // actualizaba items/fechas/total pero NUNCA guardaba de vuelta la decisión de
+            // impuesto (invoiceConfig) que se usó en ESTE envío — así que la próxima vez
+            // que se reabriera esta misma factura, _cargarImpuestoDeFactura() no tenía
+            // forma de saber qué se decidió la última vez y caía al perfil ACTUAL del
+            // cliente (que puede ya no coincidir, ej. Trey Holdbrook). Ahora la decisión
+            // de impuesto de este envío se guarda en la factura misma, para que la
+            // próxima apertura respete la última vez que se creó o editó, no el perfil.
+            if (pdfData.invoiceConfig) alreadyExists.invoiceConfig = pdfData.invoiceConfig;
             this.save();
             return true;
         }
