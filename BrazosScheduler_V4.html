@@ -1615,7 +1615,7 @@
                     <div><label style="font-size: 0.85rem;">Hasta</label><input type="date" id="finEnd" onchange="app.refreshFinance()" style="padding: 6px;"></div>
                     <div><label style="font-size: 0.85rem;">Cliente</label><select id="finCli" onchange="app.refreshFinance()" style="padding: 6px;"></select></div>
                 </div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px">
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px">
                     <div>
                         <label style="font-size: 0.85rem;">Recurrencia</label>
                         <select id="finRecurrence" onchange="app.refreshFinance()" style="padding: 6px;">
@@ -1640,6 +1640,11 @@
                             <option value="airbnb">🏖️ AirBnB</option>
                             <option value="construccion">🏗️ Construcción</option>
                             <option value="unico">⭐ Único</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size: 0.85rem;">Grupo <span style="font-weight:400; color:#888;">(Ctrl/Cmd+clic para varios)</span></label>
+                        <select id="finGrupo" onchange="app.refreshFinance()" multiple size="3" style="padding: 6px; width:100%;">
                         </select>
                     </div>
                 </div>
@@ -4644,9 +4649,18 @@ class Scheduler {
             return nameA.localeCompare(nameB);
         });
         
-        document.getElementById('finCli').innerHTML = '<option value="all">Todos</option>' + 
+        document.getElementById('finCli').innerHTML = '<option value="all">Todos</option>' +
             sortedClis.map(c => `<option value="${c.id}">${c.name} - ${c.propId}</option>`).join('');
-        
+
+        // ✅ Filtro por Grupo (selección múltiple): opciones en el mismo orden en
+        // que existen en this.grupos. Nada seleccionado = todos los grupos.
+        const finGrupoSel = document.getElementById('finGrupo');
+        if (finGrupoSel) {
+            const seleccionPrevia = Array.from(finGrupoSel.selectedOptions || []).map(o => o.value);
+            finGrupoSel.innerHTML = Object.keys(this.grupos || {}).map(g => `<option value="${g}">${g}</option>`).join('');
+            Array.from(finGrupoSel.options).forEach(o => { if (seleccionPrevia.includes(o.value)) o.selected = true; });
+        }
+
         // Usar el rango de la semana visible en el calendario
         const calStart = this.view === 'day' ? new Date(this.curDate) : this.getMon(this.curDate);
         calStart.setHours(0,0,0,0);
@@ -10879,29 +10893,36 @@ Motivo de cancelación (opcional):`);
         // Obtener datos filtrados (copiar lógica de refreshFinance)
         const cliFilter = document.getElementById('finCli').value;
         const recFilter = document.getElementById('finRecurrence') ? document.getElementById('finRecurrence').value : 'all';
-        
+        const finGrupoElExport = document.getElementById('finGrupo');
+        const gruposFilterExport = finGrupoElExport ? Array.from(finGrupoElExport.selectedOptions).map(o => o.value) : [];
+
         const filtered = this.servs.filter(s => {
             if(start && s.date < start) return false;
             if(end && s.date > end) return false;
-            
+
             const serviceCli = this.clis.find(c => c.id == s.cliId);
             if(!serviceCli) return false;
-            
+
             if(cliFilter !== 'all') {
                 const selectedCli = this.clis.find(c => c.id == cliFilter);
                 if(!selectedCli) return false;
-                
+
                 if(selectedCli.type === 'airbnb' || selectedCli.type === 'unico' || selectedCli.type === 'construccion') {
                     if(serviceCli.name !== selectedCli.name) return false;
                 } else {
                     if(s.cliId != cliFilter) return false;
                 }
             }
-            
+
             if(recFilter !== 'all') {
                 if(serviceCli.type !== recFilter) return false;
             }
-            
+
+            if(gruposFilterExport.length) {
+                const svcGrupo = String(s.grupo || s.empId || '');
+                if(!gruposFilterExport.includes(svcGrupo)) return false;
+            }
+
             return true;
         });
         
@@ -12288,7 +12309,9 @@ Motivo de cancelación (opcional):`);
         const cliFilter = document.getElementById('finCli').value;
         const recFilter = document.getElementById('finRecurrence') ? document.getElementById('finRecurrence').value : 'all';
         const serviceTypeFilter = document.getElementById('finServiceType') ? document.getElementById('finServiceType').value : 'all';
-        
+        const finGrupoElRF = document.getElementById('finGrupo');
+        const gruposFilter = finGrupoElRF ? Array.from(finGrupoElRF.selectedOptions).map(o => o.value) : [];
+
         // Resaltar filtro de recurrencia si está activo
         const recSelect = document.getElementById('finRecurrence');
         if(recSelect) {
@@ -12337,7 +12360,16 @@ Motivo de cancelación (opcional):`);
             if(serviceTypeFilter !== 'all') {
                 if(serviceCli.serviceType !== serviceTypeFilter) return false;
             }
-            
+
+            // Filtro de grupo, selección múltiple (mismo patrón que usa el resto
+            // de la app: s.grupo guarda el nombre del grupo; s.empId como
+            // respaldo para servicios viejos que sólo tienen el grupo guardado
+            // ahí). Nada seleccionado = no filtra (todos los grupos).
+            if(gruposFilter.length) {
+                const svcGrupo = String(s.grupo || s.empId || '');
+                if(!gruposFilter.includes(svcGrupo)) return false;
+            }
+
             return true;
         });
         
@@ -15136,7 +15168,11 @@ Motivo de cancelación (opcional):`);
             const pdfData = this.createPDFBlob(client, services, inv.startDate, inv.endDate, 'standard', '', false, false, 0);
             if (!pdfData || !pdfData.blob) { alert('Error al generar PDF'); return; }
             client.email = client.email || inv.clientEmail;
-            await this.sendInvoiceByGmail(pdfData.blob, client, inv.invoiceNumber || pdfData.invoiceNumber, inv.total || 0, inv.startDate, inv.endDate);
+            // Este camino (envío rápido desde Pendientes) no pasa por el modal de vista
+            // previa, así que no hay caja de texto visible — se pregunta con un prompt
+            // rápido en su lugar. Cancelar o dejarlo vacío manda el correo normal, sin nota.
+            const nota = (prompt('📝 Nota para el cliente (opcional, se incluye en el correo). Deja vacío o cancela para enviar sin nota:', '') || '').trim();
+            await this.sendInvoiceByGmail(pdfData.blob, client, inv.invoiceNumber || pdfData.invoiceNumber, inv.total || 0, inv.startDate, inv.endDate, nota);
         } catch(e) {
             alert('Error: ' + e.message);
         }
@@ -15575,7 +15611,7 @@ Motivo de cancelación (opcional):`);
         return true;
     }
 
-    async sendInvoiceByGmail(pdfBlob, client, invoiceNumber, total, startDate, endDate) {
+    async sendInvoiceByGmail(pdfBlob, client, invoiceNumber, total, startDate, endDate, notaOverride) {
         if (this._clicDuplicado('sendInvoiceByGmail', 5000)) return;
         // Registrar en Enviadas con status enviada
         // 2026-09-15: si se bloqueó por duplicado, no seguir — ni enviar el correo ni
@@ -15602,7 +15638,7 @@ Motivo de cancelación (opcional):`);
             // Nota personalizada opcional (campo del preview) — se incluye en el correo
             // solo si el usuario escribió algo; si se deja vacío, el placeholder
             // {{custom_note}} de la plantilla queda en blanco sin afectar el resto.
-            const _notaCliente = (document.getElementById('previewCustomNote')?.value || '').trim();
+            const _notaCliente = (notaOverride !== undefined ? notaOverride : (document.getElementById('previewCustomNote')?.value || '')).trim();
             const customNote = _notaCliente ? `\n${_notaCliente}\n` : '';
 
             // Enviar a cada email
