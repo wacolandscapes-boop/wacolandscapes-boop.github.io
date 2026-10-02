@@ -18213,8 +18213,9 @@ Motivo de cancelación (opcional):`);
             alert('Conecta Google Drive primero (el botón de Sync arriba).');
             return;
         }
-        const memberIds = (this.grupos[empGroup] || []).filter(id => id);
-        if (!memberIds.length) { alert('El grupo "' + empGroup + '" no tiene empleados asignados.'); return; }
+        // Todos los empleados de los grupos marcados (uno o varios), sin repetir.
+        const memberIds = this.nmGetGroupMemberIds();
+        if (!memberIds.length) { alert('"' + empGroup + '" no tiene empleados asignados.'); return; }
 
         // Mismo cálculo que updateNomina() usa para "HORAS PARA QUICKBOOKS".
         const rate = parseFloat(document.getElementById('nmRate').value) || 15;
@@ -20260,16 +20261,27 @@ Motivo de cancelación (opcional):`);
         document.getElementById('nominaMariaContent').style.display = 'block';
         document.getElementById('nmMinBar').style.display = 'none';
 
-        // Poblar selector de grupos
-        const sel = document.getElementById('nmEmpSel');
-        sel.innerHTML = '';
-        Object.keys(this.grupos).forEach(grp => {
-            const opt = document.createElement('option');
-            opt.value = grp;
-            opt.dataset.group = grp;
-            const activeCount = (this.grupos[grp]||[]).filter(id => id && id.trim() !== '').length;
-            opt.textContent = grp + ' (' + activeCount + ' empleado' + (activeCount !== 1 ? 's' : '') + ')';
-            sel.appendChild(opt);
+        // Poblar casillas de grupos (se pueden marcar varios para combinar).
+        // Conserva lo que ya estaba marcado si se reabre; si no había nada, marca
+        // el primer grupo (mismo comportamiento que el selector anterior).
+        const box = document.getElementById('nmGruposChecks');
+        const prevSel = this.nmGetSelectedGroups();
+        box.innerHTML = '';
+        Object.keys(this.grupos).forEach((grp, i) => {
+            const activeCount = (this.grupos[grp]||[]).filter(id => id && String(id).trim() !== '').length;
+            const checked = prevSel.length ? prevSel.includes(grp) : i === 0;
+            const lbl = document.createElement('label');
+            lbl.style.cssText = 'display:flex;align-items:center;gap:5px;padding:5px 9px;border:1px solid #4a5568;border-radius:6px;background:#2d3748;cursor:pointer;font-size:0.85rem;';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'nm-grupo-chk';
+            cb.value = grp;
+            cb.checked = checked;
+            cb.style.cssText = 'width:15px;height:15px;cursor:pointer;';
+            cb.onchange = () => this.calcNominaMaria();
+            lbl.appendChild(cb);
+            lbl.appendChild(document.createTextNode(grp + ' (' + activeCount + ')'));
+            box.appendChild(lbl);
         });
 
         // Setear semana PASADA por defecto (la nómina se calcula sobre la semana ya
@@ -20326,16 +20338,44 @@ Motivo de cancelación (opcional):`);
         this.calcNominaMaria();
     }
 
+    // Grupos marcados, en el mismo orden en que existen en this.grupos.
+    nmGetSelectedGroups() {
+        const marcados = Array.from(document.querySelectorAll('#nmGruposChecks .nm-grupo-chk:checked')).map(c => c.value);
+        return Object.keys(this.grupos || {}).filter(g => marcados.includes(g));
+    }
+
+    // Empleados de TODOS los grupos marcados (sin repetir si alguien está en dos).
+    nmGetGroupMemberIds() {
+        const ids = [];
+        this.nmGetSelectedGroups().forEach(g => {
+            (this.grupos[g] || []).forEach(id => {
+                const s = String(id || '').trim();
+                if (s && !ids.includes(s)) ids.push(s);
+            });
+        });
+        return ids;
+    }
+
+    // Llave del cálculo: con UN grupo es su nombre (igual que antes, así lo ya
+    // guardado de cada semana sigue apareciendo); con varios, "Grupo A + Grupo C"
+    // para guardarse aparte sin pisar lo de cada grupo individual.
     nmGetEmpId() {
-        const sel = document.getElementById('nmEmpSel');
-        return sel ? sel.value : '';
+        return this.nmGetSelectedGroups().join(' + ');
     }
 
     nmGetEmpGroup() {
-        const sel = document.getElementById('nmEmpSel');
-        if (!sel) return '';
-        // value is always the group name (e.g. "Grupo C")
-        return sel.value || '';
+        return this.nmGetSelectedGroups().join(' + ');
+    }
+
+    // "÷ # empleados (total)" del modo combinado: lo copia a cada renglón.
+    nmAplicarEmpTotal() {
+        const v = parseInt(document.getElementById('nmEmpTotal').value) || 1;
+        const n = parseInt(document.getElementById('nmServicesTable').dataset.svcCount || 0);
+        for (let i = 0; i < n; i++) {
+            const inp = document.getElementById('nmEmp_' + i);
+            if (inp) inp.value = v;
+        }
+        this.updateNomina();
     }
 
     nmGetPriceCatalog() {
@@ -20395,13 +20435,19 @@ Motivo de cancelación (opcional):`);
         document.querySelector('#nominaMariaContent h2').textContent = '💰 Nómina % — ' + empName;
         document.getElementById('nmMinBar').textContent = '💰 Nómina ' + empName.split(' ')[0] + ' □ Expandir';
 
-        const groupIds = (this.grupos[empGroup] || []).filter(id => id && id.trim() !== '').map(String);
-        console.log('🔢 empGroup:', empGroup, '| raw slots:', (this.grupos[empGroup]||[]).length, '| groupIds filtered:', groupIds.length, groupIds);
+        // Uno o varios grupos marcados. Con uno solo, todo funciona igual que antes.
+        const selGroups = this.nmGetSelectedGroups();
+        const esCombinado = selGroups.length > 1;
+        const groupIds = this.nmGetGroupMemberIds();
+        console.log('🔢 grupos:', selGroups, '| groupIds:', groupIds.length, groupIds);
         const weekServs = this.servs.filter(s =>
             !s.cancelled &&
             weekDates.includes(s.date) &&
-            (s.empId === empGroup || groupIds.includes(String(s.empId)))
+            (selGroups.includes(s.empId) || groupIds.includes(String(s.empId)))
         ).sort((a, b) => a.date.localeCompare(b.date));
+        // Barra del modo combinado (oculta con un solo grupo)
+        const comboBar = document.getElementById('nmComboBar');
+        if (comboBar) comboBar.style.display = esCombinado ? 'flex' : 'none';
 
         const pct = parseFloat(document.getElementById('nmPct').value) / 100 || 0.60;
         const priceCatalog = this.nmGetPriceCatalog();
@@ -20409,7 +20455,7 @@ Motivo de cancelación (opcional):`);
 
         const tbl = document.getElementById('nmServicesTable');
         if (weekServs.length === 0) {
-            tbl.innerHTML = '<div style="color:#94a3b8;padding:12px;">Sin servicios registrados esta semana para el Grupo A.</div>';
+            tbl.innerHTML = '<div style="color:#94a3b8;padding:12px;">' + (selGroups.length ? 'Sin servicios registrados esta semana para ' + empGroup + '.' : 'Marca al menos un grupo.') + '</div>';
             tbl.dataset.svcCount = 0;
         } else {
             let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
@@ -20436,7 +20482,13 @@ Motivo de cancelación (opcional):`);
                 const empCount = savedEmp !== null ? savedEmp : defaultEmpCount;
                 const dayIdx = weekDates.indexOf(s.date);
                 const dayLabel = DAYS[dayIdx] + ' ' + s.date.slice(8);
-                const propLabel = (cli.type==='airbnb'||cli.type==='unico'||cli.type==='construccion') && cli.propId ? cli.name + ' / ' + cli.propId : cli.name || s.cliId;
+                let propLabel = (cli.type==='airbnb'||cli.type==='unico'||cli.type==='construccion') && cli.propId ? cli.name + ' / ' + cli.propId : cli.name || s.cliId;
+                // En modo combinado se indica de qué grupo es cada servicio
+                if (esCombinado) {
+                    const gSvc = selGroups.includes(s.empId) ? s.empId
+                        : (selGroups.find(g => (this.grupos[g] || []).map(String).includes(String(s.empId))) || '');
+                    if (gSvc) propLabel += ' · ' + gSvc;
+                }
                 html += `<tr style="border-bottom:1px solid #374151;">
                     <td style="padding:8px;color:#94a3b8;">${dayLabel}</td>
                     <td style="padding:8px;">${propLabel}</td>
@@ -20468,6 +20520,13 @@ Motivo de cancelación (opcional):`);
             </tr></tbody></table>`;
             tbl.innerHTML = html;
             tbl.dataset.svcCount = weekServs.length;
+        }
+        // Modo combinado: el divisor general arranca con lo guardado de esa semana
+        // (si existe) o con el total de empleados de los grupos marcados.
+        if (esCombinado) {
+            const empTot = document.getElementById('nmEmpTotal');
+            const savedEmp0 = weekData && weekData.emps && weekData.emps[0] !== undefined ? weekData.emps[0] : null;
+            if (empTot) empTot.value = savedEmp0 !== null ? savedEmp0 : (groupIds.length || 1);
         }
 
         // Horas directas — cargar desde datos guardados de la semana
@@ -20540,6 +20599,12 @@ Motivo de cancelación (opcional):`);
         }
         const totalRow = document.getElementById('nmTotalPctRow');
         if (totalRow) totalRow.textContent = '$' + totalPct.toFixed(2);
+        // Total facturado de la semana (barra del modo combinado)
+        const comboTotalEl = document.getElementById('nmComboTotal');
+        if (comboTotalEl) {
+            const totalFacturado = Object.values(prices).reduce((a, b) => a + (parseFloat(b) || 0), 0);
+            comboTotalEl.textContent = '$' + totalFacturado.toFixed(2);
+        }
         const totalEmpRow = document.getElementById('nmTotalEmpPay');
         if (totalEmpRow) totalEmpRow.textContent = '$' + totalEmpPay.toFixed(2);
         this.nmSavePriceCatalog(priceCatalog);
@@ -20615,8 +20680,7 @@ Motivo de cancelación (opcional):`);
     }
 
     printNominaMaria() {
-        const empGroup = this.nmGetEmpGroup();
-        const groupIds = (this.grupos[empGroup] || []).filter(id => id && id.trim() !== '').map(String);
+        const groupIds = this.nmGetGroupMemberIds();
         const groupEmps = this.emps.filter(e => groupIds.includes(String(e.id)));
 
         if (groupEmps.length <= 1) {
@@ -22455,8 +22519,8 @@ document.addEventListener('click', function(e) {
     <!-- Selector de empleado -->
     <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
       <div>
-        <label style="font-size:0.8rem;color:#94a3b8;">Grupo</label>
-        <select id="nmEmpSel" onchange="app.calcNominaMaria()" style="padding:6px 10px;border:1px solid #4a5568;border-radius:6px;background:#2d3748;color:#e2e8f0;margin-left:8px;"></select>
+        <label style="font-size:0.8rem;color:#94a3b8;">Grupo(s) <span style="color:#64748b;">— marca varios para combinar</span></label>
+        <div id="nmGruposChecks" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
       </div>
       <div>
         <label style="font-size:0.8rem;color:#94a3b8;">Semana del</label>
@@ -22465,6 +22529,13 @@ document.addEventListener('click', function(e) {
       <button onclick="app.calcNominaMaria()" style="background:#7c3aed;color:white;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;font-weight:700;">🔄 Calcular</button>
       <button onclick="app.nmPrevWeek()" style="background:#374151;color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;">◀</button>
       <button onclick="app.nmNextWeek()" style="background:#374151;color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;">▶</button>
+    </div>
+    <div id="nmComboBar" style="display:none;background:#2d3748;border:1px solid #7c3aed;border-radius:8px;padding:10px 14px;margin-bottom:12px;align-items:center;gap:14px;flex-wrap:wrap;">
+      <span style="color:#a78bfa;font-weight:700;">🔗 Grupos combinados</span>
+      <span style="font-size:0.85rem;color:#94a3b8;">Total facturado: <b id="nmComboTotal" style="color:#86efac;">$0.00</b></span>
+      <label style="font-size:0.85rem;color:#94a3b8;">÷ # empleados (total)
+        <input type="number" id="nmEmpTotal" min="1" max="50" step="1" value="1" oninput="app.nmAplicarEmpTotal()" title="Se aplica a todos los servicios de la tabla" style="width:60px;padding:4px;border:1px solid #4a5568;border-radius:4px;background:#1a1a2e;color:#e2e8f0;text-align:center;margin-left:6px;">
+      </label>
     </div>
     <div id="nmServicesTable" style="margin-bottom:20px;"></div>
     <div style="background:#2d3748;border-radius:8px;padding:16px;margin-bottom:20px;">
