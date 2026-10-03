@@ -7297,7 +7297,9 @@ class Scheduler {
             if (start && inv.generatedDate < start) return false;
             if (end && inv.generatedDate > end) return false;
             if (clientFilter !== 'all' && inv.clientName !== clientFilter) return false;
-            if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
+            if (statusFilter === 'sin_entrega') {
+                if (!this._entregaPendiente(inv)) return false;
+            } else if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
             if (numSearchTerm && !String(inv.invoiceNumber).includes(numSearchTerm)) return false;
             if (payMethodFilter !== 'all') {
                 const pm = inv.paymentMethod || '';
@@ -7343,7 +7345,7 @@ class Scheduler {
         this._lastFilteredInvoices = filtered;
         
         const statusColors = { pendiente:'#e67e22', enviada:'#2980b9', parcial:'#d4a017', pagada:'#27ae60', vencida:'#e74c3c', cancelada:'#95a5a6' };
-        const statusLabels = { pendiente:'⏳ Pendiente', enviada:'📧 Enviada', pagada:'✅ Pagada', vencida:'🔴 Vencida', cancelada:'🚫 Cancelada' };
+        const statusLabels = { pendiente:'⏳ Sin enviar', enviada:'📤 Enviada · Esperando pago', parcial:'💛 Pago parcial · Resta saldo', pagada:'✅ Pagada', vencida:'🔴 Vencida · Pago atrasado', cancelada:'🚫 Cancelada' };
 
         // Detectar números de factura duplicados (excluyendo canceladas)
         const numCounts = {};
@@ -7415,13 +7417,25 @@ class Scheduler {
                 </td>
                 <td>
                     <select onchange="app.changeInvoiceStatus('${inv.id || inv.invoiceNumber}', '${inv.clientName}', this.value)" style="background:${statusColor}; color:white; border:none; padding:3px 6px; border-radius:4px; font-size:0.7rem; cursor:pointer; font-weight:bold;">
-                        <option value="pendiente" ${inv.status==='pendiente'?'selected':''}>⏳ Pendiente</option>
-                        <option value="enviada" ${inv.status==='enviada'?'selected':''}>📧 Enviada</option>
-                        <option value="parcial" ${inv.status==='parcial'?'selected':''}>💛 Parcial</option>
+                        <option value="pendiente" ${inv.status==='pendiente'?'selected':''}>⏳ Sin enviar</option>
+                        <option value="enviada" ${inv.status==='enviada'?'selected':''}>📤 Enviada · Esperando pago</option>
+                        <option value="parcial" ${inv.status==='parcial'?'selected':''}>💛 Pago parcial · Resta saldo</option>
                         <option value="pagada" ${inv.status==='pagada'?'selected':''}>✅ Pagada</option>
-                        <option value="vencida" ${inv.status==='vencida'?'selected':''}>🔴 Vencida</option>
+                        <option value="vencida" ${inv.status==='vencida'?'selected':''}>🔴 Vencida · Pago atrasado</option>
                         <option value="cancelada" ${inv.status==='cancelada'?'selected':''}>🚫 Cancelada</option>
                     </select>
+                    ${(() => {
+                        // 2026-10-03: entrega real al cliente (ver _marcarCanalEnvio).
+                        if (inv.status === 'cancelada' || inv.status === 'pendiente') return '';
+                        const _idE = inv.id || inv.invoiceNumber;
+                        if (inv.deliveredAt) {
+                            const d = inv.deliveredAt.split('-');
+                            return `<div onclick="app.confirmarEntregaFactura('${_idE}')" title="Clic para editar la entrega" style="font-size:0.68rem;color:#27ae60;margin-top:2px;cursor:pointer;">📬 Entregada ${d[1]}/${d[2]} · ${inv.deliveredVia || ''}</div>`;
+                        }
+                        if (!this._entregaPendiente(inv)) return '';
+                        const etiqueta = inv.sendChannel === 'impresa' ? '🖨️ Impresa' : '❔ Sin dato de envío';
+                        return `<div style="font-size:0.68rem;color:#b45309;margin-top:2px;">${etiqueta} · <a href="#" onclick="event.preventDefault();app.confirmarEntregaFactura('${_idE}')" style="color:#b45309;font-weight:bold;">confirmar entrega</a></div>`;
+                    })()}
                     ${(inv.status==='pagada' || inv.status==='parcial') && inv.paidAt ? (() => {
                         // Antes la fecha del pago SOLO se mostraba en las pagadas: en las
                         // PARCIALES no aparecía, y parecía que no se hubiera guardado.
@@ -7525,10 +7539,10 @@ class Scheduler {
         const end = document.getElementById('cobrosEnd').value;
 
         const statusColors = {
-            pendiente: { bg:'#fff3cd', color:'#856404', label:'⏳ Pendiente' },
-            enviada:   { bg:'#cce5ff', color:'#004085', label:'📤 Enviada' },
+            pendiente: { bg:'#fff3cd', color:'#856404', label:'⏳ Sin enviar' },
+            enviada:   { bg:'#cce5ff', color:'#004085', label:'📤 Enviada · Esperando pago' },
             pagada:    { bg:'#d4edda', color:'#155724', label:'✅ Pagada' },
-            vencida:   { bg:'#f8d7da', color:'#721c24', label:'🔴 Vencida' },
+            vencida:   { bg:'#f8d7da', color:'#721c24', label:'🔴 Vencida · Pago atrasado' },
             cancelada: { bg:'#e2e3e5', color:'#383d41', label:'❌ Cancelada' }
         };
 
@@ -8562,6 +8576,82 @@ class Scheduler {
         if (inv.sentHistory.length > 30) inv.sentHistory = inv.sentHistory.slice(-30); // no crecer sin límite
     }
 
+    // ── 2026-10-03: POR QUÉ MEDIO salió la factura y si ya se ENTREGÓ al cliente ──
+    // "Enviada" significaba lo mismo si se imprimió o si se mandó por correo, y una
+    // factura impresa puede quedarse en el escritorio sin llegar nunca al cliente.
+    // Ahora se guarda el medio (sendChannel) y la entrega (deliveredAt/deliveredVia):
+    // por email se da por entregada sola; impresa queda "por confirmar" hasta que se
+    // confirme a mano desde Enviadas.
+    _invDelPDFActual() {
+        const d = window.currentPDFData;
+        if (!d || !d.invoiceNumber) return null;
+        const num = parseInt(d.invoiceNumber);
+        const nom = d.client?.name || '';
+        return (this.generatedInvoices || []).find(i => parseInt(i.invoiceNumber) === num && i.clientName === nom) || null;
+    }
+
+    _marcarCanalEnvio(inv, canal) {
+        if (!inv) return;
+        inv.sendChannel = canal; // 'email' | 'impresa'
+        if (canal === 'email' && !inv.deliveredAt) {
+            inv.deliveredAt = new Date().toLocaleDateString('en-CA');
+            inv.deliveredVia = 'email';
+        }
+    }
+
+    // Solo cuenta como "falta confirmar entrega" si se considera enviada y aún no se paga
+    // (si ya pagó, obviamente la recibió; si está "Sin enviar" o cancelada, no aplica).
+    _entregaPendiente(inv) {
+        if (!inv || inv.deliveredAt) return false;
+        return inv.status === 'enviada' || inv.status === 'vencida';
+    }
+
+    confirmarEntregaFactura(idOrNum) {
+        const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(idOrNum))
+                 || (this.generatedInvoices || []).find(i => String(i.invoiceNumber) === String(idOrNum));
+        if (!inv) return;
+        document.getElementById('entregaFacturaModal')?.remove();
+        const hoy = new Date().toLocaleDateString('en-CA');
+        const via = inv.deliveredVia || (inv.sendChannel === 'impresa' ? 'en mano' : 'en mano');
+        const opciones = [['en mano','🤝 En mano'],['correo postal','✉️ Correo postal'],['email','📧 Email'],['mensaje de texto','💬 Mensaje de texto'],['otro','Otro']];
+        const m = document.createElement('div');
+        m.id = 'entregaFacturaModal';
+        m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:20000;display:flex;align-items:center;justify-content:center;';
+        m.innerHTML = `
+            <div style="background:white;border-radius:12px;padding:22px;width:min(360px,92%);font-family:sans-serif;">
+                <h3 style="margin:0 0 6px;color:#2c3e50;">📬 Entrega de la factura #${String(inv.invoiceNumber).padStart(4,'0')}</h3>
+                <div style="font-size:0.85rem;color:#666;margin-bottom:14px;">${inv.clientName}${inv.sendChannel === 'impresa' ? ' · se imprimió' : ''}</div>
+                <label style="font-size:0.8rem;font-weight:700;">¿Cómo se entregó?</label>
+                <select id="entregaVia" style="width:100%;padding:8px;margin:4px 0 12px;border:1px solid #ddd;border-radius:6px;">
+                    ${opciones.map(([v,t]) => `<option value="${v}" ${v===via?'selected':''}>${t}</option>`).join('')}
+                </select>
+                <label style="font-size:0.8rem;font-weight:700;">Fecha de entrega</label>
+                <input type="date" id="entregaFecha" value="${inv.deliveredAt || hoy}" style="width:100%;padding:8px;margin:4px 0 16px;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;">
+                <div style="display:flex;gap:8px;">
+                    <button onclick="app._guardarEntregaFactura('${inv.id || inv.invoiceNumber}', false)" style="flex:1;background:#27ae60;color:white;border:none;padding:10px;border-radius:8px;cursor:pointer;font-weight:bold;">✅ Confirmar</button>
+                    ${inv.deliveredAt ? `<button onclick="app._guardarEntregaFactura('${inv.id || inv.invoiceNumber}', true)" style="background:#e67e22;color:white;border:none;padding:10px 12px;border-radius:8px;cursor:pointer;">Quitar</button>` : ''}
+                    <button onclick="document.getElementById('entregaFacturaModal').remove()" style="background:#95a5a6;color:white;border:none;padding:10px 12px;border-radius:8px;cursor:pointer;">✕</button>
+                </div>
+            </div>`;
+        document.body.appendChild(m);
+    }
+
+    _guardarEntregaFactura(idOrNum, quitar) {
+        const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(idOrNum))
+                 || (this.generatedInvoices || []).find(i => String(i.invoiceNumber) === String(idOrNum));
+        if (!inv) return;
+        if (quitar) {
+            delete inv.deliveredAt;
+            delete inv.deliveredVia;
+        } else {
+            inv.deliveredAt = document.getElementById('entregaFecha')?.value || new Date().toLocaleDateString('en-CA');
+            inv.deliveredVia = document.getElementById('entregaVia')?.value || 'en mano';
+        }
+        document.getElementById('entregaFacturaModal')?.remove();
+        this.save();
+        this.refreshGeneratedInvoices();
+    }
+
     // Una factura "avanzada" (pagada, parcial, vencida o cancelada) nunca debe
     // regresar a "enviada" solo porque se imprimió una copia o se reenvió por
     // email — eso borraba el registro de pago. Imprimir/reenviar solo debe
@@ -9117,7 +9207,7 @@ Motivo de cancelación (opcional):`);
             if (invForClient.length > 0) {
                 const inv = invForClient[0];
                 const statusColors = { pendiente:'#e67e22', enviada:'#2980b9', pagada:'#27ae60', vencida:'#e74c3c' };
-                const statusLabels = { pendiente:'⏳ Pendiente', enviada:'📧 Enviada', pagada:'✅ Pagada', vencida:'🔴 Vencida' };
+                const statusLabels = { pendiente:'⏳ Sin enviar', enviada:'📤 Enviada · Esperando pago', parcial:'💛 Pago parcial', pagada:'✅ Pagada', vencida:'🔴 Vencida · Pago atrasado' };
                 const color = statusColors[inv.status] || '#888';
                 const label = statusLabels[inv.status] || inv.status;
                 invBadge = `<span style="background:${color};color:white;padding:2px 7px;border-radius:4px;font-size:0.7rem;cursor:pointer;" title="#${inv.invoiceNumber}" onclick="app.openGeneratedInvoices()">${label} #${inv.invoiceNumber}</span>`;
@@ -15396,6 +15486,8 @@ Motivo de cancelación (opcional):`);
         // 2026-09-15: si _registerInvoiceFromPDF() bloqueó por duplicado, no seguir —
         // ni imprimir ni quitar la tarjeta de Pendientes.
         if (!this._registerInvoiceFromPDF('enviada')) return;
+        this._marcarCanalEnvio(this._invDelPDFActual(), 'impresa'); // 2026-10-03
+        this.save();
         this.markPendingAsGenerated();
         const printWindow = window.open(pdfUrl);
         printWindow.onload = function() { printWindow.print(); };
@@ -15659,6 +15751,8 @@ Motivo de cancelación (opcional):`);
                 };
                 await emailjs.send('service_mamjtia', 'template_ygaa3xa', templateParams);
             }
+            // 2026-10-03: el correo salió bien → queda registrado el medio y la entrega.
+            this._marcarCanalEnvio(this._invDelPDFActual(), 'email');
 
             alert(`✅ Factura enviada exitosamente a ${emails.join(', ')}`);
 
@@ -21718,12 +21812,13 @@ document.addEventListener('click', function(e) {
                 <div><label style="font-size:0.8rem;font-weight:600;">Status</label>
                     <select id="genInvStatus" onchange="app.refreshGeneratedInvoices()" style="width:100%;padding:6px;">
                         <option value="all">Todos</option>
-                        <option value="pendiente">⏳ Solo Pendientes</option>
-                        <option value="enviada">📧 Enviada</option>
-                        <option value="parcial">💛 Pago Parcial</option>
+                        <option value="pendiente">⏳ Sin enviar</option>
+                        <option value="enviada">📤 Enviada · Esperando pago</option>
+                        <option value="parcial">💛 Pago parcial · Resta saldo</option>
                         <option value="pagada">✅ Pagada</option>
-                        <option value="vencida">🔴 Vencida</option>
+                        <option value="vencida">🔴 Vencida · Pago atrasado</option>
                         <option value="cancelada">🚫 Cancelada</option>
+                        <option value="sin_entrega">⚠️ Entrega sin confirmar</option>
                     </select>
                 </div>
                 <div><label style="font-size:0.8rem;font-weight:600;">Período (mes)</label>
@@ -22172,10 +22267,10 @@ document.addEventListener('click', function(e) {
         <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap; align-items:center;">
             <select id="cobrosFilterStatus" onchange="app.refreshCobros()" style="padding:8px; border-radius:6px; border:1px solid #ddd;">
                 <option value="all">Todos los estados</option>
-                <option value="pendiente">⏳ Pendientes</option>
-                <option value="enviada">📤 Enviadas</option>
+                <option value="pendiente">⏳ Sin enviar</option>
+                <option value="enviada">📤 Enviadas · Esperando pago</option>
                 <option value="pagada">✅ Pagadas</option>
-                <option value="vencida">🔴 Vencidas</option>
+                <option value="vencida">🔴 Vencidas · Pago atrasado</option>
                 <option value="cancelada">❌ Canceladas</option>
             </select>
             <select id="cobrosFilterClient" onchange="app.refreshCobros()" style="padding:8px; border-radius:6px; border:1px solid #ddd;">
@@ -22232,11 +22327,11 @@ document.addEventListener('click', function(e) {
         <div style="margin-bottom:14px;">
             <label style="font-size:0.82rem; font-weight:700; color:#444; text-transform:uppercase; letter-spacing:0.5px;">Estado</label>
             <select id="cobroDetalleStatus" onchange="app.onCobroStatusChange()" style="width:100%; padding:9px; margin-top:5px; border:1px solid #ddd; border-radius:8px; font-size:0.95rem; font-weight:600;">
-                <option value="pendiente">⏳ Pendiente</option>
-                <option value="enviada">📤 Enviada al cliente</option>
-                <option value="parcial">💛 Pago Parcial</option>
+                <option value="pendiente">⏳ Sin enviar (todavía no se le manda al cliente)</option>
+                <option value="enviada">📤 Enviada · Esperando pago</option>
+                <option value="parcial">💛 Pago parcial · Resta saldo</option>
                 <option value="pagada">✅ Pagada</option>
-                <option value="vencida">🔴 Vencida</option>
+                <option value="vencida">🔴 Vencida · Pago atrasado</option>
                 <option value="cancelada">❌ Cancelada</option>
             </select>
         </div>
