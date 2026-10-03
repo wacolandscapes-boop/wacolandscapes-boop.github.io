@@ -7432,10 +7432,12 @@ class Scheduler {
                             const d = inv.deliveredAt.split('-');
                             return `<div onclick="app.confirmarEntregaFactura('${_idE}')" title="Clic para editar la entrega" style="font-size:0.68rem;color:#27ae60;margin-top:2px;cursor:pointer;">📬 Entregada ${d[1]}/${d[2]} · ${inv.deliveredVia || ''}</div>`;
                         }
-                        if (!this._entregaPendiente(inv)) return '';
-                        const etiqueta = inv.sendChannel === 'impresa' ? '🖨️ Impresa' : '❔ Sin dato de envío';
-                        return `<div style="font-size:0.68rem;color:#b45309;margin-top:2px;">${etiqueta} · <a href="#" onclick="event.preventDefault();app.confirmarEntregaFactura('${_idE}')" style="color:#b45309;font-weight:bold;">confirmar entrega</a></div>`;
+                        // Solo las IMPRESAS (desde 2026-10-03) muestran el aviso en la fila, discreto
+                        // y en gris; las viejas sin dato se ven con el filtro "Entrega sin confirmar".
+                        if (!this._entregaPendiente(inv) || inv.sendChannel !== 'impresa') return '';
+                        return `<div style="font-size:0.66rem;color:#8a8f98;margin-top:2px;">🖨️ Impresa · <a href="#" onclick="event.preventDefault();app.confirmarEntregaFactura('${_idE}')" style="color:#8a8f98;text-decoration:underline;">¿ya se entregó?</a></div>`;
                     })()}
+                    ${this._avisoAchHTML(inv)}
                     ${(inv.status==='pagada' || inv.status==='parcial') && inv.paidAt ? (() => {
                         // Antes la fecha del pago SOLO se mostraba en las pagadas: en las
                         // PARCIALES no aparecía, y parecía que no se hubiera guardado.
@@ -7589,7 +7591,7 @@ class Scheduler {
                 <td style="padding:8px;">${inv.clientName}</td>
                 <td style="padding:8px; font-size:0.8rem;">${period}</td>
                 <td style="padding:8px; text-align:right; font-weight:700;">$${inv.total.toLocaleString('en-US',{minimumFractionDigits:2})}</td>
-                <td style="padding:8px; text-align:center;"><span style="background:${sc.bg}; color:${sc.color}; padding:3px 8px; border-radius:12px; font-size:0.75rem; font-weight:600; white-space:nowrap;">${sc.label}</span></td>
+                <td style="padding:8px; text-align:center;"><span style="background:${sc.bg}; color:${sc.color}; padding:3px 8px; border-radius:12px; font-size:0.75rem; font-weight:600; white-space:nowrap;">${sc.label}</span>${this._avisoAchHTML(inv)}</td>
                 <td style="padding:8px; text-align:center; font-size:0.8rem; color:#555;">${sentFmt}</td>
                 <td style="padding:8px; text-align:center; font-size:0.8rem; color:#555;">${inv.paidAmount ? '$'+parseFloat(inv.paidAmount).toLocaleString('en-US',{minimumFractionDigits:2}) : paidFmt}</td>
                 <td style="padding:8px; text-align:center;">
@@ -8147,6 +8149,7 @@ class Scheduler {
                      `La factura volverá a quedar como ENVIADA (sin pago).\n` +
                      `Después puedes capturar el pago correcto abajo.`)) return;
 
+        this._registrarPagosQuitados(inv, inv.payments || []); // 2026-10-03 lápida
         inv.paidAmount = null;
         inv.paidAt = null;
         inv.paymentMethod = null;
@@ -8173,7 +8176,8 @@ class Scheduler {
     removePayment(invId, index) {
         const inv = (this.generatedInvoices||[]).find(i => String(i.id) === String(invId));
         if (!inv || !inv.payments) return;
-        inv.payments.splice(index, 1);
+        const _quitado = inv.payments.splice(index, 1);
+        this._registrarPagosQuitados(inv, _quitado); // 2026-10-03 lápida
         const totalPaid = inv.payments.reduce((s,p) => s + parseFloat(p.amount||0), 0);
 
         if (inv.payments.length > 0) {
@@ -8489,6 +8493,7 @@ class Scheduler {
             const goingToUnpaid = newStatus === 'pendiente' || newStatus === 'enviada';
             inv.status = newStatus;
             if (wasPaidLike && goingToUnpaid) {
+                this._registrarPagosQuitados(inv, inv.payments || []); // 2026-10-03 lápida
                 inv.paidAmount = null;
                 inv.paidAt = null;
                 inv.paymentMethod = null;
@@ -8692,11 +8697,13 @@ class Scheduler {
         // fecha, método y referencia del pago — si no, esa info se queda pegada en la
         // tabla aunque el estatus ya diga otra cosa.
         if (wasPaidLike && goingToUnpaid) {
+            this._registrarPagosQuitados(inv, inv.payments || []); // 2026-10-03 lápida
             inv.paidAmount = null;
             inv.paidAt = null;
             inv.paymentMethod = null;
             inv.paymentRef = null;
             inv.payments = [];
+            inv._pagoBorradoManual = true;   // 2026-10-03: este camino no la ponía
         }
 
         this.save();
@@ -19647,6 +19654,72 @@ Motivo de cancelación (opcional):`);
     // si no hay ref, se compara fecha+monto+método. Así, el pago que estaba en ambas PCs
     // no se duplica y el que se agregó en una sola se conserva. Es la corrección al bug
     // por el que registrar un 2º pago en una PC borraba los pagos al sincronizar.
+    // ── 2026-10-03: LÁPIDA de pagos quitados a propósito ─────────────────────────
+    // Al sincronizar, los pagos de los dos lados se JUNTAN (para no perder ninguno).
+    // Eso revivía un pago que el usuario borró a propósito si la otra copia (Drive)
+    // todavía lo tenía — caso Home Abstract #7853: el Worker de Stripe registró un
+    // ACH que nunca se cobró, Ranu lo borró y al reiniciar volvía como "Pagada".
+    // Cada pago quitado deja su clave aquí (misma clave que usa _fusionarPagos) y
+    // NINGÚN camino del sync lo vuelve a meter.
+    _clavePago(p) {
+        const ref = p && p.ref ? String(p.ref).trim() : '';
+        if (ref) return 'ref:' + ref.toLowerCase();
+        const dia = (p && p.date ? String(p.date) : '').split('T')[0];
+        const monto = Math.round(parseFloat((p && p.amount) || 0) * 100);
+        const met = (p && p.method ? String(p.method) : '').toLowerCase();
+        return 'dam:' + dia + '|' + monto + '|' + met;
+    }
+
+    // ── 2026-10-03: AVISO DE PAGO ACH (lo escribe el Worker de Stripe en Drive) ──────
+    // inv.achStripe = { ref (pi_...), amount, fecha, estado: 'transito'|'pagado'|'rechazado',
+    //                   fechaEstado, oculto }. Un ACH tarda días: mientras tanto la factura
+    // sigue SIN pagar y solo se muestra el aviso. Al juntar dos copias gana el aviso más
+    // avanzado (rechazado/pagado > tránsito) y, si son pagos distintos, el más reciente.
+    _mejorAch(a, b) {
+        if (!a) return b || a;
+        if (!b) return a;
+        if (String(a.ref || '') !== String(b.ref || '')) return String(b.fecha || '') > String(a.fecha || '') ? b : a;
+        const rango = (x) => (x.estado === 'transito' ? 1 : 2);
+        if (rango(b) !== rango(a)) return rango(b) > rango(a) ? b : a;
+        if (!!b.oculto !== !!a.oculto) return b.oculto ? b : a;
+        return a;
+    }
+
+    _avisoAchHTML(inv) {
+        const a = inv && inv.achStripe;
+        if (!a || inv.status === 'cancelada') return '';
+        const f = (x) => { const d = String(x || '').split('T')[0].split('-'); return d.length === 3 ? d[1] + '/' + d[2] : ''; };
+        const monto = '$' + parseFloat(a.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 });
+        if (a.estado === 'transito') {
+            return `<div title="El cliente pagó con cuenta bancaria (ACH). Stripe tarda varios días en cobrarlo; la factura se marca pagada sola cuando se confirme." style="font-size:0.68rem;color:#2471a3;margin-top:2px;">🏦 ACH en tránsito · ${monto} · desde ${f(a.fecha)}</div>`;
+        }
+        if (a.estado === 'rechazado' && !a.oculto) {
+            const _id = inv.id || inv.invoiceNumber;
+            return `<div style="font-size:0.68rem;color:#c0392b;margin-top:2px;font-weight:bold;">🔴 ACH rechazado · ${monto} · ${f(a.fechaEstado)} · <a href="#" onclick="event.preventDefault();app.ocultarAvisoAch('${_id}')" style="color:#c0392b;font-weight:normal;">quitar aviso</a></div>`;
+        }
+        return '';
+    }
+
+    ocultarAvisoAch(idOrNum) {
+        const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(idOrNum) || String(i.invoiceNumber) === String(idOrNum));
+        if (!inv || !inv.achStripe) return;
+        if (!confirm('¿Quitar el aviso de ACH rechazado de la factura #' + inv.invoiceNumber + '?\n(La factura sigue sin pagar.)')) return;
+        inv.achStripe.oculto = true;
+        localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices));
+        this.save();
+        if (typeof this.refreshGeneratedInvoices === 'function') this.refreshGeneratedInvoices();
+        if (typeof this.refreshCobros === 'function' && document.getElementById('cobrosBody')) this.refreshCobros();
+    }
+
+    _registrarPagosQuitados(inv, pagos) {
+        if (!inv) return;
+        const lista = (pagos || []).filter(Boolean).map(p => this._clavePago(p));
+        // Factura con pago "resumen" sin lista de pagos (datos viejos / Worker): también.
+        if (!(pagos || []).length && inv.paymentRef) lista.push(this._clavePago({ ref: inv.paymentRef }));
+        if (!lista.length) return;
+        inv._pagosQuitados = [...new Set([...(inv._pagosQuitados || []), ...lista])];
+    }
+
     _fusionarPagos(pagosA = [], pagosB = []) {
         const norm = (p) => ({
             date: p && p.date ? String(p.date) : '',
@@ -19760,7 +19833,21 @@ Motivo de cancelación (opcional):`);
                                 // NO fue tocado para dejarlo sin pago (marca _pagoBorradoManual).
                                 const esPagoStripe = String(driveInv.paymentMethod || '').toLowerCase().includes('stripe')
                                     || (driveInv.payments || []).some(p => String(p.method || '').toLowerCase().includes('stripe'));
-                                const borradoAProposito = localInv && localInv._pagoBorradoManual;
+                                const _qr = new Set((localInv && localInv._pagosQuitados) || []);
+                                const _dp = driveInv.payments || [];
+                                // 2026-10-03 (ACH): si la factura tiene LÁPIDAS, ellas deciden pago por
+                                // pago — un pago NUEVO de Stripe (sin lápida) sí se rescata aunque antes
+                                // se haya borrado otro a propósito (caso Home Abstract #7853). Sin
+                                // lápidas (datos viejos) se respeta la marca general _pagoBorradoManual.
+                                let borradoAProposito = false;
+                                if (localInv) {
+                                    if (_qr.size > 0 && (_dp.length || driveInv.paymentRef)) {
+                                        borradoAProposito = _dp.length ? _dp.every(p => _qr.has(this._clavePago(p)))
+                                            : _qr.has(this._clavePago({ ref: driveInv.paymentRef }));
+                                    } else {
+                                        borradoAProposito = !!localInv._pagoBorradoManual;
+                                    }
+                                }
                                 if (esPagoStripe && !borradoAProposito
                                     && localInv && localInv.status !== 'pagada' && localInv.status !== 'parcial') {
                                     localInv.status = driveInv.status;
@@ -19769,10 +19856,30 @@ Motivo de cancelación (opcional):`);
                                     localInv.paymentMethod = driveInv.paymentMethod;
                                     localInv.paymentRef = driveInv.paymentRef;
                                     localInv.payments = driveInv.payments || localInv.payments;
+                                    // Nunca rescatar un pago que tiene lápida: se quita y se recalcula.
+                                    if (_qr.size > 0 && (localInv.payments || []).some(p => _qr.has(this._clavePago(p)))) {
+                                        localInv.payments = localInv.payments.filter(p => !_qr.has(this._clavePago(p)));
+                                        const _suma = localInv.payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+                                        localInv.paidAmount = _suma.toFixed(2);
+                                        localInv.status = this._cubreTotal(_suma, localInv.total) ? 'pagada' : 'parcial';
+                                        const _ult = localInv.payments[localInv.payments.length - 1];
+                                        localInv.paymentMethod = _ult.method || localInv.paymentMethod;
+                                        localInv.paymentRef = _ult.ref || null;
+                                    }
+                                    localInv._pagoBorradoManual = false;
                                     changed = true;
                                     console.log('💳 Pago de Stripe preservado para factura', driveInv.invoiceNumber);
                                 }
                             }
+                        });
+                        // 2026-10-03: aviso de ACH (en tránsito / rechazado) que escribe el Worker
+                        // en Drive — copiarlo a local ANTES de subir, para no pisarlo.
+                        driveData.generatedInvoices.forEach(driveInv => {
+                            if (!driveInv.achStripe) return;
+                            const localInv = (this.generatedInvoices || []).find(i => String(i.id) === String(driveInv.id));
+                            if (!localInv) return;
+                            const mejor = this._mejorAch(localInv.achStripe, driveInv.achStripe);
+                            if (mejor !== localInv.achStripe) { localInv.achStripe = mejor; changed = true; }
                         });
                         if (changed) {
                             localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices));
@@ -20191,16 +20298,40 @@ Motivo de cancelación (opcional):`);
                     inv.updatedAt = li.updatedAt || inv.updatedAt;
                 }
             });
+            // 2026-10-03: unir las lápidas de pagos quitados de AMBOS lados antes de fusionar.
+            mergedInvoices.forEach(inv => {
+                const li = loserInvById[String(inv.id)];
+                if (!li) return;
+                const q = [...new Set([...(inv._pagosQuitados || []), ...(li._pagosQuitados || [])])];
+                if (q.length) inv._pagosQuitados = q;
+                if (li._pagoBorradoManual && !inv._pagoBorradoManual && q.length) inv._pagoBorradoManual = true;
+                // 2026-10-03: aviso de ACH del Worker — gana el más avanzado (ver _mejorAch).
+                const _ach = this._mejorAch(inv.achStripe, li.achStripe);
+                if (_ach) inv.achStripe = _ach;
+            });
             mergedInvoices.forEach(inv => {
                 const li = loserInvById[String(inv.id)];
                 if (li && (Array.isArray(inv.payments) || Array.isArray(li.payments))) {
                     inv.payments = this._fusionarPagos(inv.payments || [], li.payments || []);
+                    // 2026-10-03: fuera los pagos con lápida (quitados a propósito).
+                    const _qs = new Set(inv._pagosQuitados || []);
+                    let _seQuitoAlgo = false;
+                    if (_qs.size) {
+                        const antes = inv.payments.length;
+                        inv.payments = inv.payments.filter(p => !_qs.has(this._clavePago(p)));
+                        _seQuitoAlgo = inv.payments.length !== antes || (inv.paymentRef && _qs.has(this._clavePago({ ref: inv.paymentRef })));
+                        if (_seQuitoAlgo && !inv.payments.length) {
+                            inv.paidAmount = null; inv.paidAt = null; inv.paymentMethod = null; inv.paymentRef = null;
+                        }
+                    }
                     // Recalcular el estado según la suma REAL de los pagos fusionados,
                     // salvo canceladas (nunca se tocan) — así si al juntar quedó pagada
                     // o parcial, el estado lo refleja. Stripe se maneja aparte abajo.
                     if (inv.status !== 'cancelada') {
                         const suma = (inv.payments || []).reduce((s, p) => s + parseFloat(p.amount || 0), 0);
-                        const yaPagada = inv.status === 'pagada';
+                        // 2026-10-03: si se quitó un pago con lápida, el estado SÍ debe recalcularse
+                        // (el candado "no degradar pagada" es para syncs normales, no para esto).
+                        const yaPagada = inv.status === 'pagada' && !_seQuitoAlgo;
                         const recalculado = (suma > 0 && this._cubreTotal(suma, inv.total)) ? 'pagada' : (suma > 0 ? 'parcial' : (inv.status === 'pagada' || inv.status === 'parcial' ? 'enviada' : inv.status));
                         // SALVAGUARDA: una factura ya "pagada" NO se degrada durante un sync;
                         // solo puede subir a pagada, nunca bajar sola (evita el bug pagada->parcial).
@@ -20230,7 +20361,13 @@ Motivo de cancelación (opcional):`);
                 // SALVAGUARDA (2026-09-15): si esta factura ya quedó "pagada" en el merge de
                 // arriba, un pago parcial de Stripe visto en Drive no debe degradarla — mismo
                 // candado que el resto del merge (solo puede subir a pagada, nunca bajar sola).
-                if (driveIsStripePayment && inv.status !== 'pagada') {
+                // 2026-10-03: no revivir un pago de Stripe que se quitó a propósito.
+                const _qd = new Set(inv._pagosQuitados || []);
+                const _dPays = (driveVersion && driveVersion.payments) || [];
+                const _stripeQuitado = _qd.size > 0 && (_dPays.length
+                    ? _dPays.every(p => _qd.has(this._clavePago(p)))
+                    : !!(driveVersion && driveVersion.paymentRef && _qd.has(this._clavePago({ ref: driveVersion.paymentRef }))));
+                if (driveIsStripePayment && inv.status !== 'pagada' && !_stripeQuitado) {
                     inv.status = driveVersion.status;
                     inv.paidAt = driveVersion.paidAt;
                     inv.paidAmount = driveVersion.paidAmount;
