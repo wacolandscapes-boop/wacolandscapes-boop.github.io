@@ -5249,6 +5249,12 @@ class Scheduler {
     // Ir a "Generar Factura" con el cliente en foco ya seleccionado, si hay uno.
     verClienteEnGenerar(clientName) {
         this._invLastClient = clientName || this._invLastClient || '';
+        // FIX 2026-10-03: el botón "🧾 Generar" de Enviadas/Pendientes "no hacía nada":
+        // abría Generar (invoiceModal) pero dejaba abierto el modal de origen, y como
+        // invoiceModal está ANTES en la página, quedaba escondido DEBAJO. Ahora se cierra
+        // el de origen primero, igual que ya hacen los otros caminos hacia Generar.
+        if (document.getElementById('pendingInvoicesModal')?.style.display === 'block') this.closePendingInvoices();
+        if (document.getElementById('generatedInvoicesModal')?.style.display === 'block') this.closeGeneratedInvoices();
         this.openInvoice();
         setTimeout(() => {
             if (this._invLastClient) {
