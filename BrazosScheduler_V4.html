@@ -2513,7 +2513,8 @@ class Scheduler {
         const lbl = document.createElement('div');
         lbl.style.cssText = 'width:32px;min-width:32px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#34495e;color:white;font-size:0.95rem;';
         lbl.title = 'Empleados de cada grupo por día';
-        lbl.textContent = '👥';
+        // Ícono BLANCO (SVG) — el emoji 👥 no se veía sobre el fondo oscuro.
+        lbl.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="#ffffff" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 19c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6v1h-13z"/><circle cx="16.5" cy="9" r="2.6"/><path d="M14.8 13.4c.5-.1 1.1-.2 1.7-.2 3 0 5.5 2 5.5 5.2V20h-4.6v-1c0-2.2-.9-4.2-2.6-5.6z"/></svg>';
         row.appendChild(lbl);
         const cells = document.createElement('div');
         cells.style.cssText = 'display:grid;grid-template-columns:repeat(7,1fr);flex:1;';
@@ -2825,6 +2826,7 @@ class Scheduler {
         const fecha = new Date().toLocaleDateString('en-CA');
         this._rotFecha = fecha;
         this._rotSelected = null;
+        this._rotDoble = false;
         this._rotBuildState(fecha);
         const modal = document.createElement('div');
         modal.id = 'rotacionModal';
@@ -2845,7 +2847,11 @@ class Scheduler {
                 <input type="date" id="rotFecha" value="${fecha}" onchange="app._rotSetFecha(this.value)" style="padding:7px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem;">
                 <button onclick="app._rotNav(1)" style="background:#34495e;color:white;border:none;width:34px;height:34px;border-radius:6px;cursor:pointer;font-size:1rem;">▶</button>
             </div>
-            <div id="rotMsg" style="text-align:center;font-size:0.75rem;color:#888;margin-bottom:10px;"></div>
+            <div id="rotMsg" style="text-align:center;font-size:0.75rem;color:#888;margin-bottom:6px;"></div>
+            <label style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:0.82rem;margin-bottom:10px;cursor:pointer;background:#eaf6ff;border:1px solid #b9dcf5;border-radius:8px;padding:6px;">
+                <input type="checkbox" id="rotDoble" onchange="app._rotDoble=this.checked">
+                <span>➕ <b>Turno doble:</b> al pasar a una empleada a otro grupo, <b>no</b> se quita del suyo (queda en los dos ese día)</span>
+            </label>
             <div id="rotBoard"></div>
             <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
                 <button onclick="document.getElementById('rotacionModal').remove()" style="background:#95a5a6;color:white;border:none;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:bold;">Cancelar</button>
@@ -2940,7 +2946,11 @@ class Scheduler {
                 const e = this.emps.find(x => String(x.id) === String(id));
                 const nombre = e ? e.name : '¿?';
                 const sel = String(this._rotSelected) === String(id);
-                return `<div draggable="true" ondragstart="app._rotDragStart(event,'${id}')" onclick="event.stopPropagation(); app._rotTapChip('${id}')" style="background:${sel?'#f1c40f':'#fff'};border:2px solid ${sel?'#f39c12':color};border-radius:8px;padding:7px 10px;margin:4px 0;cursor:pointer;font-size:0.85rem;color:#2c3e50;user-select:none;">${sel?'✋ ':''}${nombre}</div>`;
+                // 2026-10-05: turno doble — avisar si también está en otro grupo y permitir quitarla SOLO de este
+                const otros = esSin ? [] : Object.keys(this.grupos).filter(o => o !== g && (this._rotState[o] || []).map(String).includes(String(id)));
+                const tambien = otros.length ? `<div style="font-size:0.68rem;color:#2471a3;">también en ${otros.join(', ')}</div>` : '';
+                const quitar = esSin ? '' : `<span onclick="event.stopPropagation(); app._rotQuitar('${id}','${g}')" title="Quitar solo de ${g}" style="float:right;color:#c0392b;font-weight:bold;cursor:pointer;padding:0 2px;">✕</span>`;
+                return `<div draggable="true" ondragstart="app._rotDragStart(event,'${id}')" onclick="event.stopPropagation(); app._rotTapChip('${id}')" style="background:${sel?'#f1c40f':'#fff'};border:2px solid ${sel?'#f39c12':color};border-radius:8px;padding:7px 10px;margin:4px 0;cursor:pointer;font-size:0.85rem;color:#2c3e50;user-select:none;">${quitar}${sel?'✋ ':''}${nombre}${tambien}</div>`;
             }).join('') || `<div style="font-size:0.75rem;color:#bbb;padding:6px;">— vacío —</div>`;
             return `<div ondragover="event.preventDefault()" ondrop="app._rotDrop(event,'${g}')" onclick="app._rotTapColumn('${g}')" style="flex:1;min-width:150px;background:#f8f9fa;border-top:4px solid ${color};border-radius:8px;padding:8px;min-height:90px;">
                 <div style="font-weight:700;color:${color};font-size:0.9rem;margin-bottom:6px;text-align:center;">${titulo} <span style="color:#999;font-weight:400;">(${(this._rotState[g]||[]).length})</span></div>
@@ -2951,11 +2961,33 @@ class Scheduler {
 
     _rotMove(empId, destGrupo) {
         if (!this._rotState) return;
+        // 2026-10-05: TURNO DOBLE — agrega al grupo destino sin quitarla de su(s) grupo(s).
+        if (this._rotDoble && destGrupo !== '__sin__') {
+            this._rotState['__sin__'] = (this._rotState['__sin__'] || []).filter(id => String(id) !== String(empId));
+            if (!this._rotState[destGrupo]) this._rotState[destGrupo] = [];
+            if (!this._rotState[destGrupo].map(String).includes(String(empId))) this._rotState[destGrupo].push(String(empId));
+            this._rotSelected = null;
+            this._rotRender();
+            return;
+        }
         Object.keys(this._rotState).forEach(g => {
             this._rotState[g] = this._rotState[g].filter(id => String(id) !== String(empId));
         });
         if (!this._rotState[destGrupo]) this._rotState[destGrupo] = [];
         this._rotState[destGrupo].push(String(empId));
+        this._rotSelected = null;
+        this._rotRender();
+    }
+
+    // Quita a la empleada SOLO de un grupo; si ya no queda en ninguno, vuelve a "Sin grupo".
+    _rotQuitar(empId, grupo) {
+        if (!this._rotState || !this._rotState[grupo]) return;
+        this._rotState[grupo] = this._rotState[grupo].filter(id => String(id) !== String(empId));
+        const enAlguno = Object.keys(this.grupos).some(g => (this._rotState[g] || []).map(String).includes(String(empId)));
+        if (!enAlguno) {
+            if (!this._rotState['__sin__']) this._rotState['__sin__'] = [];
+            if (!this._rotState['__sin__'].map(String).includes(String(empId))) this._rotState['__sin__'].push(String(empId));
+        }
         this._rotSelected = null;
         this._rotRender();
     }
