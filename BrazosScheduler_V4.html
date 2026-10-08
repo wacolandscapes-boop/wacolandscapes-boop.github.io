@@ -23038,7 +23038,16 @@ document.addEventListener('click', function(e) {
         <input type="number" id="nmEmpTotal" min="1" max="50" step="1" value="1" oninput="app.nmAplicarEmpTotal()" title="Se aplica a todos los servicios de la tabla" style="width:60px;padding:4px;border:1px solid #4a5568;border-radius:4px;background:#1a1a2e;color:#e2e8f0;text-align:center;margin-left:6px;">
       </label>
     </div>
+    <!-- 2026-10-08: tabla de servicios RETRÁCTIL (se recuerda abierta/cerrada) -->
+    <div id="nmServicesToggle" onclick="(function(){var t=document.getElementById('nmServicesTable'),c=document.getElementById('nmServicesChevron');var oculto=t.style.display!=='none';t.style.display=oculto?'none':'';c.style.transform=oculto?'rotate(-90deg)':'rotate(0deg)';try{localStorage.setItem('nmServiciosColapsado',oculto?'1':'0');}catch(e){}})()" style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;background:#2d3748;border-radius:8px;padding:8px 14px;margin-bottom:8px;" title="Mostrar / ocultar la tabla de servicios">
+      <span id="nmServicesChevron" style="display:inline-block;transition:transform .15s;color:#a78bfa;">▼</span>
+      <span style="color:#a78bfa;font-weight:700;">📋 Servicios de la semana</span>
+      <span style="font-size:0.75rem;color:#94a3b8;">(clic para mostrar / ocultar)</span>
+    </div>
     <div id="nmServicesTable" style="margin-bottom:20px;"></div>
+    <script>
+    (function(){ try{ if(localStorage.getItem('nmServiciosColapsado')==='1'){ var t=document.getElementById('nmServicesTable'),c=document.getElementById('nmServicesChevron'); if(t) t.style.display='none'; if(c) c.style.transform='rotate(-90deg)'; } }catch(e){} })();
+    </script>
     <div style="background:#2d3748;border-radius:8px;padding:16px;margin-bottom:20px;">
       <h3 style="margin:0 0 12px;color:#a78bfa;font-size:1rem;">⏱ Horas por Tiempo</h3>
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;" id="nmDirectHours"></div>
