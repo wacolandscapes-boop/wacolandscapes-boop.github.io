@@ -1775,9 +1775,18 @@ class Scheduler {
         // tablero de Rotación (misma estructura/lógica que AnaCS). No reemplaza
         // this.grupos (composición vigente hoy) — es un historial por fecha.
         this.gruposHistorial = JSON.parse(localStorage.getItem('v35_gruposHistorial')) || {};
+        // 2026-10-12: marcas de tiempo de los acomodos de grupos, para que al
+        // sincronizar gane SIEMPRE el acomodo cambiado más recientemente (y un
+        // dispositivo con datos viejos ya no pueda regresar el acomodo anterior).
+        // gruposHistorialTs = { 'YYYY-MM-DD': { 'Grupo A': ISO } } · gruposTs = ISO
+        this.gruposHistorialTs = JSON.parse(localStorage.getItem('v35_gruposHistorialTs')) || {};
+        this.gruposTs = localStorage.getItem('v35_gruposTs') || '';
         this.gastos = JSON.parse(localStorage.getItem('v35_gastos')) || [];
         this.estimates = JSON.parse(localStorage.getItem('v35_estimates')) || [];
         this.serviceCatalog = JSON.parse(localStorage.getItem('v35_serviceCatalog')) || this.getDefaultServiceCatalog();
+        // 2026-10-12: foto de empleados/clientes/servicios tal como se cargaron, para
+        // marcar con hora (_mod) SOLO los que se modifiquen en este dispositivo.
+        this._snapReg = null; this._initSnapReg();
         this.nominaTotales = JSON.parse(localStorage.getItem('v35_nominaTotales')) || [];
         this.gastosCategories = JSON.parse(localStorage.getItem('v35_gastosCategories')) || {
             "Vehículos": ["Gas", "Aseguranza", "Reparación", "Renovación de placas"],
@@ -2180,6 +2189,7 @@ class Scheduler {
     }
     
     save() {
+        try { this._marcarModificados(); } catch(e) { console.warn('marcarModificados', e); }
         localStorage.setItem('v35_emps', JSON.stringify(this.emps));
         localStorage.setItem('v35_clis', JSON.stringify(this.clis));
         localStorage.setItem('v35_servs', JSON.stringify(this.servs));
@@ -2234,6 +2244,7 @@ class Scheduler {
     toggleMembers(g) { this.expandedMembers[g] = !this.expandedMembers[g]; this.save(); this.render(); }
 
     render() {
+        try { this._aplicarRotacionDeHoy(); } catch(e) { console.warn('aplicarRotacionDeHoy', e); }
         const todayStr = new Date().toLocaleDateString('en-CA');
         const grid = document.getElementById('mainSchedulerGrid');
         grid.innerHTML = '';
@@ -2624,6 +2635,7 @@ class Scheduler {
     }
 
     saveGrupoFromModal(nombreGrupo) {
+        const _antes = (this.grupos[nombreGrupo] || []).slice();
         for (let i = 0; i < 5; i++) {
             const sel = document.getElementById(`gEditSlot_${i}`);
             if (sel) this.grupos[nombreGrupo][i] = sel.value;
@@ -2638,6 +2650,7 @@ class Scheduler {
         if (!this.gruposHistorial[hoy]) this.gruposHistorial[hoy] = {};
         this.gruposHistorial[hoy][nombreGrupo] = (this.grupos[nombreGrupo] || []).filter(Boolean);
         localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial));
+        if (this._mismoRoster(_antes, this.grupos[nombreGrupo]) === false) { this._marcarHist(hoy, nombreGrupo); this._marcarGrupos(); }
         this.save();
         document.getElementById('grupoEditModal')?.remove();
         this.render();
@@ -2806,7 +2819,10 @@ class Scheduler {
         const hoy = new Date().toLocaleDateString('en-CA');
         let base;
         if (fecha === hoy) {
-            base = this.grupos[nombreGrupo] || [];
+            // 2026-10-12: si en Rotación se guardó un acomodo PARA HOY, ese manda
+            // (antes se ignoraba y se mostraban los grupos del día anterior).
+            const hh = (this.gruposHistorial || {})[hoy];
+            base = (hh && hh[nombreGrupo]) ? hh[nombreGrupo] : (this.grupos[nombreGrupo] || []);
         } else {
             const hist = this.gruposHistorial || {};
             if (hist[fecha] && hist[fecha][nombreGrupo]) base = hist[fecha][nombreGrupo];
@@ -3017,12 +3033,17 @@ class Scheduler {
         const hoy = new Date().toLocaleDateString('en-CA');
         if (!this.gruposHistorial) this.gruposHistorial = {};
         if (!this.gruposHistorial[fecha]) this.gruposHistorial[fecha] = {};
+        const _prev = {};
+        Object.keys(this.grupos).forEach(g => { _prev[g] = this._rosterParaFecha(g, fecha); });
+        let _cambioHoy = false;
         Object.keys(this.grupos).forEach(g => {
             const seen = new Set();
             const roster = (this._rotState[g] || []).filter(id => { if (!id) return false; const k = String(id); if (seen.has(k)) return false; seen.add(k); return true; });
             this.gruposHistorial[fecha][g] = roster;
+            if (!this._mismoRoster(_prev[g], roster)) { this._marcarHist(fecha, g); if (fecha === hoy) _cambioHoy = true; }
             if (fecha === hoy) this.grupos[g] = roster.slice();
         });
+        if (_cambioHoy) this._marcarGrupos();
         localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial));
         if (fecha === hoy) localStorage.setItem('v35_grupos', JSON.stringify(this.grupos));
         this.save();
@@ -3030,11 +3051,81 @@ class Scheduler {
         this.render();
     }
 
-    mergeGruposHistorial(w = {}, l = {}) {
+    // 2026-10-12: por fecha y por grupo, gana el acomodo GUARDADO MÁS RECIENTE
+    // (marca en gruposHistorialTs). Si ninguno de los dos lados tiene marca
+    // (datos de antes de este cambio), se conserva el comportamiento anterior:
+    // gana el lado ganador de la sincronización.
+    mergeGruposHistorial(w = {}, l = {}, wTs = {}, lTs = {}) {
         const out = {};
         const fechas = new Set([...Object.keys(w||{}), ...Object.keys(l||{})]);
-        fechas.forEach(fq => { out[fq] = Object.assign({}, (l && l[fq]) || {}, (w && w[fq]) || {}); });
+        fechas.forEach(fq => {
+            const wd = (w && w[fq]) || {}, ld = (l && l[fq]) || {};
+            const r = Object.assign({}, ld, wd);
+            const wt = (wTs && wTs[fq]) || {}, lt = (lTs && lTs[fq]) || {};
+            Object.keys(r).forEach(g => {
+                const a = wt[g] || '', b = lt[g] || '';
+                if (b > a && ld[g]) r[g] = ld[g];
+                else if (a > b && wd[g]) r[g] = wd[g];
+            });
+            out[fq] = r;
+        });
         return out;
+    }
+    _mergeTsHist(a = {}, b = {}) {
+        const out = {};
+        [a || {}, b || {}].forEach(src => Object.keys(src).forEach(fq => {
+            out[fq] = out[fq] || {};
+            Object.keys(src[fq] || {}).forEach(g => {
+                const v = src[fq][g] || '';
+                if (v > (out[fq][g] || '')) out[fq][g] = v;
+            });
+        }));
+        return out;
+    }
+    _mismoRoster(a, b) {
+        const n = x => (x || []).filter(Boolean).map(String).join('|');
+        return n(a) === n(b);
+    }
+    _marcarHist(fecha, g) {
+        if (!this.gruposHistorialTs) this.gruposHistorialTs = {};
+        if (!this.gruposHistorialTs[fecha]) this.gruposHistorialTs[fecha] = {};
+        this.gruposHistorialTs[fecha][g] = new Date().toISOString();
+        localStorage.setItem('v35_gruposHistorialTs', JSON.stringify(this.gruposHistorialTs));
+    }
+    _marcarGrupos(ts) {
+        this.gruposTs = ts || new Date().toISOString();
+        localStorage.setItem('v35_gruposTs', this.gruposTs);
+    }
+    // Cambio hecho HOY directo en los grupos (barra lateral): dejar rastro en el
+    // acomodo de hoy, con marca de tiempo, para que la sincronización lo respete.
+    _registrarCambioGrupoHoy(g, antes) {
+        const hoy = new Date().toLocaleDateString('en-CA');
+        if (!this.gruposHistorial) this.gruposHistorial = {};
+        if (!this.gruposHistorial[hoy]) this.gruposHistorial[hoy] = {};
+        this.gruposHistorial[hoy][g] = (this.grupos[g] || []).filter(Boolean);
+        localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial));
+        if (!this._mismoRoster(antes, this.grupos[g])) { this._marcarHist(hoy, g); this._marcarGrupos(); }
+    }
+    // 2026-10-12: cuando llega el día de un acomodo guardado en Rotación, aplicarlo
+    // a los grupos vigentes. Devuelve true si cambió algo.
+    _aplicarRotacionDeHoy() {
+        const hoy = new Date().toLocaleDateString('en-CA');
+        const plan = (this.gruposHistorial || {})[hoy];
+        if (!plan || !this.grupos) return false;
+        let cambio = false;
+        Object.keys(plan).forEach(g => {
+            if (!this.grupos[g]) return; // el grupo ya no existe
+            if (!this._mismoRoster(plan[g], this.grupos[g])) {
+                this.grupos[g] = (plan[g] || []).filter(Boolean).slice();
+                cambio = true;
+            }
+        });
+        if (cambio) {
+            const tsPlan = Object.values((this.gruposHistorialTs || {})[hoy] || {}).sort().pop() || '';
+            if (tsPlan > (this.gruposTs || '')) this._marcarGrupos(tsPlan);
+            localStorage.setItem('v35_grupos', JSON.stringify(this.grupos));
+        }
+        return cambio;
     }
 
     // ── Helper: construir sidebar de grupo ──────────────────────────
@@ -3091,7 +3182,7 @@ class Scheduler {
                     const also = (otherGroupsOf[eid] && eid !== currentSlotId) ? ` (también en ${otherGroupsOf[eid].join(', ')})` : '';
                     return `<option value="${e.id}" ${selected}>${e.name}${also}</option>`;
                 }).join('');
-            sel.onchange = (e) => { this.grupos[nombreGrupo][i]=e.target.value; this.save(); this.render(); };
+            sel.onchange = (e) => { const _antes = (this.grupos[nombreGrupo] || []).slice(); this.grupos[nombreGrupo][i]=e.target.value; this._registrarCambioGrupoHoy(nombreGrupo, _antes); this.save(); this.render(); };
             panel.appendChild(sel);
         }
         // Panel de sin asignar dentro del panel de edición
@@ -11577,6 +11668,7 @@ Motivo de cancelación (opcional):`);
         if (!name) { alert('Escribe el nombre del grupo'); return; }
         if (this.grupos[name]) { alert('Ya existe un grupo con ese nombre'); return; }
         this.grupos[name] = ['', '', '', '', ''];
+        this._marcarGrupos();
         inp.value = '';
         this.save();
         this.renderGruposSection();
@@ -11596,6 +11688,7 @@ Motivo de cancelación (opcional):`);
             if (!confirm('¿Eliminar grupo "' + name + '"?')) return;
         }
         delete this.grupos[name];
+        this._marcarGrupos();
         this.save();
         this.renderGruposSection();
         if (typeof this.populateGroupDropdowns === 'function') this.populateGroupDropdowns();
@@ -12996,6 +13089,8 @@ Motivo de cancelación (opcional):`);
             servs: this.servs,
             grupos: this.grupos,
             gruposHistorial: this.gruposHistorial || {},
+            gruposHistorialTs: this.gruposHistorialTs || {},
+            gruposTs: this.gruposTs || '',
             gastos: this.gastos || [],
             gastosCategories: this.gastosCategories || {},
             generatedInvoices: this.generatedInvoices || [],
@@ -13067,6 +13162,8 @@ Motivo de cancelación (opcional):`);
                             this.servs = d.servs || [];
                             this.grupos = d.grupos || [];
                             if (d.gruposHistorial) { this.gruposHistorial = d.gruposHistorial; localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial)); }
+                            if (d.gruposHistorialTs) { this.gruposHistorialTs = d.gruposHistorialTs; localStorage.setItem('v35_gruposHistorialTs', JSON.stringify(this.gruposHistorialTs)); }
+                            if (d.gruposTs) this._marcarGrupos(d.gruposTs);
                             this.gastos = d.gastos || [];
                             this.gastosCategories = d.gastosCategories || {};
                             this.generatedInvoices = d.generatedInvoices || [];
@@ -20012,7 +20109,7 @@ Motivo de cancelación (opcional):`);
         return [...porClave.values()];
     }
 
-    mergeArraysById(winnerArr = [], loserArr = [], idKeys = ['id']) {
+    mergeArraysById(winnerArr = [], loserArr = [], idKeys = ['id'], porMod = false) {
         const getKey = (item) => {
             for (const k of idKeys) {
                 if (item && item[k] !== undefined && item[k] !== null && item[k] !== '') return k + ':' + String(item[k]);
@@ -20021,11 +20118,46 @@ Motivo de cancelación (opcional):`);
         };
         const winnerKeys = new Set(winnerArr.map(getKey).filter(k => k !== null));
         const merged = winnerArr.slice();
+        // 2026-10-12 (porMod): si el MISMO registro existe en los dos lados, se queda
+        // la versión modificada más recientemente (_mod), sin importar qué lado "gana"
+        // la sincronización. Sin _mod en ninguno: gana el lado ganador, como antes.
+        const idxW = new Map();
+        if (porMod) merged.forEach((it, i) => { const k = getKey(it); if (k !== null && !idxW.has(k)) idxW.set(k, i); });
         loserArr.forEach(item => {
             const key = getKey(item);
             if (key === null || !winnerKeys.has(key)) merged.push(item);
+            else if (porMod) {
+                const i = idxW.get(key);
+                if (i !== undefined && (item && item._mod || '') > (merged[i] && merged[i]._mod || '')) merged[i] = item;
+            }
         });
         return merged;
+    }
+
+    // 2026-10-12: marcas de modificación por registro (empleados, clientes, servicios).
+    _hashReg(r) { const { _mod, ...rest } = r || {}; return JSON.stringify(rest); }
+    _initSnapReg() {
+        this._snapReg = {};
+        ['emps', 'clis', 'servs'].forEach(col => {
+            const m = new Map();
+            (this[col] || []).forEach(r => { if (r && r.id != null) m.set(String(r.id), this._hashReg(r)); });
+            this._snapReg[col] = m;
+        });
+    }
+    _marcarModificados() {
+        if (!this._snapReg) { this._initSnapReg(); return; }
+        const ahora = new Date().toISOString();
+        ['emps', 'clis', 'servs'].forEach(col => {
+            const snap = this._snapReg[col] || new Map();
+            const nuevo = new Map();
+            (this[col] || []).forEach(r => {
+                if (!r || r.id == null) return;
+                const k = String(r.id), h = this._hashReg(r);
+                if (snap.get(k) !== h) r._mod = ahora;
+                nuevo.set(k, h);
+            });
+            this._snapReg[col] = nuevo;
+        });
     }
 
     mergeGrupos(winnerGrupos = {}, loserGrupos = {}) {
@@ -20079,6 +20211,19 @@ Motivo de cancelación (opcional):`);
                         { headers: { Authorization: `Bearer ${this.driveToken}` } }
                     );
                     const driveData = await driveFileRes.json();
+                    // 2026-10-12: NUNCA subir a ciegas. Si Drive trae cambios de OTRO
+                    // dispositivo que este todavía no ha bajado, primero se bajan y se
+                    // fusionan (driveDownloadData sube el resultado al terminar).
+                    const _miDev = localStorage.getItem('anaCS_deviceId') || 'unknown';
+                    const _visto = localStorage.getItem('brazos_driveVisto') || '';
+                    if (!this._fusionandoAntesDeSubir && driveData && driveData.lastSavedAt && driveData.deviceId
+                        && driveData.deviceId !== _miDev && driveData.lastSavedAt !== _visto) {
+                        console.log('📥 Drive tiene cambios de otro dispositivo — fusionando antes de subir.');
+                        this._fusionandoAntesDeSubir = true;
+                        this.isSyncing = false;
+                        try { await this.driveDownloadData(); } finally { this._fusionandoAntesDeSubir = false; }
+                        return;
+                    }
                     if (driveData.generatedInvoices) {
                         let changed = false;
                         driveData.generatedInvoices.forEach(driveInv => {
@@ -20162,6 +20307,8 @@ Motivo de cancelación (opcional):`);
                 servs: this.servs,
                 grupos: this.grupos,
                 gruposHistorial: this.gruposHistorial || {},
+                gruposHistorialTs: this.gruposHistorialTs || {},
+                gruposTs: this.gruposTs || '',
                 gastos: this.gastos || [],
                 gastosCategories: this.gastosCategories || {},
                 generatedInvoices: this.generatedInvoices || [],
@@ -20200,6 +20347,7 @@ Motivo de cancelación (opcional):`);
             );
             const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
             localStorage.setItem('anaCS_lastSavedAt', new Date().toISOString());
+            localStorage.setItem('brazos_driveVisto', data.lastSavedAt);
             // Guardar el modifiedTime que Drive le asignó a ESTA subida, para que el
             // chequeo "¿Drive más nuevo?" pueda distinguir la propia subida de esta PC
             // (mismo modifiedTime) de un cambio real de OTRA PC (modifiedTime mayor).
@@ -20427,6 +20575,8 @@ Motivo de cancelación (opcional):`);
                 if (data.servs)            { this.servs = data.servs; localStorage.setItem('v35_servs', JSON.stringify(this.servs)); }
                 if (data.grupos)           { this.grupos = data.grupos; localStorage.setItem('v35_grupos', JSON.stringify(this.grupos)); }
                 if (data.gruposHistorial)  { this.gruposHistorial = data.gruposHistorial; localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial)); }
+                if (data.gruposHistorialTs){ this.gruposHistorialTs = data.gruposHistorialTs; localStorage.setItem('v35_gruposHistorialTs', JSON.stringify(this.gruposHistorialTs)); }
+                if (data.gruposTs)         this._marcarGrupos(data.gruposTs);
                 if (data.gastos)           { this.gastos = data.gastos; localStorage.setItem('v35_gastos', JSON.stringify(this.gastos)); }
                 if (data.gastosCategories) { this.gastosCategories = data.gastosCategories; localStorage.setItem('v35_gastosCategories', JSON.stringify(this.gastosCategories)); }
                 if (data.generatedInvoices){ this.generatedInvoices = data.generatedInvoices; localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices)); }
@@ -20458,6 +20608,8 @@ Motivo de cancelación (opcional):`);
                 this.detectPendingInvoices();
                 localStorage.setItem('v35_pendingInvoices', JSON.stringify(this.pendingInvoices));
                 if (document.getElementById('pendingInvoicesModal')?.style.display === 'block') this.renderPendingInvoices();
+                if (data.lastSavedAt) localStorage.setItem('brazos_driveVisto', data.lastSavedAt);
+                this._initSnapReg();
                 this.refreshSels();
                 this.render();
                 return;
@@ -20500,9 +20652,9 @@ Motivo de cancelación (opcional):`);
             const winner = localWins ? localSide : driveSide;
             const loser  = localWins ? driveSide : localSide;
 
-            this.emps              = this.mergeArraysById(winner.emps, loser.emps);
-            this.clis               = this.mergeArraysById(winner.clis, loser.clis);
-            this.servs               = this.mergeArraysById(winner.servs, loser.servs);
+            this.emps              = this.mergeArraysById(winner.emps, loser.emps, ['id'], true);
+            this.clis               = this.mergeArraysById(winner.clis, loser.clis, ['id'], true);
+            this.servs               = this.mergeArraysById(winner.servs, loser.servs, ['id'], true);
             this.gastos              = this.mergeArraysById(winner.gastos, loser.gastos);
             this.serviceCatalog      = this.mergeArraysById(winner.serviceCatalog, loser.serviceCatalog);
             this.estimates           = this.mergeArraysById(winner.estimates, loser.estimates);
@@ -20664,18 +20816,32 @@ Motivo de cancelación (opcional):`);
                 !(p.serviceIds && p.serviceIds.some(sid => this.dismissedServiceIds.includes(sid)))
             );
 
-            this.grupos = this.mergeGrupos(
-                localWins ? this.grupos : (data.grupos || {}),
-                localWins ? (data.grupos || {}) : this.grupos
-            );
+            // 2026-10-12: si hay marcas de tiempo, gana COMPLETO el acomodo de grupos
+            // cambiado más recientemente (sin volver a meter a nadie del acomodo viejo).
+            // Sin marcas (datos de antes de este cambio): comportamiento anterior.
+            const _gtL = this.gruposTs || '', _gtD = data.gruposTs || '';
+            if ((_gtL || _gtD) && data.grupos) {
+                if (_gtD > _gtL) { this.grupos = data.grupos; this._marcarGrupos(_gtD); }
+            } else {
+                this.grupos = this.mergeGrupos(
+                    localWins ? this.grupos : (data.grupos || {}),
+                    localWins ? (data.grupos || {}) : this.grupos
+                );
+            }
             // gruposHistorial (tablero de Rotación): merge por fecha — para cada día,
             // el lado ganador manda sobre los mismos grupos, pero un grupo/fecha que
             // solo exista del otro lado se conserva igual.
             this.gruposHistorial = this.mergeGruposHistorial(
                 localWins ? (this.gruposHistorial || {}) : (data.gruposHistorial || {}),
-                localWins ? (data.gruposHistorial || {}) : (this.gruposHistorial || {})
+                localWins ? (data.gruposHistorial || {}) : (this.gruposHistorial || {}),
+                localWins ? (this.gruposHistorialTs || {}) : (data.gruposHistorialTs || {}),
+                localWins ? (data.gruposHistorialTs || {}) : (this.gruposHistorialTs || {})
             );
             localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial));
+            this.gruposHistorialTs = this._mergeTsHist(this.gruposHistorialTs, data.gruposHistorialTs);
+            localStorage.setItem('v35_gruposHistorialTs', JSON.stringify(this.gruposHistorialTs));
+            this._aplicarRotacionDeHoy();
+            localStorage.setItem('v35_grupos', JSON.stringify(this.grupos));
 
             const winnerNomina = localWins ? (this.nominaTotales || []) : (data.nominaTotales || []);
             const loserNomina  = localWins ? (data.nominaTotales || []) : (this.nominaTotales || []);
@@ -20738,6 +20904,8 @@ Motivo de cancelación (opcional):`);
             this.refreshSels();
             this.render();
 
+            if (data.lastSavedAt) localStorage.setItem('brazos_driveVisto', data.lastSavedAt);
+            this._initSnapReg();
             // Subir el resultado fusionado para que ambos lados (Drive y este dispositivo)
             // queden con la misma información unificada, sin importar quién "ganó".
             this.localDirty = false;
