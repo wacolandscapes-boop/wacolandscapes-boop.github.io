@@ -1756,6 +1756,11 @@ function getTextColor(bgColor) {
     return luminance > 0.55 ? '#000' : '#fff';
 }
 
+// 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
+// Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
+// queda en solo lectura (no sube nada) y muestra un aviso rojo.
+const SCHED_BUILD = '2026-10-14.1';
+
 class Scheduler {
     constructor() {
         this.curDate = new Date();
@@ -20135,6 +20140,29 @@ Motivo de cancelación (opcional):`);
     }
 
     // 2026-10-12: marcas de modificación por registro (empleados, clientes, servicios).
+    // 2026-10-14: si Drive lo escribió una versión MÁS NUEVA del Scheduler, esta copia
+    // es vieja → solo lectura + aviso rojo. Devuelve true si se bloqueó.
+    _revisarVersionDrive(d) {
+        const suya = (d && d.appBuild) || '';
+        if (!suya || suya <= SCHED_BUILD) return false;
+        if (!this._versionVieja) {
+            this._versionVieja = true;
+            console.warn('⛔ Versión vieja del Scheduler (' + SCHED_BUILD + ') — Drive tiene ' + suya + '. No se sube nada.');
+            try {
+                let b = document.getElementById('avisoVersionVieja');
+                if (!b) {
+                    b = document.createElement('div');
+                    b.id = 'avisoVersionVieja';
+                    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:100000;background:#c0392b;color:#fff;padding:12px 16px;font-weight:bold;text-align:center;font-size:1rem;box-shadow:0 2px 8px rgba(0,0,0,.4);';
+                    b.innerHTML = '⚠️ VERSIÓN VIEJA DEL SCHEDULER — no se guardará nada en Drive. Cierra esta ventana y abre la versión correcta (o recarga la página).';
+                    document.body.appendChild(b);
+                }
+            } catch(e) {}
+            const lbl = document.getElementById('driveSyncLabel'); if (lbl) lbl.textContent = '⛔ Versión vieja';
+            const btn = document.getElementById('driveSyncBtn'); if (btn) btn.style.background = '#c0392b';
+        }
+        return true;
+    }
     _hashReg(r) { const { _mod, ...rest } = r || {}; return JSON.stringify(rest); }
     _initSnapReg() {
         this._snapReg = {};
@@ -20180,6 +20208,11 @@ Motivo de cancelación (opcional):`);
     async driveSyncNow() {
         if (!this.driveConnected || !this.driveFolderId) return;
         if (this._lockReadOnly) return; // CANDADO: la 2a PC en solo lectura NO sube a Drive
+        if (this._versionVieja) { // 2026-10-14: copia vieja del Scheduler — nunca sube
+            const _l = document.getElementById('driveSyncLabel'); if (_l) _l.textContent = '⛔ Versión vieja';
+            const _b = document.getElementById('driveSyncBtn'); if (_b) _b.style.background = '#c0392b';
+            return;
+        }
         // ── CANDADO: mientras se está facturando, Drive NO se toca ──────────────
         // Salvo que se pida explícitamente (la sincronización final de la Fase 4, que
         // llama a esta función con el candado ya soltado). Se ignoran aquí los tres
@@ -20211,6 +20244,7 @@ Motivo de cancelación (opcional):`);
                         { headers: { Authorization: `Bearer ${this.driveToken}` } }
                     );
                     const driveData = await driveFileRes.json();
+                    if (this._revisarVersionDrive(driveData)) { this.isSyncing = false; return; }
                     // 2026-10-12: NUNCA subir a ciegas. Si Drive trae cambios de OTRO
                     // dispositivo que este todavía no ha bajado, primero se bajan y se
                     // fusionan (driveDownloadData sube el resultado al terminar).
@@ -20302,6 +20336,7 @@ Motivo de cancelación (opcional):`);
                 exportDate: new Date().toISOString(),
                 lastSavedAt: new Date().toISOString(),
                 deviceId: localStorage.getItem('anaCS_deviceId') || 'unknown',
+                appBuild: SCHED_BUILD,
                 emps: this.emps,
                 clis: this.clis,
                 servs: this.servs,
@@ -20556,6 +20591,7 @@ Motivo de cancelación (opcional):`);
             );
             const data = await fileRes.json();
             if (data.exportType !== 'anaCS_sync' && data.exportType !== 'brazosCS_sync') return;
+            if (this._revisarVersionDrive(data)) return;
 
             // Comparar timestamps — gana el más reciente
             const driveTime  = data.lastSavedAt ? new Date(data.lastSavedAt).getTime() : 0;
