@@ -1149,6 +1149,7 @@
                 <button class="btn" onclick="app.showSec('secGrupos')" style="background:#2c3e50; color:white">👥 Grupos</button>
                 <button class="btn" onclick="app.showSec('secServiceCatalog')" style="background:#16a085; color:white">📐 Catálogo Servicios</button>
                 <button class="btn" onclick="app.showSec('secSupervisor')" style="background:#6c3483; color:white">🔐 Supervisor</button>
+                <button class="btn" onclick="app.showSec('secEmpresa')" style="background:#e67e22; color:white">🏢 Datos de la Empresa</button>
                 <button class="btn" onclick="app.showSec('secRespaldo')" style="background:#c0392b; color:white">🔒 Respaldo de Datos</button>
             </div>
             <div id="secEmp">
@@ -1437,6 +1438,121 @@
                     </button>
                 </div>
             </div>
+        <!-- 2026-10-14: movido desde Facturación → ⚙️ Configuración -->
+            <div id="secEmpresa" style="display:none">
+
+            <!-- Sección: Información de la Empresa -->
+            <div style="background:#f8f9fa; border-radius:10px; padding:16px; margin-bottom:14px; border-left:4px solid #e67e22;">
+                <div style="font-size:0.7rem; font-weight:800; text-transform:uppercase; letter-spacing:0.08em; color:#e67e22; margin-bottom:12px;">
+                    🏢 Información de la Empresa
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div>
+                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">Nombre de la Empresa</label>
+                        <input type="text" id="companyName" placeholder="Brazos Cleaning"
+                            style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
+                            onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
+                    </div>
+                    <div>
+                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">Email (sale en la factura)</label>
+                        <input type="text" id="companyRFC" placeholder="brazoscleaningservices@gmail.com"
+                            style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
+                            onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
+                    </div>
+                    <div>
+                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">📞 Teléfono</label>
+                        <input type="text" id="companyPhone" placeholder="(555) 123-4567"
+                            style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
+                            onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
+                    </div>
+                    <div>
+                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">🌐 Website / Email</label>
+                        <input type="text" id="companyWebsite" placeholder="www.miempresa.com"
+                            style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
+                            onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
+                    </div>
+                    <div style="grid-column:span 2;">
+                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">📍 Dirección</label>
+                        <input type="text" id="companyAddress" placeholder="123 Calle Principal, Ciudad, TX"
+                            style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
+                            onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sección: Configuración de Facturas + Logo -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+
+                <!-- Facturación -->
+                <div style="background:#f8f9fa; border-radius:10px; padding:16px; border-left:4px solid #0D2B8E;">
+                    <div style="font-size:0.7rem; font-weight:800; text-transform:uppercase; letter-spacing:0.08em; color:#0D2B8E; margin-bottom:12px;">
+                        🧾 Configuración de Facturas
+                    </div>
+                    <div style="display:grid; gap:10px;">
+                        <div>
+                            <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">Número Inicial</label>
+                            <input type="number" id="invoiceStartNumber" placeholder="1" min="1"
+                                style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
+                                onfocus="this.style.borderColor='#0D2B8E'" onblur="this.style.borderColor='#e0e0e0'">
+                            <div style="font-size:0.72rem; color:#999; margin-top:3px;">Se generarán como: 0001, 0002, 0003…</div>
+                        </div>
+                        <div>
+                            <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">Impuestos (%)</label>
+                            <div style="position:relative;">
+                                <input type="number" id="taxPercentage" placeholder="8.25" min="0" max="100" step="0.01"
+                                    style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
+                                    onfocus="this.style.borderColor='#0D2B8E'" onblur="this.style.borderColor='#e0e0e0'">
+                            </div>
+                            <div style="font-size:0.72rem; color:#999; margin-top:3px;">Texas Sales Tax = 8.25%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logo -->
+                <div style="background:#f8f9fa; border-radius:10px; padding:16px; border-left:4px solid #27ae60;">
+                    <div style="font-size:0.7rem; font-weight:800; text-transform:uppercase; letter-spacing:0.08em; color:#27ae60; margin-bottom:12px;">
+                        🖼️ Logo de la Empresa
+                    </div>
+                    <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:8px;">PNG con fondo transparente</label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;
+                                  background:white; border:1.5px dashed #27ae60; border-radius:7px;
+                                  padding:10px 12px; font-size:0.82rem; color:#27ae60; font-weight:600;
+                                  transition:background 0.2s;"
+                           onmouseover="this.style.background='#f0faf4'" onmouseout="this.style.background='white'">
+                        📁 Elegir imagen…
+                        <input type="file" id="companyLogo" accept="image/*" onchange="app.previewLogo(event)" style="display:none;">
+                    </label>
+                    <div id="logoPreview" style="margin-top:12px; text-align:center; display:none;">
+                        <img id="logoPreviewImg" style="max-width:110px; max-height:70px;
+                             border:1px solid #ddd; padding:6px; border-radius:8px;
+                             box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+                        <div style="font-size:0.72rem; color:#27ae60; margin-top:4px; font-weight:600;">✓ Logo cargado</div>
+                    </div>
+                    <div id="logoPlaceholder" style="margin-top:12px; text-align:center; color:#ccc; font-size:0.8rem;">
+                        Sin logo cargado
+                    </div>
+                    <!-- Control de tamaño del logo -->
+                    <div style="margin-top:12px;">
+                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">📐 Tamaño en factura (alto en mm)</label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input type="range" id="logoSizeSlider" min="10" max="50" value="25" step="1"
+                                style="flex:1;" oninput="document.getElementById('logoSizeVal').textContent=this.value+'mm'">
+                            <span id="logoSizeVal" style="font-size:0.85rem;font-weight:700;color:#27ae60;min-width:40px;">25mm</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Botón Guardar -->
+            <button onclick="app.saveCompanyConfig()" class="btn"
+                style="width:100%; background:linear-gradient(135deg,#27ae60,#2ecc71); color:white;
+                       padding:13px; font-size:1rem; font-weight:700; border-radius:8px;
+                       box-shadow:0 3px 10px rgba(39,174,96,0.3); letter-spacing:0.03em; transition:0.2s;"
+                onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 5px 15px rgba(39,174,96,0.4)'"
+                onmouseout="this.style.transform=''; this.style.boxShadow='0 3px 10px rgba(39,174,96,0.3)'">
+                💾 Guardar Configuración
+            </button>
+        </div>
         </div>
         <!-- Respaldo de Datos (sección propia, zona delicada) -->
         <div id="secRespaldo" style="display:none">
@@ -1759,7 +1875,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-14.1';
+const SCHED_BUILD = '2026-10-14.2';
 
 class Scheduler {
     constructor() {
@@ -11599,7 +11715,7 @@ Motivo de cancelación (opcional):`);
 
     
     showSec(s) { 
-        ['secEmp','secCli','secConfig','secGrupos','secSupervisor','secServiceCatalog','secRespaldo'].forEach(x => document.getElementById(x).style.display = x === s ? 'block' : 'none');
+        ['secEmp','secCli','secConfig','secGrupos','secSupervisor','secServiceCatalog','secRespaldo','secEmpresa'].forEach(x => document.getElementById(x).style.display = x === s ? 'block' : 'none');
         // Refrescar PIN actual al abrir sección supervisor
         if (s === 'secSupervisor') {
             const el = document.getElementById('supPinActual');
@@ -11613,6 +11729,9 @@ Motivo de cancelación (opcional):`);
         }
         if(s === 'secServiceCatalog') {
             this.renderServiceCatalog();
+        }
+        if(s === 'secEmpresa') {
+            this.loadCompanyConfig();
         }
     }
 
@@ -14743,7 +14862,6 @@ Motivo de cancelación (opcional):`);
         
         localStorage.setItem('companyConfig', JSON.stringify(config));
         alert('✅ Configuración guardada correctamente');
-        this.switchInvoiceTab('generar');
     }
     
     previewLogo(event) {
@@ -21922,7 +22040,7 @@ document.addEventListener('click', function(e) {
             <button id="tabGenerar" onclick="app.switchInvoiceTab('generar')" style="flex: 1; padding: 8px; border: none; background: #bdc3c7; color: white; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; font-size: 0.9rem;">
                 📄 Generar
             </button>
-            <button id="tabConfig" onclick="app.switchInvoiceTab('config')" style="flex: 1; padding: 8px; border: none; background: #bdc3c7; color: white; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; font-size: 0.9rem;">
+            <button id="tabConfig" onclick="app.switchInvoiceTab('config')" style="display:none; flex: 1; padding: 8px; border: none; background: #bdc3c7; color: white; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; font-size: 0.9rem;">
                 ⚙️ Configuración
             </button>
             <button id="tabManual" onclick="app.switchInvoiceTab('manual')" style="flex: 1; padding: 8px; border: none; background: #bdc3c7; color: white; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; font-size: 0.9rem;">
@@ -22172,120 +22290,8 @@ document.addEventListener('click', function(e) {
         </div>
 
         <!-- TAB CONFIGURACIÓN -->
-        <div id="invoiceTabConfig" style="display: none;">
-
-            <!-- Sección: Información de la Empresa -->
-            <div style="background:#f8f9fa; border-radius:10px; padding:16px; margin-bottom:14px; border-left:4px solid #e67e22;">
-                <div style="font-size:0.7rem; font-weight:800; text-transform:uppercase; letter-spacing:0.08em; color:#e67e22; margin-bottom:12px;">
-                    🏢 Información de la Empresa
-                </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                    <div>
-                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">Nombre de la Empresa</label>
-                        <input type="text" id="companyName" placeholder="Brazos Cleaning"
-                            style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
-                            onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
-                    </div>
-                    <div>
-                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">Email (sale en la factura)</label>
-                        <input type="text" id="companyRFC" placeholder="brazoscleaningservices@gmail.com"
-                            style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
-                            onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
-                    </div>
-                    <div>
-                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">📞 Teléfono</label>
-                        <input type="text" id="companyPhone" placeholder="(555) 123-4567"
-                            style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
-                            onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
-                    </div>
-                    <div>
-                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">🌐 Website / Email</label>
-                        <input type="text" id="companyWebsite" placeholder="www.miempresa.com"
-                            style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
-                            onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
-                    </div>
-                    <div style="grid-column:span 2;">
-                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">📍 Dirección</label>
-                        <input type="text" id="companyAddress" placeholder="123 Calle Principal, Ciudad, TX"
-                            style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
-                            onfocus="this.style.borderColor='#e67e22'" onblur="this.style.borderColor='#e0e0e0'">
-                    </div>
-                </div>
-            </div>
-
-            <!-- Sección: Configuración de Facturas + Logo -->
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
-
-                <!-- Facturación -->
-                <div style="background:#f8f9fa; border-radius:10px; padding:16px; border-left:4px solid #0D2B8E;">
-                    <div style="font-size:0.7rem; font-weight:800; text-transform:uppercase; letter-spacing:0.08em; color:#0D2B8E; margin-bottom:12px;">
-                        🧾 Configuración de Facturas
-                    </div>
-                    <div style="display:grid; gap:10px;">
-                        <div>
-                            <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">Número Inicial</label>
-                            <input type="number" id="invoiceStartNumber" placeholder="1" min="1"
-                                style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
-                                onfocus="this.style.borderColor='#0D2B8E'" onblur="this.style.borderColor='#e0e0e0'">
-                            <div style="font-size:0.72rem; color:#999; margin-top:3px;">Se generarán como: 0001, 0002, 0003…</div>
-                        </div>
-                        <div>
-                            <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">Impuestos (%)</label>
-                            <div style="position:relative;">
-                                <input type="number" id="taxPercentage" placeholder="8.25" min="0" max="100" step="0.01"
-                                    style="width:100%; padding:9px 11px; border:1.5px solid #e0e0e0; border-radius:7px; font-size:0.9rem; font-family:inherit; transition:border 0.2s;"
-                                    onfocus="this.style.borderColor='#0D2B8E'" onblur="this.style.borderColor='#e0e0e0'">
-                            </div>
-                            <div style="font-size:0.72rem; color:#999; margin-top:3px;">Texas Sales Tax = 8.25%</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Logo -->
-                <div style="background:#f8f9fa; border-radius:10px; padding:16px; border-left:4px solid #27ae60;">
-                    <div style="font-size:0.7rem; font-weight:800; text-transform:uppercase; letter-spacing:0.08em; color:#27ae60; margin-bottom:12px;">
-                        🖼️ Logo de la Empresa
-                    </div>
-                    <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:8px;">PNG con fondo transparente</label>
-                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;
-                                  background:white; border:1.5px dashed #27ae60; border-radius:7px;
-                                  padding:10px 12px; font-size:0.82rem; color:#27ae60; font-weight:600;
-                                  transition:background 0.2s;"
-                           onmouseover="this.style.background='#f0faf4'" onmouseout="this.style.background='white'">
-                        📁 Elegir imagen…
-                        <input type="file" id="companyLogo" accept="image/*" onchange="app.previewLogo(event)" style="display:none;">
-                    </label>
-                    <div id="logoPreview" style="margin-top:12px; text-align:center; display:none;">
-                        <img id="logoPreviewImg" style="max-width:110px; max-height:70px;
-                             border:1px solid #ddd; padding:6px; border-radius:8px;
-                             box-shadow:0 2px 8px rgba(0,0,0,0.1);">
-                        <div style="font-size:0.72rem; color:#27ae60; margin-top:4px; font-weight:600;">✓ Logo cargado</div>
-                    </div>
-                    <div id="logoPlaceholder" style="margin-top:12px; text-align:center; color:#ccc; font-size:0.8rem;">
-                        Sin logo cargado
-                    </div>
-                    <!-- Control de tamaño del logo -->
-                    <div style="margin-top:12px;">
-                        <label style="font-size:0.75rem; font-weight:600; color:#555; display:block; margin-bottom:4px;">📐 Tamaño en factura (alto en mm)</label>
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <input type="range" id="logoSizeSlider" min="10" max="50" value="25" step="1"
-                                style="flex:1;" oninput="document.getElementById('logoSizeVal').textContent=this.value+'mm'">
-                            <span id="logoSizeVal" style="font-size:0.85rem;font-weight:700;color:#27ae60;min-width:40px;">25mm</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Botón Guardar -->
-            <button onclick="app.saveCompanyConfig()" class="btn"
-                style="width:100%; background:linear-gradient(135deg,#27ae60,#2ecc71); color:white;
-                       padding:13px; font-size:1rem; font-weight:700; border-radius:8px;
-                       box-shadow:0 3px 10px rgba(39,174,96,0.3); letter-spacing:0.03em; transition:0.2s;"
-                onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 5px 15px rgba(39,174,96,0.4)'"
-                onmouseout="this.style.transform=''; this.style.boxShadow='0 3px 10px rgba(39,174,96,0.3)'">
-                💾 Guardar Configuración
-            </button>
-        </div>
+        <!-- 2026-10-14: la Configuración de la empresa se movió a Base de Datos → 🏢 Datos de la Empresa -->
+        <div id="invoiceTabConfig" style="display: none;"></div>
     </div>
     </div>
 </div>
