@@ -1875,7 +1875,16 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-14.2';
+const SCHED_BUILD = '2026-10-14.3';
+
+// 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
+// Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
+function recargarApp() {
+    try {
+        if (typeof app !== 'undefined' && app && app.isSyncing) { alert('⏳ Espera a que termine de sincronizar y vuelve a tocar Recargar.'); return; }
+    } catch (e) {}
+    location.replace(location.origin + location.pathname + '?r=' + Date.now());
+}
 
 class Scheduler {
     constructor() {
@@ -20272,7 +20281,7 @@ Motivo de cancelación (opcional):`);
                     b = document.createElement('div');
                     b.id = 'avisoVersionVieja';
                     b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:100000;background:#c0392b;color:#fff;padding:12px 16px;font-weight:bold;text-align:center;font-size:1rem;box-shadow:0 2px 8px rgba(0,0,0,.4);';
-                    b.innerHTML = '⚠️ VERSIÓN VIEJA DEL SCHEDULER — no se guardará nada en Drive. Cierra esta ventana y abre la versión correcta (o recarga la página).';
+                    b.innerHTML = '⚠️ VERSIÓN VIEJA DEL SCHEDULER — no se guardará nada en Drive. <button onclick="recargarApp()" style="margin-left:10px;background:#fff;color:#c0392b;border:none;border-radius:6px;padding:6px 14px;font-weight:bold;font-size:1rem;cursor:pointer;">🔄 Recargar ahora</button>';
                     document.body.appendChild(b);
                 }
             } catch(e) {}
@@ -23279,6 +23288,9 @@ document.addEventListener('click', function(e) {
 </div>
 
 
+<!-- 2026-10-14: botón flotante para recargar la app (útil en iPhone) -->
+<button id="btnRecargarApp" onclick="recargarApp()" title="Recargar la app" aria-label="Recargar la app"
+    style="position:fixed; right:8px; bottom:30px; z-index:99990; width:46px; height:46px; border-radius:50%; border:none; background:#34495e; color:#fff; font-size:1.35rem; box-shadow:0 3px 10px rgba(0,0,0,.35); cursor:pointer;">🔄</button>
 <!-- VERSION STAMP -->
 <div id="versionStamp" style="position:fixed; bottom:4px; right:6px; background:rgba(0,0,0,0.7); color:#0f0; font-size:0.68rem; padding:2px 7px; border-radius:8px; z-index:2147483647; pointer-events:none; font-family:monospace; letter-spacing:0.3px;">
     v 06/20/2026 10:51 AM CT
