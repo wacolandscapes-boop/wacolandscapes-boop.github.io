@@ -1875,7 +1875,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-14.3';
+const SCHED_BUILD = '2026-10-15.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -6134,15 +6134,25 @@ class Scheduler {
             }
 
             // ── billingPeriod = "monthly" o "fixed_monthly" → columna ENVIAR AL FINAL DEL MES ──
-            // Se junta todo el mes y se muestra a partir del día 15.
+            // Se junta todo el mes y se muestra 5 días antes de que termine el mes (mes completo).
             if (billingPeriod === 'monthly' || billingPeriod === 'fixed_monthly') {
-                if (currentDay < 15) return;
-                const periodStart = new Date(currentYear, currentMonth, 1).toLocaleDateString('en-CA');
-                const periodEnd = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('en-CA');
-                const periodKey = `${clientName}-${currentYear}-${String(currentMonth+1).padStart(2,'0')}-recurrente`;
+              // 2026-10-15: antes esta regla SOLO veía el mes en curso (y desde el día 15).
+              // Al pasar al mes siguiente (ej. 1 de octubre) la tarjeta del mes que acababa
+              // de terminar ya no se generaba, y lo único que quedaba eran tarjetas parciales
+              // de la "red de seguridad" (solo servicios con más de 7 días) → las facturas de
+              // septiembre salieron cortadas a mitad de mes (Kylie, Robin, Gigi, etc.).
+              // Ahora también se arma la tarjeta del MES ANTERIOR COMPLETO (día 1 al último),
+              // salvo que ese mes ya tenga alguna factura (para no cobrar doble).
+              const _tarjetaMes = (yy, mm, esMesAnterior) => {
+                const periodStart = new Date(yy, mm, 1).toLocaleDateString('en-CA');
+                const periodEnd = new Date(yy, mm + 1, 0).toLocaleDateString('en-CA');
+                const periodKey = `${clientName}-${yy}-${String(mm+1).padStart(2,'0')}-recurrente`;
 
                 if (this.pendingInvoices.some(p => p.periodKey === periodKey)) return;
                 if (hasGeneratedInvoice(clientName, periodStart, periodEnd)) return;
+                if (esMesAnterior && (this.generatedInvoices || []).some(g =>
+                    g.clientName === clientName && g.status !== 'cancelada' &&
+                    g.startDate && g.endDate && g.startDate <= periodEnd && g.endDate >= periodStart)) return;
 
                 const monthServs = this.servs.filter(s =>
                     clients.some(c => c.id == s.cliId) &&
@@ -6177,7 +6187,7 @@ class Scheduler {
                     total += propFija ? precio : precio * visitasPorProp[cid];
                 });
 
-                const lastDay = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
+                const lastDay = new Date(yy, mm + 1, 0).toLocaleDateString('es-MX', {day:'numeric', month:'long'});
 
                 this.pendingInvoices.push({
                     id: Date.now() + Math.random(),
@@ -6192,10 +6202,19 @@ class Scheduler {
                     endDate: periodEnd,
                     serviceCount: monthServs.length,
                     total,
-                    urgency: 'normal',
-                    reason: `📋 Mensual — Revisar y enviar el ${lastDay}`,
+                    urgency: esMesAnterior ? 'overdue' : 'normal',
+                    reason: esMesAnterior
+                        ? `📋 Mensual — mes completo hasta el ${lastDay} (ya terminó, enviar)`
+                        : `📋 Mensual — Revisar y enviar el ${lastDay}`,
                     createdAt: today.toISOString()
                 });
+              };
+              const _mesAnt = new Date(currentYear, currentMonth - 1, 1);
+              _tarjetaMes(_mesAnt.getFullYear(), _mesAnt.getMonth(), true);
+              // 2026-10-15 (Ranu): la tarjeta del mes en curso aparece 5 días antes de que
+              // termine el mes (antes: desde el día 15), y abarca el mes COMPLETO.
+              const _diasDelMes = new Date(currentYear, currentMonth + 1, 0).getDate();
+              if (currentDay >= _diasDelMes - 5) _tarjetaMes(currentYear, currentMonth, false);
             }
         });
 
@@ -6324,10 +6343,33 @@ class Scheduler {
                 if (propCli.type === 'construccion') return;
                 if (this._cliSinFacturar(propCli)) return; // "No facturar por Brazos" o servicio pausado
                 if (propCli.billingPeriod === 'weekly') return; // ya cubierto arriba en (A1)
-                const oldServs = this.servs.filter(s =>
+                let oldServs = this.servs.filter(s =>
                     String(s.cliId) === String(propCli.id) && !s.cancelled &&
                     s.date >= safetyBacklogStartStr && s.date <= safetyCutoffStr
                 );
+                // 2026-10-15: clientes de facturación MENSUAL — el mes en curso se factura
+                // completo al final del mes (tarjeta "recurrente"); aquí ya no se arma una
+                // tarjeta parcial con sus primeros días (eso cortaba las facturas a mitad de mes).
+                // Y si es CUOTA FIJA mensual y ese mes ya tiene factura, el mes está cobrado:
+                // no se vuelve a sugerir el monto fijo por los días que "faltaron".
+                if (propCli.billingPeriod === 'monthly' || propCli.billingPeriod === 'fixed_monthly') {
+                    const _mesHoy = todayStr.slice(0, 7);
+                    oldServs = oldServs.filter(s => String(s.date).slice(0, 7) !== _mesHoy);
+                    const _fija = (propCli.billingPeriod === 'fixed_monthly' || propCli.invoicingType === 'fixed_monthly');
+                    if (_fija) {
+                        const _mesFacturado = (ym) => (this.generatedInvoices || []).some(g =>
+                            g.status !== 'cancelada' && g.startDate && g.endDate &&
+                            String(g.startDate).slice(0, 7) <= ym && String(g.endDate).slice(0, 7) >= ym &&
+                            ((g.clientIds || []).map(String).includes(String(propCli.id)) || g.clientName === propCli.name));
+                        oldServs = oldServs.filter(s => !_mesFacturado(String(s.date).slice(0, 7)));
+                    }
+                    // Si ya no queda nada, retirar la tarjeta parcial que se hubiera guardado antes.
+                    if (oldServs.length === 0) {
+                        const _kRS = `${propCli.name}-${propCli.id}-backlog-redseguridad`;
+                        this.pendingInvoices = this.pendingInvoices.filter(p => p.periodKey !== _kRS);
+                        return;
+                    }
+                }
                 if (oldServs.length === 0) return;
 
                 const isHandled = (s) => {
@@ -6335,7 +6377,12 @@ class Scheduler {
                         g.clientName === propCli.name && g.status !== 'cancelada' &&
                         g.startDate <= s.date && g.endDate >= s.date);
                     if (inGenerated) return true;
+                    // 2026-10-15: en clientes mensuales, su PROPIA tarjeta parcial no cuenta como
+                    // "ya atendido" (si no, nunca se actualizaba ni se podía retirar).
+                    const _kPropia = (propCli.billingPeriod === 'monthly' || propCli.billingPeriod === 'fixed_monthly')
+                        ? `${propCli.name}-${propCli.id}-backlog-redseguridad` : null;
                     return this.pendingInvoices.some(p =>
+                        p.periodKey !== _kPropia &&
                         p.clientName === propCli.name &&
                         ((p.serviceIds && p.serviceIds.includes(s.id)) ||
                          (p.startDate <= s.date && p.endDate >= s.date &&
@@ -6344,7 +6391,15 @@ class Scheduler {
                 };
 
                 const unhandled = oldServs.filter(s => !isHandled(s));
-                if (unhandled.length === 0) return;
+                if (unhandled.length === 0) {
+                    // 2026-10-15: en clientes mensuales, si ya no queda nada pendiente,
+                    // retirar la tarjeta parcial vieja que se hubiera guardado.
+                    if (propCli.billingPeriod === 'monthly' || propCli.billingPeriod === 'fixed_monthly') {
+                        const _kRS2 = `${propCli.name}-${propCli.id}-backlog-redseguridad`;
+                        this.pendingInvoices = this.pendingInvoices.filter(p => p.periodKey !== _kRS2);
+                    }
+                    return;
+                }
 
                 const key = `${propCli.name}-${propCli.id}-backlog-redseguridad`;
 
@@ -6641,7 +6696,7 @@ class Scheduler {
         if (dfOtros.length > 0) sections.push({ key:'otros', title:'Otros', icon:'📦', list:dfOtros, color:'#fde8e8', textColor:'#c0392b',
               desc:'Pendientes sin Frecuencia de Facturación reconocida (datos de antes de este ajuste). Revísalas y confirma su ficha de cliente.' });
         sections.push({ key:'finmes', title:`Enviar al Final del Mes (${lastDayLabel})`, icon:'📋', list:dfFinMes, color:'#fff3cd', textColor:'#856404',
-              desc:'Frecuencia de Facturación = Mensual. Se junta todo el mes y se muestra a partir del día 15.' });
+              desc:'Frecuencia de Facturación = Mensual. Se junta todo el mes y aparece 5 días antes de que termine el mes, con el mes completo.' });
 
         const sectionHeader = (s, isFullscreen) => `
             <div style="cursor:pointer; background:${s.color}; color:${s.textColor}; padding:8px 10px; border-radius:6px; font-weight:700; font-size:0.8rem; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
