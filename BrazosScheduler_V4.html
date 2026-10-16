@@ -1889,7 +1889,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-16.6';
+const SCHED_BUILD = '2026-10-16.8';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -21495,10 +21495,34 @@ Motivo de cancelación (opcional):`);
         this._nxeGuardar(monStr, datos);
         this._nxeRender();
     }
+    // 2026-10-16: resumen tentativo — facturado (precio por visita de cada servicio
+    // de la semana), total de nómina y lo que queda (sin contar gastos).
+    _nxeResumen(calc, filas) {
+        const facturado = calc.dias.reduce((a, d) => a + d.grupos.reduce((b, gr) => b + gr.servicios.reduce((c, s) => c + (s.precio || 0), 0), 0), 0);
+        const nomina = filas.reduce((a, f) => a + f.total, 0);
+        const ganancia = facturado - nomina;
+        return { facturado, nomina, ganancia, margen: facturado > 0 ? ganancia / facturado * 100 : 0 };
+    }
+    // 2026-10-16: sueldo fijo semanal (ej. Claudia $600) + "socio" cuyo trabajo
+    // se cubre con ese cheque (ej. Victor, dueño, no cobra). Se guarda para todas
+    // las semanas. {empId, monto, socioId}
+    _nxeFijoLeer() { try { return JSON.parse(localStorage.getItem('brazos_nomina_xemp_fijo') || 'null') || {}; } catch(e) { return {}; } }
+    _nxeFijoSet(campo, valor) {
+        const f = this._nxeFijoLeer();
+        if (campo === 'monto') f.monto = parseFloat(valor) || 0; else f[campo] = valor || '';
+        try { localStorage.setItem('brazos_nomina_xemp_fijo', JSON.stringify(f)); } catch(e) {}
+        this._nxeRender();
+    }
     _nxeFilas(monStr) {
         const rate = parseFloat(document.getElementById('nmRate').value) || 15;
         const calc = this._nxeCalcular(monStr);
         const extra = this._nxeLeer(monStr).extra || {};
+        const fijo = this._nxeFijoLeer();
+        const fijoActivo = fijo.empId && (fijo.monto || 0) > 0;
+        if (fijoActivo) {
+            // que aparezcan aunque esta semana no tengan servicios
+            [fijo.empId, fijo.socioId].filter(Boolean).forEach(id => { if (!calc.porEmp[String(id)] && (this.emps || []).some(e => String(e.id) === String(id))) calc.porEmp[String(id)] = { id: String(id), total: 0, servicios: 0, detalle: [] }; });
+        }
         const filas = Object.values(calc.porEmp).map(r => {
             const emp = (this.emps || []).find(e => String(e.id) === r.id) || {};
             const hrsDir = (extra[r.id] && extra[r.id].hrs) || 0;
@@ -21506,17 +21530,39 @@ Motivo de cancelación (opcional):`);
             const pagoPct = r.total;
             const pagoHoras = pagoPct + hrsDir * rate;
             const h = this._nxeHoras(pagoHoras, rate);
-            return { id: r.id, nombre: emp.name || r.id, servicios: r.servicios, pagoPct, hrsDir, bonus, regHrs: h.regHrs, otHrs: h.otHrs, total: pagoHoras + bonus, detalle: r.detalle };
+            const fila = { id: r.id, nombre: emp.name || r.id, servicios: r.servicios, pagoPct, hrsDir, bonus, regHrs: h.regHrs, otHrs: h.otHrs, total: pagoHoras + bonus, trabajado: pagoHoras + bonus, detalle: r.detalle };
+            if (fijoActivo && String(r.id) === String(fijo.empId)) { fila.fijo = fijo.monto; fila.total = fijo.monto + bonus; fila.regHrs = 0; fila.otHrs = 0; }
+            else if (fijoActivo && String(r.id) === String(fijo.socioId)) { fila.socio = true; fila.total = 0; fila.regHrs = 0; fila.otHrs = 0; }
+            return fila;
         }).sort((a, b) => a.nombre.localeCompare(b.nombre));
-        return { calc, filas, rate };
+        return { calc, filas, rate, fijo: fijoActivo ? fijo : null };
     }
     _nxeRender(soloTabla) {
         const body = document.getElementById('nxeBody'); if (!body) return;
         const monStr = document.getElementById('nmWeekStart').value;
-        const { calc, filas, rate } = this._nxeFilas(monStr);
+        const { calc, filas, rate, fijo: fijoCfg } = this._nxeFilas(monStr);
         const fmt = n => '$' + (n || 0).toFixed(2);
         const DAYS = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
         const nom = id => { const e = (this.emps || []).find(x => String(x.id) === String(id)); return e ? String(e.name || '').split(' ')[0] : id; };
+        const fijoRaw = this._nxeFijoLeer();
+        const optsEmp = sel => '<option value="">— nadie —</option>' + (this.emps || []).map(e => `<option value="${e.id}" ${String(e.id) === String(sel || '') ? 'selected' : ''}>${e.name}</option>`).join('');
+        const selSt = 'width:auto;display:inline-block;padding:3px 6px;border:1px solid #4a5568;border-radius:6px;background:#1a1a2e;color:#e2e8f0;font-size:0.82rem;';
+        const fijoBar = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#2d3748;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:0.82rem;">
+            💰 Sueldo fijo semanal: <select onchange="app._nxeFijoSet('empId',this.value)" style="${selSt}">${optsEmp(fijoRaw.empId)}</select>
+            $<input type="number" min="0" step="1" value="${fijoRaw.monto || ''}" placeholder="600" onchange="app._nxeFijoSet('monto',this.value)" style="width:80px;${selSt}">
+            · cubre también lo trabajado por: <select onchange="app._nxeFijoSet('socioId',this.value)" style="${selSt}">${optsEmp(fijoRaw.socioId)}</select>
+          </div>`;
+        let parejaHtml = '';
+        if (fijoCfg) {
+            const fF = filas.find(f => String(f.id) === String(fijoCfg.empId));
+            const fS = fijoCfg.socioId ? filas.find(f => String(f.id) === String(fijoCfg.socioId)) : null;
+            const tF = fF ? fF.trabajado : 0, tS = fS ? fS.trabajado : 0, junto = tF + tS, dif = junto - fijoCfg.monto;
+            parejaHtml = `<div style="background:#1e3a5f;border:1px solid #3b82f6;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:0.88rem;">
+              <b>💑 Lo que en realidad trabajaron:</b> ${nom(fijoCfg.empId)} ${fmt(tF)}${fS || fijoCfg.socioId ? ` + ${nom(fijoCfg.socioId)} ${fmt(tS)} = <b>${fmt(junto)}</b>` : ''}
+              · Cheque fijo: <b>${fmt(fijoCfg.monto)}</b>
+              · ${dif >= 0 ? `Trabajaron <b style="color:#4ade80;">${fmt(dif)} más</b> que el cheque` : `El cheque es <b style="color:#fbbf24;">${fmt(-dif)} más</b> de lo trabajado`}
+            </div>`;
+        }
         const tablaEmp = `
             <table style="width:100%;border-collapse:collapse;font-size:0.88rem;">
               <thead><tr style="background:#374151;color:#a78bfa;">
@@ -21531,9 +21577,9 @@ Motivo de cancelación (opcional):`);
                 <td style="padding:7px;text-align:right;color:#86efac;">${fmt(f.pagoPct)}</td>
                 <td style="padding:7px;text-align:center;"><input type="number" min="0" step="0.25" value="${f.hrsDir}" onchange="app._nxeExtra('${f.id}','hrs',this.value)" style="width:62px;padding:3px;border:1px solid #4a5568;border-radius:4px;background:#2d3748;color:#e2e8f0;text-align:center;"></td>
                 <td style="padding:7px;text-align:center;"><input type="number" min="0" step="0.01" value="${f.bonus}" onchange="app._nxeExtra('${f.id}','bonus',this.value)" style="width:70px;padding:3px;border:1px solid #4a5568;border-radius:4px;background:#2d3748;color:#e2e8f0;text-align:center;"></td>
-                <td style="padding:7px;text-align:center;">${f.regHrs.toFixed(2)}</td>
-                <td style="padding:7px;text-align:center;color:#fbbf24;">${f.otHrs.toFixed(2)}</td>
-                <td style="padding:7px;text-align:right;color:#a78bfa;font-weight:800;">${fmt(f.total)}</td></tr>`).join('')}
+                ${f.fijo !== undefined || f.socio ? `<td colspan="2" style="padding:7px;text-align:center;font-size:0.78rem;color:#93c5fd;">${f.fijo !== undefined ? '💰 sueldo fijo' : 'cubierto por el fijo'}</td>` : `<td style="padding:7px;text-align:center;">${f.regHrs.toFixed(2)}</td>
+                <td style="padding:7px;text-align:center;color:#fbbf24;">${f.otHrs.toFixed(2)}</td>`}
+                <td style="padding:7px;text-align:right;color:#a78bfa;font-weight:800;">${f.socio ? '<span style="color:#94a3b8;font-weight:600;">$0.00</span>' : fmt(f.total)}</td></tr>`).join('')}
                 <tr style="background:#374151;font-weight:800;"><td style="padding:7px;" colspan="2">TOTAL</td>
                 <td style="padding:7px;text-align:right;color:#86efac;">${fmt(filas.reduce((a,f)=>a+f.pagoPct,0))}</td><td colspan="4"></td>
                 <td style="padding:7px;text-align:right;color:#a78bfa;">${fmt(filas.reduce((a,f)=>a+f.total,0))}</td></tr>
@@ -21563,6 +21609,13 @@ Motivo de cancelación (opcional):`);
               }).join('')}
             </div>`;
         }).join('') || '<div style="color:#94a3b8;">Sin servicios esta semana.</div>';
+        const rs = this._nxeResumen(calc, filas);
+        const tile = (lbl, val, col, sub) => `<div style="flex:1;min-width:150px;background:#2d3748;border-radius:8px;padding:10px 12px;"><div style="font-size:0.75rem;color:#94a3b8;">${lbl}</div><div style="font-size:1.25rem;font-weight:800;color:${col};">${val}</div>${sub ? `<div style="font-size:0.72rem;color:#94a3b8;">${sub}</div>` : ''}</div>`;
+        const resumenHtml = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0;">
+            ${tile('💵 Facturado esta semana', fmt(rs.facturado), '#e2e8f0', 'precio de cada servicio realizado')}
+            ${tile('👥 Nómina (total a pagar)', fmt(rs.nomina), '#a78bfa', fijoCfg ? 'con el cheque fijo de ' + nom(fijoCfg.empId) : 'incluye la parte de Victor')}
+            ${tile('📈 Queda (tentativo)', fmt(rs.ganancia), rs.ganancia >= 0 ? '#4ade80' : '#f87171', rs.margen.toFixed(1) + '% · sin contar gastos')}
+          </div>`;
         const sinAsignar = calc.dias.reduce((a, d) => a + d.grupos.filter(gr => !gr.presentes.length).reduce((b, gr) => b + gr.servicios.reduce((c, s) => c + s.pago, 0), 0), 0);
         const avisoSin = sinAsignar > 0.005 ? `<div style="background:#7f1d1d;color:#fecaca;padding:8px 12px;border-radius:8px;margin:10px 0;font-size:0.85rem;">⚠️ ${fmt(sinAsignar)} sin asignar: hay días/grupos sin nadie marcado. Abajo usa “+ Agregar” para poner quién trabajó.</div>` : '';
         const mon = new Date(monStr + 'T12:00:00'), sun = new Date(mon); sun.setDate(sun.getDate()+6);
@@ -21573,7 +21626,10 @@ Motivo de cancelación (opcional):`);
             <button onclick="document.getElementById('nxeModal').remove()" style="background:#ef4444;color:white;border:none;width:30px;height:30px;border-radius:6px;cursor:pointer;">✕</button>
           </div>
           <div style="font-size:0.82rem;color:#94a3b8;margin-bottom:12px;">Cada servicio se reparte (${Math.round(calc.pct*100)}% del precio) solo entre quienes trabajaron ese día en ese grupo, según la Rotación. Si alguien faltó, quítale la palomita en ese día; si llegó tarde o se fue temprano, cámbiale el % de tiempo (lo que no trabajó se reparte entre los demás). Tarifa: ${fmt(rate)}/hr · overtime después de 40 hrs.</div>
+          ${fijoBar}
           ${tablaEmp}
+          ${parejaHtml}
+          ${resumenHtml}
           ${avisoSin}
           <div style="display:flex;gap:10px;margin:14px 0;flex-wrap:wrap;align-items:center;">
             <button onclick="app._nxeImprimir()" style="background:#059669;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:700;">🖨️ Imprimir / PDF</button>
@@ -21585,14 +21641,26 @@ Motivo de cancelación (opcional):`);
     }
     _nxeImprimir() {
         const monStr = document.getElementById('nmWeekStart').value;
-        const { calc, filas, rate } = this._nxeFilas(monStr);
+        const { calc, filas, rate, fijo: fijoCfg } = this._nxeFilas(monStr);
         const fmt = n => '$' + (n || 0).toFixed(2);
         const mon = new Date(monStr + 'T12:00:00'), sun = new Date(mon); sun.setDate(sun.getDate()+6);
         const f2 = d => d.toLocaleDateString('es-MX',{month:'short',day:'numeric',year:'numeric'});
+        const nomP = id => { const e = (this.emps || []).find(x => String(x.id) === String(id)); return e ? e.name : ''; };
         let html = `<h1 style="color:#7c3aed;">📊 Nómina % por empleado</h1><h3 style="font-weight:normal;color:#555;">Semana: ${f2(mon)} — ${f2(sun)} · ${Math.round(calc.pct*100)}% · ${fmt(rate)}/hr</h3>
           <table><thead><tr style="background:#f3f4f6;"><th>Empleado</th><th>Servicios</th><th>Pago por %</th><th>Hrs directas</th><th>Bonus</th><th>Reg hrs</th><th>OT hrs</th><th>Total</th></tr></thead><tbody>
-          ${filas.map(f=>`<tr><td>${f.nombre}</td><td style="text-align:center">${f.servicios}</td><td style="text-align:right">${fmt(f.pagoPct)}</td><td style="text-align:center">${f.hrsDir}</td><td style="text-align:right">${fmt(f.bonus)}</td><td style="text-align:center">${f.regHrs.toFixed(2)}</td><td style="text-align:center">${f.otHrs.toFixed(2)}</td><td style="text-align:right;font-weight:bold">${fmt(f.total)}</td></tr>`).join('')}
+          ${filas.map(f=>`<tr><td>${f.nombre}</td><td style="text-align:center">${f.servicios}</td><td style="text-align:right">${fmt(f.pagoPct)}</td><td style="text-align:center">${f.hrsDir}</td><td style="text-align:right">${fmt(f.bonus)}</td>${f.fijo !== undefined || f.socio ? `<td colspan="2" style="text-align:center;font-size:0.85em">${f.fijo !== undefined ? 'Sueldo fijo' : 'Cubierto por el fijo'}</td>` : `<td style="text-align:center">${f.regHrs.toFixed(2)}</td><td style="text-align:center">${f.otHrs.toFixed(2)}</td>`}<td style="text-align:right;font-weight:bold">${fmt(f.total)}</td></tr>`).join('')}
           <tr style="font-weight:bold;background:#f3f4f6"><td colspan="7">TOTAL</td><td style="text-align:right">${fmt(filas.reduce((a,f)=>a+f.total,0))}</td></tr></tbody></table>`;
+        if (fijoCfg) {
+            const fF = filas.find(f => String(f.id) === String(fijoCfg.empId)), fS = fijoCfg.socioId ? filas.find(f => String(f.id) === String(fijoCfg.socioId)) : null;
+            const tF = fF ? fF.trabajado : 0, tS = fS ? fS.trabajado : 0, junto = tF + tS, dif = junto - fijoCfg.monto;
+            html += `<div style="margin-top:14px;padding:10px;border:1px solid #93c5fd;border-radius:8px;background:#eff6ff;"><b>Lo que en realidad trabajaron:</b> ${nomP(fijoCfg.empId)} ${fmt(tF)}${fijoCfg.socioId ? ` + ${nomP(fijoCfg.socioId)} ${fmt(tS)} = <b>${fmt(junto)}</b>` : ''}<br>Cheque fijo: <b>${fmt(fijoCfg.monto)}</b> · ${dif >= 0 ? `Trabajaron ${fmt(dif)} más que el cheque` : `El cheque es ${fmt(-dif)} más de lo trabajado`}</div>`;
+        }
+        { const rs = this._nxeResumen(calc, filas);
+          html += `<table style="margin-top:14px;max-width:420px;"><tbody>
+            <tr><td>💵 Facturado esta semana</td><td style="text-align:right">${fmt(rs.facturado)}</td></tr>
+            <tr><td>👥 Nómina (total a pagar)</td><td style="text-align:right">-${fmt(rs.nomina)}</td></tr>
+            <tr style="font-weight:bold;background:#f3f4f6"><td>📈 Queda (tentativo, sin gastos)</td><td style="text-align:right">${fmt(rs.ganancia)} (${rs.margen.toFixed(1)}%)</td></tr>
+          </tbody></table>`; }
         filas.forEach(f => {
             html += `<div style="page-break-before:always;"></div><h1 style="color:#7c3aed;">💰 Comprobante de Nómina</h1><h3 style="font-weight:normal;color:#555;">${f.nombre} · Semana: ${f2(mon)} — ${f2(sun)}</h3>
               <table><thead><tr style="background:#f3f4f6;"><th>Día</th><th>Grupo</th><th>Cliente</th><th>Tu pago</th></tr></thead><tbody>
@@ -21601,7 +21669,7 @@ Motivo de cancelación (opcional):`);
               <div style="margin-top:12px;padding:12px;border:1px solid #ddd;border-radius:8px;">
                 ${f.hrsDir ? `<div>Horas directas: ${f.hrsDir} × ${fmt(rate)} = ${fmt(f.hrsDir*rate)}</div>` : ''}
                 ${f.bonus ? `<div>Bonus: ${fmt(f.bonus)}</div>` : ''}
-                <div>Reg: ${f.regHrs.toFixed(2)} hrs · OT: ${f.otHrs.toFixed(2)} hrs</div>
+                ${f.fijo !== undefined ? `<div>Trabajado: ${fmt(f.trabajado)} · Se paga con sueldo fijo semanal de ${fmt(f.fijo)}</div>` : f.socio ? `<div>Trabajado: ${fmt(f.trabajado)} · Cubierto por el sueldo fijo de ${nomP(fijoCfg.empId)}</div>` : `<div>Reg: ${f.regHrs.toFixed(2)} hrs · OT: ${f.otHrs.toFixed(2)} hrs</div>`}
                 <div style="font-size:1.25rem;font-weight:bold;color:#7c3aed;text-align:right;">TOTAL: ${fmt(f.total)}</div></div>`;
         });
         const win = window.open('', '_blank');
@@ -21617,7 +21685,7 @@ Motivo de cancelación (opcional):`);
         if (!this.driveConnected || !this.driveToken) { alert('Conecta Google Drive primero (el botón de Sync arriba).'); return; }
         const { filas } = this._nxeFilas(monStr);
         const mon = new Date(monStr + 'T12:00:00'), sun = new Date(mon); sun.setDate(sun.getDate()+6);
-        const entries = filas.filter(f => f.regHrs > 0 || f.otHrs > 0 || f.bonus > 0).map(f => ({
+        const entries = filas.filter(f => f.fijo === undefined && !f.socio).filter(f => f.regHrs > 0 || f.otHrs > 0 || f.bonus > 0).map(f => ({
             employeeId: String(f.id), employeeName: f.nombre, weekStart: monStr, weekEnd: sun.toLocaleDateString('en-CA'),
             regularHours: Math.round(f.regHrs * 100) / 100, overtimeHours: Math.round(f.otHrs * 100) / 100, bonus: f.bonus,
             source: 'nomina_pct_xemp'
