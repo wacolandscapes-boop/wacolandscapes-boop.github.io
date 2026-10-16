@@ -1889,7 +1889,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-16.3';
+const SCHED_BUILD = '2026-10-16.6';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -1909,6 +1909,7 @@ class Scheduler {
         this.selectedGroups = ['all'];
         this.expandedMembers = JSON.parse(localStorage.getItem('v55_expMembers')) || {};
         this.emps = JSON.parse(localStorage.getItem('v35_emps')) || [];
+        { const _e = this._sinEmpsDuplicados(this.emps); if (_e.length !== this.emps.length) { this.emps = _e; localStorage.setItem('v35_emps', JSON.stringify(_e)); } }
         this.clis = JSON.parse(localStorage.getItem('v35_clis')) || [];
         this.serviceLog = JSON.parse(localStorage.getItem('v35_serviceLog') || '[]');
         this.servs = JSON.parse(localStorage.getItem('v35_servs')) || [];
@@ -20310,6 +20311,21 @@ Motivo de cancelación (opcional):`);
         return [...porClave.values()];
     }
 
+    // 2026-10-16: dos empleados con el MISMO id (pasó con Claudia al cambiarle el
+    // apellido) → se deja uno solo: el editado más recientemente (_mod); si empatan,
+    // el que aparece después. Se conserva la posición del primero.
+    _sinEmpsDuplicados(arr) {
+        if (!Array.isArray(arr)) return arr;
+        const pos = new Map(), out = [];
+        arr.forEach(e => {
+            const k = e && e.id != null && e.id !== '' ? String(e.id) : null;
+            if (k === null) { out.push(e); return; }
+            if (!pos.has(k)) { pos.set(k, out.length); out.push(e); return; }
+            const i = pos.get(k);
+            if ((e._mod || '') >= (out[i]._mod || '')) out[i] = e;
+        });
+        return out;
+    }
     mergeArraysById(winnerArr = [], loserArr = [], idKeys = ['id'], porMod = false) {
         const getKey = (item) => {
             for (const k of idKeys) {
@@ -20640,12 +20656,17 @@ Motivo de cancelación (opcional):`);
 
             empList.forEach(ne => {
                 if (!ne.name) return;
-                const idx = this.emps.findIndex(e =>
+                // 2026-10-16: primero se busca por ID (así un cambio de nombre en Nómina,
+                // ej. Claudia Ortiz → Claudia Alvarado, se aplica a la MISMA ficha en vez
+                // de crear otra con el mismo ID); si el ID no está, por nombre como antes.
+                let idx = ne.id != null && ne.id !== '' ? this.emps.findIndex(e => String(e.id) === String(ne.id)) : -1;
+                if (idx === -1) idx = this.emps.findIndex(e =>
                     e.name.trim().toLowerCase() === ne.name.trim().toLowerCase()
                 );
                 if (idx !== -1) {
                     // Actualizar tel y address si vienen de la Nómina
                     let changed = false;
+                    if (this.emps[idx].name.trim() !== ne.name.trim()) { this.emps[idx].name = ne.name.trim(); changed = true; }
                     if (ne.tel || ne.phone) { this.emps[idx].tel = ne.tel || ne.phone; changed = true; }
                     if (ne.address)         { this.emps[idx].address = ne.address; changed = true; }
                     // Always sync rate from Nomina (needed for Production Report cost calc)
@@ -20802,7 +20823,7 @@ Motivo de cancelación (opcional):`);
 
             if (localIsEmpty) {
                 console.log('📥 Local vacío — descargando de Drive sin fusión...');
-                if (data.emps)             { this.emps = data.emps; localStorage.setItem('v35_emps', JSON.stringify(this.emps)); }
+                if (data.emps)             { this.emps = this._sinEmpsDuplicados(data.emps); localStorage.setItem('v35_emps', JSON.stringify(this.emps)); }
                 if (data.clis)             { this.clis = data.clis; localStorage.setItem('v35_clis', JSON.stringify(this.clis)); }
                 if (data.servs)            { this.servs = data.servs; localStorage.setItem('v35_servs', JSON.stringify(this.servs)); }
                 if (data.grupos)           { this.grupos = data.grupos; localStorage.setItem('v35_grupos', JSON.stringify(this.grupos)); }
@@ -20884,7 +20905,7 @@ Motivo de cancelación (opcional):`);
             const winner = localWins ? localSide : driveSide;
             const loser  = localWins ? driveSide : localSide;
 
-            this.emps              = this.mergeArraysById(winner.emps, loser.emps, ['id'], true);
+            this.emps              = this._sinEmpsDuplicados(this.mergeArraysById(winner.emps, loser.emps, ['id'], true));
             this.clis               = this.mergeArraysById(winner.clis, loser.clis, ['id'], true);
             this.servs               = this.mergeArraysById(winner.servs, loser.servs, ['id'], true);
             this.gastos              = this.mergeArraysById(winner.gastos, loser.gastos);
@@ -21180,7 +21201,9 @@ Motivo de cancelación (opcional):`);
             cb.style.cssText = 'width:15px;height:15px;cursor:pointer;';
             cb.onchange = () => this.calcNominaMaria();
             lbl.appendChild(cb);
-            lbl.appendChild(document.createTextNode(grp + ' (' + activeCount + ')'));
+            lbl.appendChild(document.createTextNode(grp));
+            const cnt = document.createElement('span'); cnt.className = 'nm-grupo-cnt'; cnt.dataset.grupo = grp;
+            cnt.textContent = ' (' + activeCount + ')'; lbl.appendChild(cnt);
             box.appendChild(lbl);
         });
 
@@ -21247,13 +21270,34 @@ Motivo de cancelación (opcional):`);
     // Empleados de TODOS los grupos marcados (sin repetir si alguien está en dos).
     nmGetGroupMemberIds() {
         const ids = [];
+        const monStr = document.getElementById('nmWeekStart')?.value;
         this.nmGetSelectedGroups().forEach(g => {
-            (this.grupos[g] || []).forEach(id => {
-                const s = String(id || '').trim();
-                if (s && !ids.includes(s)) ids.push(s);
-            });
+            this._nmMiembrosSemana(g, monStr).forEach(s => { if (!ids.includes(s)) ids.push(s); });
         });
         return ids;
+    }
+    // 2026-10-16: miembros de un grupo en la semana = quienes aparecen en la
+    // Rotación de ese grupo en cualquier día de la semana (solo empleados que
+    // existen). Si la Rotación no tiene a nadie, se usan los miembros fijos.
+    _nmMiembrosSemana(g, monStr) {
+        const existe = id => (this.emps || []).some(e => String(e.id) === String(id));
+        const ids = [];
+        const meter = id => { const s = String(id || '').trim(); if (s && existe(s) && !ids.includes(s)) ids.push(s); };
+        if (monStr) {
+            const mon = new Date(monStr + 'T12:00:00');
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(mon); d.setDate(d.getDate() + i);
+                this._rosterParaFecha(g, d.toLocaleDateString('en-CA')).forEach(meter);
+            }
+        }
+        if (!ids.length) (this.grupos[g] || []).forEach(meter);
+        return ids;
+    }
+    _nmActualizarConteos() {
+        const monStr = document.getElementById('nmWeekStart')?.value;
+        document.querySelectorAll('#nmGruposChecks .nm-grupo-cnt').forEach(sp => {
+            sp.textContent = ' (' + this._nmMiembrosSemana(sp.dataset.grupo, monStr).length + ')';
+        });
     }
 
     // Llave del cálculo: con UN grupo es su nombre (igual que antes, así lo ya
@@ -21356,7 +21400,8 @@ Motivo de cancelación (opcional):`);
                 const svs = delDia.filter(s => s.empId === g);
                 if (!svs.length) return;
                 const agregados = ((datos.agregados || {})[fecha + '|' + g] || []).map(String);
-                const roster = [...new Set([...this._rosterParaFecha(g, fecha).map(String), ...agregados])];
+                const existe = id => (this.emps || []).some(e => String(e.id) === String(id));
+                const roster = [...new Set([...this._rosterParaFecha(g, fecha).map(String).filter(existe), ...agregados])];
                 const fuera = (faltas[fecha + '|' + g] || []).map(String);
                 const presentes = roster.filter(id => !fuera.includes(id));
                 // % del tiempo que cada quien trabajó en este grupo este día (100 por defecto).
@@ -21612,6 +21657,7 @@ Motivo de cancelación (opcional):`);
         // Uno o varios grupos marcados. Con uno solo, todo funciona igual que antes.
         const selGroups = this.nmGetSelectedGroups();
         const esCombinado = selGroups.length > 1;
+        this._nmActualizarConteos();
         const groupIds = this.nmGetGroupMemberIds();
         console.log('🔢 grupos:', selGroups, '| groupIds:', groupIds.length, groupIds);
         const weekServs = this.servs.filter(s =>
@@ -21652,7 +21698,11 @@ Motivo de cancelación (opcional):`);
                 const soloHrsChecked = weekData && weekData.soloHrs && weekData.soloHrs[idx];
                 // ÷ Empleados: precargado con número del grupo, editable
                 const savedEmp = weekData && weekData.emps && weekData.emps[idx] !== undefined ? weekData.emps[idx] : null;
-                const defaultEmpCount = groupIds.length || 1;
+                // 2026-10-16: por defecto, cuántos estaban en la Rotación de ese grupo ESE día
+                const gDelSvc = selGroups.includes(s.empId) ? s.empId : null;
+                const enRotDia = gDelSvc ? this._rosterParaFecha(gDelSvc, s.date).filter(id => this.emps.some(e => String(e.id) === String(id))).length : 0;
+                const fijosValidos = gDelSvc ? (this.grupos[gDelSvc] || []).filter(id => this.emps.some(e => String(e.id) === String(id))).length : 0;
+                const defaultEmpCount = enRotDia || fijosValidos || groupIds.length || 1;
                 const empCount = savedEmp !== null ? savedEmp : defaultEmpCount;
                 const dayIdx = weekDates.indexOf(s.date);
                 const dayLabel = DAYS[dayIdx] + ' ' + s.date.slice(8);
