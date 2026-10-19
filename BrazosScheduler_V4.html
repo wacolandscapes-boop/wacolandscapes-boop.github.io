@@ -1889,7 +1889,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-16.8';
+const SCHED_BUILD = '2026-10-19.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -2588,7 +2588,7 @@ class Scheduler {
                     visible.forEach(s => {
                         const c = this.clis.find(cl => cl.id == s.cliId); if(!c) return;
                         const ev = document.createElement('div'); ev.className = 'month-event';
-                        const typeKeyM = c.type.toLowerCase().replace(/ /g,'');
+                        const typeKeyM = (s.recType || c.type).toLowerCase().replace(/ /g,'');
                         const bgColor = this.getColor(typeKeyM); // siempre hex real
                         const prioPrefixM = s.priority ? `${s.priority}. ` : '';
                         if (s.cancelled) {
@@ -2633,7 +2633,7 @@ class Scheduler {
                             hidden.forEach(s => {
                                 const c = this.clis.find(cl => cl.id == s.cliId); if(!c) return;
                                 const ev = document.createElement('div'); ev.className = 'month-event';
-                                const typeKeyH = c.type.toLowerCase().replace(/ /g,'');
+                                const typeKeyH = (s.recType || c.type).toLowerCase().replace(/ /g,'');
                                 const bgColorH = this.getColor(typeKeyH);
                                 ev.style.backgroundColor = bgColorH;
                                 const textModeH = this.getTextMode(typeKeyH);
@@ -3448,7 +3448,7 @@ class Scheduler {
             const prioPrefix = prioNum ? `<b>${prioNum}.</b> ` : '';
             const showPropId = (c.type === 'airbnb' || c.type === 'unico' || c.type === 'construccion');
             if (s.cancelled) {
-                const typeKeyCan = c.type.toLowerCase().replace(/ /g,'');
+                const typeKeyCan = (s.recType || c.type).toLowerCase().replace(/ /g,'');
                 const bgColorCan = s.customColor || this.getColor(typeKeyCan);
                 div.style.backgroundColor = bgColorCan;
                 div.style.color = '#fff';
@@ -3460,7 +3460,7 @@ class Scheduler {
                 const cancelProp  = showPropId && c.propId ? `<div class="ev-propid">${c.propId}</div>` : '';
                 div.innerHTML = `<div class="ev-prop">${cancelLabel}</div>${cancelProp}`;
             } else {
-                const typeKey4 = c.type.toLowerCase().replace(/ /g,'');
+                const typeKey4 = (s.recType || c.type).toLowerCase().replace(/ /g,'');
                 // Color individual del servicio sobreescribe el color de la serie
                 const bgColor4 = s.customColor || this.getColor(typeKey4);
                 div.style.backgroundColor = bgColor4;
@@ -12421,7 +12421,16 @@ Motivo de cancelación (opcional):`);
                         servicePaused, pausedSince
                     };
                 }
-                if (oldType !== type) {
+                if (oldType !== type && oldType) {
+                    // 2026-10-16: al cambiar la recurrencia, los servicios YA PASADOS
+                    // conservan el tipo (y color) que tenían; los de hoy en adelante
+                    // toman el tipo nuevo. Se marca solo a los que aún no traen recType.
+                    const hoyRT = new Date().toLocaleDateString('en-CA');
+                    const idsCli = new Set(this.clis.filter(c => c.name === name).map(c => String(c.id)));
+                    idsCli.add(String(this.clis[idx].id));
+                    this.servs.forEach(sv => {
+                        if (idsCli.has(String(sv.cliId)) && sv.date < hoyRT && !sv.recType) sv.recType = oldType;
+                    });
                 }
             }
             
