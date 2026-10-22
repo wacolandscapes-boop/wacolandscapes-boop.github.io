@@ -953,7 +953,7 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
                         <select id="mPropId" onchange="app.onPropChange();" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:6px; margin-top:3px;"></select>
                     </div>
                     <div id="airbnbNoteWrap" style="display:none; margin-top:6px; background:#fff8e1; border:1px solid #ffca28; border-radius:6px; padding:8px;">
-                        <label style="font-size:0.8rem; font-weight:700; color:#e65100;">🏠 Nota del Servicio</label>
+                        <label style="font-size:0.8rem; font-weight:700; color:#e65100;">📝 Nota del Servicio <span style="font-weight:400;color:#8d6e63;">(solo este servicio · se ve en Calendar)</span></label>
                         <textarea id="mAirbnbNote" name="airbnbNote" rows="3" placeholder="Escribe las instrucciones o notas para este servicio..." style="width:100%;margin-top:4px;padding:8px;border:1px solid #ffca28;border-radius:4px;font-size:0.85rem;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
                     </div>
                     <div id="clientType" style="display:none; margin-top:8px; padding:8px; background:#e8f5e9; border-left:3px solid #4caf50; border-radius:4px">
@@ -1907,7 +1907,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-19.4';
+const SCHED_BUILD = '2026-10-22.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -4146,7 +4146,7 @@ class Scheduler {
         // Mostrar nota AirBnb si el cliente es de tipo airbnb/unico
         if(airbnbWrap) {
             const selCli = this.clis.find(c => c.id == document.getElementById('mCli').value);
-            airbnbWrap.style.display = (selCli && (selCli.type === 'airbnb' || selCli.type === 'unico' || selCli.type === 'construccion')) ? 'block' : 'none';
+            airbnbWrap.style.display = selCli ? 'block' : 'none'; // 2026-10-22: nota por servicio para TODOS los clientes
         }
         // Solo sugerir grupo en servicios NUEVOS, no al editar
         if (!this.editing) this.suggestGroup();
@@ -4518,7 +4518,7 @@ class Scheduler {
             // Mostrar panel AirBnb si el cliente es tipo airbnb/unico
             const _sCli = this.clis.find(c => c.id == s.cliId);
             const _airbnbWrap = document.getElementById('airbnbNoteWrap');
-            if(_airbnbWrap) _airbnbWrap.style.display = (_sCli && (_sCli.type==='airbnb'||_sCli.type==='unico'||_sCli.type==='construccion')) ? 'block' : 'none';
+            if(_airbnbWrap) _airbnbWrap.style.display = 'block'; // 2026-10-22: nota por servicio para TODOS los clientes
             document.getElementById('btnDel').style.display = 'inline-block';
 
         } else {
