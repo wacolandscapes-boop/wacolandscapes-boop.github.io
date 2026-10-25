@@ -1907,7 +1907,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-22.1';
+const SCHED_BUILD = '2026-10-25.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -2136,12 +2136,16 @@ class Scheduler {
         const today = new Date();
         today.setHours(0,0,0,0);
         const todayStr = today.toLocaleDateString('en-CA');
+        // 2026-10-25: la semana se toma de la que se está VIENDO en el calendario
+        // (this.curDate), no siempre de hoy. "Ya pasó" (tachado) sigue siendo vs. hoy real.
+        const base = new Date(this.curDate || today);
+        base.setHours(0,0,0,0);
 
         // Inicio de semana (lunes)
-        const dow = today.getDay(); // 0=Dom
+        const dow = base.getDay(); // 0=Dom
         const diffToMon = (dow === 0) ? -6 : 1 - dow;
-        const weekStart = new Date(today);
-        weekStart.setDate(today.getDate() + diffToMon);
+        const weekStart = new Date(base);
+        weekStart.setDate(base.getDate() + diffToMon);
 
         // Fin: martes de la semana siguiente
         const weekEnd = new Date(weekStart);
@@ -2162,7 +2166,7 @@ class Scheduler {
                     clients.push({ cli, serv: s, past: s.date < todayStr });
                 }
             });
-        return { clients, todayStr };
+        return { clients, todayStr, weekStartStr, weekEndStr };
     }
 
     updateRemindersBadge() {
@@ -2181,7 +2185,7 @@ class Scheduler {
     showRemindersFromBtn() {
         const { clients, todayStr } = this.getUpcomingMonthly();
         if (clients.length === 0) {
-            alert('✅ No hay servicios mensuales esta semana.');
+            alert('✅ No hay servicios mensuales en la semana que estás viendo.');
             return;
         }
         this.showReminders(clients, todayStr);
@@ -2209,7 +2213,10 @@ class Scheduler {
             </tr>`;
         }).join('');
         const pending = clients.filter(x => !x.past).length;
-        document.getElementById('remindersDate').textContent = 'Semana actual + próximo Lun/Mar';
+        const _rg = this.getUpcomingMonthly();
+        const _f = d => new Date(d + 'T12:00:00').toLocaleDateString('es-US', { month:'short', day:'numeric' });
+        const _finSem = new Date(_rg.weekStartStr + 'T12:00:00'); _finSem.setDate(_finSem.getDate() + 6);
+        document.getElementById('remindersDate').textContent = 'Semana del ' + _f(_rg.weekStartStr) + ' al ' + _f(_finSem.toLocaleDateString('en-CA')) + ' + Lun/Mar siguiente';
         document.getElementById('remindersBody').innerHTML = rows;
         document.getElementById('remindersCount').textContent = pending;
         document.getElementById('remindersModal').style.display = 'block';
