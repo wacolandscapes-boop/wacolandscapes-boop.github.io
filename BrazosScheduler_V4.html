@@ -1907,7 +1907,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-25.1';
+const SCHED_BUILD = '2026-10-25.2';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -2204,12 +2204,12 @@ class Scheduler {
             const strike = past ? 'text-decoration:line-through; opacity:0.45;' : '';
             return `<tr style="${strike}">
                 <td style="padding:8px 12px; border-bottom:1px solid #eee; font-weight:600;">${cli.name}</td>
-                <td style="padding:8px 12px; border-bottom:1px solid #eee; color:#555;">${cli.tel || cli.phone || '—'}</td>
+                <td style="padding:8px 12px; border-bottom:1px solid #eee; color:#555; white-space:nowrap;">${cli.tel || cli.phone || '—'}</td>
                 <td style="padding:8px 12px; border-bottom:1px solid #eee; color:#555;">${addr || '—'}</td>
-                <td style="padding:8px 12px; border-bottom:1px solid #eee; text-align:center;">
-                    <span style="background:var(--primary); color:white; padding:2px 8px; border-radius:12px; font-size:0.75rem;">${grupo}</span>
+                <td style="padding:8px 12px; border-bottom:1px solid #eee; text-align:center; white-space:nowrap;">
+                    <span style="background:var(--primary); color:white; padding:2px 8px; border-radius:12px; font-size:0.75rem; white-space:nowrap;">${grupo}</span>
                 </td>
-                <td style="padding:8px 12px; border-bottom:1px solid #eee; color:#888; font-size:0.82rem;">${dateLabel}</td>
+                <td style="padding:8px 12px; border-bottom:1px solid #eee; color:#888; font-size:0.82rem; white-space:nowrap;">${dateLabel}</td>
             </tr>`;
         }).join('');
         const pending = clients.filter(x => !x.past).length;
@@ -22440,7 +22440,7 @@ document.addEventListener('click', function(e) {
 <!-- Modal WhatsApp -->
 <!-- 🔔 MODAL RECORDATORIOS -->
 <div id="remindersModal" class="modal" style="z-index:1100;">
-    <div class="modal-content" style="max-width:700px;">
+    <div class="modal-content" style="max-width:1000px;width:95%;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
             <div>
                 <h2 style="margin:0; color:var(--primary);">🔔 Recordatorios de Servicios</h2>
