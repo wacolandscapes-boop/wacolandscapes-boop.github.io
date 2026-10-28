@@ -779,6 +779,7 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
                             <span id="pendingBadge" style="display: none; position: absolute; top: 50%; transform: translateY(-50%); right: 10px; background: #e74c3c; color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; font-weight: bold; line-height: 18px; text-align: center;"></span>
                         </button>
                         <button onclick="app.openGeneratedInvoices(); closeAllDropdowns();">📑 Enviadas</button>
+                        <button onclick="app.openMensajesClientes(); closeAllDropdowns();">✉️ Mensaje a clientes</button>
                         <button onclick="app.openServiceLog(); closeAllDropdowns();">📋 Log</button>
                         <button onclick="app.openRevisarDuplicados(); closeAllDropdowns();">🔍 Revisar Duplicados</button>
                         <button onclick="app.openRevisarFacturasDuplicadas(); closeAllDropdowns();">🧾 Facturas Duplicadas</button>
@@ -1907,7 +1908,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-25.2';
+const SCHED_BUILD = '2026-10-28.2';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -3412,6 +3413,178 @@ class Scheduler {
             if (!shopOut && !shopBack) return null;
             return { shopOut, shopBack };
         } catch(e) { return null; }
+    }
+
+    // ══ ✉️ MENSAJE A CLIENTES (2026-10-28) ══════════════════════════════
+    // Avisos por email a varios clientes a la vez (ej. días festivos). Cada cliente
+    // recibe SU propio correo (nadie ve los demás). {nombre} y {fechas} se reemplazan
+    // por cliente. Se envía con EmailJS usando una plantilla GENÉRICA aparte de la de
+    // facturas (Subject={{subject}}, Content={{message}}, To={{to_email}}).
+    _msgTplId() { try { return localStorage.getItem('brazos_msg_template') || 'template_mensajes'; } catch (e) { return 'template_mensajes'; } }
+    _msgClientes() {
+        // Un renglón por cliente (por nombre+email; propiedades del mismo cliente se juntan)
+        const map = new Map();
+        (this.clis || []).forEach(c => {
+            if (!c || !c.name) return;
+            const k = c.name.trim().toLowerCase() + '|' + String(c.email || '').trim().toLowerCase();
+            if (!map.has(k)) map.set(k, { key: k, name: c.name.trim(), email: String(c.email || '').trim(), ids: [], pausado: true });
+            const r = map.get(k); r.ids.push(String(c.id));
+            if (!this._cliPausado(c, new Date().toLocaleDateString('en-CA'))) r.pausado = false;
+        });
+        return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    _msgFechasDe(r, desde, hasta) {
+        if (!desde || !hasta) return [];
+        const ids = new Set(r.ids);
+        return [...new Set((this.servs || []).filter(s => !s.cancelled && s.date >= desde && s.date <= hasta && ids.has(String(s.cliId))).map(s => s.date))].sort();
+    }
+    _msgFmtFechas(arr) {
+        const t = arr.map(d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }));
+        return t.length <= 1 ? (t[0] || '') : t.slice(0, -1).join('; ') + ' and ' + t[t.length - 1];
+    }
+    openMensajesClientes() {
+        document.getElementById('msgCliModal')?.remove();
+        const m = document.createElement('div'); m.id = 'msgCliModal';
+        m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10050;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:20px;box-sizing:border-box;';
+        const hoy = new Date().toLocaleDateString('en-CA');
+        m.innerHTML = `
+        <div style="background:#fff;border-radius:12px;max-width:1000px;width:100%;padding:20px;box-sizing:border-box;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <h2 style="margin:0;color:var(--primary);">✉️ Mensaje a clientes</h2>
+            <button onclick="document.getElementById('msgCliModal').remove()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:#999;">✕</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div>
+              <label style="font-weight:700;font-size:0.85rem;">Asunto</label>
+              <input id="msgAsunto" type="text" value="Holiday Schedule — Brazos Cleaning Services" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;margin:4px 0 10px;">
+              <label style="font-weight:700;font-size:0.85rem;">Mensaje</label>
+              <textarea id="msgTexto" rows="12" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;margin-top:4px;font-family:inherit;font-size:0.9rem;">Hi {nombre},
+
+We wanted to let you know that our office will be closed for the holidays. Your scheduled cleaning on {fechas} will not take place.
+
+We will contact you to reschedule if needed. Thank you for your understanding, and happy holidays!
+
+Brazos Cleaning Services</textarea>
+              <div style="font-size:0.78rem;color:#777;margin-top:4px;"><b>{nombre}</b> = nombre del cliente · <b>{fechas}</b> = sus fechas de servicio dentro del rango elegido.</div>
+              <button onclick="app._msgVistaPrevia()" style="margin-top:8px;padding:6px 12px;border:1px solid var(--primary);background:#fff;color:var(--primary);border-radius:6px;cursor:pointer;font-weight:600;">👁️ Vista previa</button>
+              <pre id="msgPreview" style="display:none;white-space:pre-wrap;background:#f8f9fa;border:1px dashed #bbb;border-radius:6px;padding:10px;font-family:inherit;font-size:0.85rem;margin-top:8px;"></pre>
+            </div>
+            <div>
+              <div style="background:#f1f6fd;border-radius:8px;padding:10px;margin-bottom:8px;">
+                <div style="font-weight:700;font-size:0.85rem;margin-bottom:6px;">Clientes con servicio entre:</div>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                  <input id="msgDesde" type="date" value="${hoy}" style="width:auto;padding:5px;border:1px solid #ccc;border-radius:6px;">
+                  <span>y</span>
+                  <input id="msgHasta" type="date" value="${hoy}" style="width:auto;padding:5px;border:1px solid #ccc;border-radius:6px;">
+                  <button onclick="app._msgSelPorFechas()" style="padding:6px 10px;background:var(--primary);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Seleccionar</button>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+                <input id="msgBuscar" type="text" placeholder="🔍 Buscar cliente" oninput="app._msgRenderLista()" style="flex:1;width:auto;min-width:140px;padding:6px;border:1px solid #ccc;border-radius:6px;">
+                <button onclick="app._msgMarcar(true)" style="padding:5px 8px;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer;">Todos</button>
+                <button onclick="app._msgMarcar(false)" style="padding:5px 8px;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer;">Ninguno</button>
+                <label style="font-size:0.8rem;color:#555;display:flex;align-items:center;gap:4px;margin:0;white-space:nowrap;"><input type="checkbox" id="msgVerPausados" style="width:14px;height:14px;margin:0;" onchange="app._msgRenderLista()"> ver suspendidos</label>
+              </div>
+              <div id="msgLista" style="max-height:340px;overflow:auto;border:1px solid #eee;border-radius:6px;"></div>
+              <div id="msgResumen" style="font-size:0.85rem;color:#555;margin-top:6px;"></div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:10px;flex-wrap:wrap;">
+            <div style="font-size:0.75rem;color:#999;">Plantilla EmailJS: <input id="msgTpl" value="${this._msgTplId()}" onchange="try{localStorage.setItem('brazos_msg_template',this.value.trim())}catch(e){}" style="width:150px;padding:3px;border:1px solid #ddd;border-radius:4px;font-size:0.75rem;"></div>
+            <div style="display:flex;gap:8px;">
+              <button onclick="app._msgCopiarCorreos()" style="padding:9px 14px;background:#f39c12;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700;">📋 Copiar correos (CCO)</button>
+              <button id="msgBtnEnviar" onclick="app._msgEnviar()" style="padding:9px 18px;background:#27ae60;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700;">✉️ Enviar</button>
+            </div>
+          </div>
+        </div>`;
+        document.body.appendChild(m);
+        this._msgSel = new Set();
+        this._msgRenderLista();
+    }
+    _msgRenderLista() {
+        const box = document.getElementById('msgLista'); if (!box) return;
+        const q = (document.getElementById('msgBuscar')?.value || '').trim().toLowerCase();
+        const verP = document.getElementById('msgVerPausados')?.checked;
+        const desde = document.getElementById('msgDesde')?.value, hasta = document.getElementById('msgHasta')?.value;
+        const filas = this._msgClientes().filter(r => (verP || !r.pausado) && (!q || r.name.toLowerCase().includes(q) || r.email.toLowerCase().includes(q)));
+        const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        box.innerHTML = filas.map(r => {
+            const f = this._msgFechasDe(r, desde, hasta);
+            const sinMail = !r.email;
+            return `<label style="display:flex;gap:10px;align-items:center;justify-content:flex-start;text-align:left;margin:0;padding:6px 8px;border-bottom:1px solid #f2f2f2;font-weight:normal;${sinMail ? 'opacity:.5;' : 'cursor:pointer;'}">
+                <input type="checkbox" style="width:16px;height:16px;flex:0 0 auto;margin:0;" ${sinMail ? 'disabled' : ''} ${this._msgSel.has(r.key) ? 'checked' : ''} onchange="app._msgToggle('${esc(r.key)}', this.checked)">
+                <span style="flex:1;min-width:0;"><b>${esc(r.name)}</b>${r.pausado ? ' <span style="color:#6b21a8;font-size:0.7rem;">⏸️</span>' : ''}<br><span style="font-size:0.75rem;color:#888;">${sinMail ? '⚠️ sin email' : esc(r.email)}</span></span>
+                <span style="font-size:0.72rem;color:#1565c0;text-align:right;white-space:nowrap;">${f.map(d => new Date(d + 'T12:00:00').toLocaleDateString('es-US', { month: 'short', day: 'numeric' })).join(' · ')}</span>
+            </label>`;
+        }).join('') || '<div style="padding:12px;color:#999;">Sin clientes.</div>';
+        this._msgResumen();
+    }
+    _msgToggle(key, on) { if (on) this._msgSel.add(key); else this._msgSel.delete(key); this._msgResumen(); }
+    _msgMarcar(on) {
+        const q = (document.getElementById('msgBuscar')?.value || '').trim().toLowerCase();
+        const verP = document.getElementById('msgVerPausados')?.checked;
+        this._msgClientes().filter(r => r.email && (verP || !r.pausado) && (!q || r.name.toLowerCase().includes(q) || r.email.toLowerCase().includes(q)))
+            .forEach(r => on ? this._msgSel.add(r.key) : this._msgSel.delete(r.key));
+        this._msgRenderLista();
+    }
+    _msgSelPorFechas() {
+        const desde = document.getElementById('msgDesde').value, hasta = document.getElementById('msgHasta').value;
+        if (!desde || !hasta || desde > hasta) { alert('Revisa las fechas (Desde debe ser antes o igual que Hasta).'); return; }
+        this._msgSel = new Set();
+        let sinMail = [];
+        this._msgClientes().forEach(r => { if (this._msgFechasDe(r, desde, hasta).length) { if (r.email) this._msgSel.add(r.key); else sinMail.push(r.name); } });
+        this._msgRenderLista();
+        if (sinMail.length) alert('⚠️ Estos clientes tienen servicio en esas fechas pero NO tienen email (avísales por teléfono):\n\n• ' + sinMail.join('\n• '));
+    }
+    _msgResumen() {
+        const el = document.getElementById('msgResumen'); if (!el) return;
+        el.innerHTML = `<b>${this._msgSel.size}</b> cliente(s) seleccionado(s).`;
+        const b = document.getElementById('msgBtnEnviar'); if (b) b.textContent = `✉️ Enviar a ${this._msgSel.size}`;
+    }
+    _msgArmar(r) {
+        const desde = document.getElementById('msgDesde').value, hasta = document.getElementById('msgHasta').value;
+        const fechas = this._msgFmtFechas(this._msgFechasDe(r, desde, hasta)) || 'your scheduled date';
+        const txt = document.getElementById('msgTexto').value.replace(/\{nombre\}/gi, r.name).replace(/\{fechas\}/gi, fechas);
+        const asunto = document.getElementById('msgAsunto').value.replace(/\{nombre\}/gi, r.name).replace(/\{fechas\}/gi, fechas);
+        return { txt, asunto };
+    }
+    _msgSeleccionados() { return this._msgClientes().filter(r => this._msgSel.has(r.key) && r.email); }
+    _msgVistaPrevia() {
+        const sel = this._msgSeleccionados();
+        const r = sel[0] || { name: 'Cliente', email: '', ids: [] };
+        const { txt, asunto } = this._msgArmar(r);
+        const pre = document.getElementById('msgPreview');
+        pre.style.display = 'block';
+        pre.textContent = `Para: ${r.email || '(ninguno seleccionado)'}\nAsunto: ${asunto}\n\n${txt}`;
+    }
+    _msgCopiarCorreos() {
+        const sel = this._msgSeleccionados();
+        if (!sel.length) { alert('Selecciona al menos un cliente con email.'); return; }
+        const emails = [...new Set(sel.flatMap(r => r.email.split(',').map(e => e.trim()).filter(Boolean)))].join(', ');
+        navigator.clipboard.writeText(emails).then(() => alert(`✅ Copiados ${sel.length} correo(s). Pégalos en "CCO" de tu correo para que nadie vea los demás.`)).catch(() => prompt('Copia esta lista:', emails));
+    }
+    async _msgEnviar() {
+        const sel = this._msgSeleccionados();
+        if (!sel.length) { alert('Selecciona al menos un cliente con email.'); return; }
+        if (!document.getElementById('msgTexto').value.trim()) { alert('Escribe el mensaje.'); return; }
+        const tpl = (document.getElementById('msgTpl').value || '').trim() || 'template_mensajes';
+        if (!confirm(`Se enviará un correo a ${sel.length} cliente(s), uno por uno.\n\n¿Enviar ahora?`)) return;
+        const btn = document.getElementById('msgBtnEnviar'); btn.disabled = true;
+        const ok = [], fail = [];
+        for (let i = 0; i < sel.length; i++) {
+            const r = sel[i]; btn.textContent = `Enviando ${i + 1}/${sel.length}…`;
+            const { txt, asunto } = this._msgArmar(r);
+            for (const em of r.email.split(',').map(e => e.trim()).filter(Boolean)) {
+                try {
+                    // La plantilla usa {{{message}}} (HTML): se escapa el texto y los saltos de línea pasan a <br>
+                    const html = txt.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+                    await emailjs.send('service_mamjtia', tpl, { to_email: em, client_name: r.name, subject: asunto, message: html, message_text: txt });
+                    ok.push(r.name + ' <' + em + '>');
+                } catch (e) { fail.push(r.name + ' <' + em + '>: ' + (e && (e.text || e.message) || e)); }
+            }
+        }
+        btn.disabled = false; this._msgResumen();
+        alert(`✅ Enviados: ${ok.length}` + (fail.length ? `\n❌ Fallaron: ${fail.length}\n\n${fail.join('\n')}\n\nSi fallan todos, revisa que exista la plantilla "${tpl}" en EmailJS.` : ''));
     }
 
     // ¿Este cliente está suspendido en esa fecha? (⏸️ Servicio suspendido / pausado)
