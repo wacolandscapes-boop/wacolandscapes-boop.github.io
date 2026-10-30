@@ -22611,6 +22611,60 @@ function schedCerrarSesion() {
     try { localStorage.removeItem('brazos_sched_jwt'); localStorage.removeItem('brazos_sched_sesion'); } catch (e) {}
     location.reload();
 }
+// ═══ 2026-10-30: PAUSA POR INACTIVIDAD (10 min) ═════════════════════════
+// Si este equipo tiene el candado y nadie usa mouse/teclado/pantalla por 10 min:
+// guarda lo pendiente, SUELTA el candado (otro equipo puede editar de inmediato)
+// y muestra "En pausa". Al tocar "Continuar" revisa el candado: baja lo último y
+// vuelve a editar, o queda en solo lectura si otro equipo lo tomó mientras.
+const SCHED_PAUSA_MIN = 10;
+let _schedUltimaActividad = Date.now(), _schedPausado = false;
+['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach(ev =>
+    window.addEventListener(ev, () => { _schedUltimaActividad = Date.now(); }, { passive: true, capture: true }));
+async function _schedSoltarCandado() {
+    try {
+        const { fileId } = await app._lockLeer();
+        if (!fileId) return;
+        const form = new FormData();
+        form.append('metadata', new Blob([JSON.stringify({ name: app._lockNombre() })], { type: 'application/json' }));
+        form.append('file', new Blob([JSON.stringify({ owner: '', heartbeat: '1970-01-01T00:00:00.000Z', label: 'libre (pausa)' })], { type: 'application/json' }));
+        await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`,
+            { method: 'PATCH', headers: { Authorization: `Bearer ${app.driveToken}` }, body: form });
+    } catch (e) { console.warn('soltar candado', e); }
+}
+async function schedPausar() {
+    if (_schedPausado) return;
+    _schedPausado = true;
+    try { await app.driveSyncNow(); } catch (e) { console.warn('guardar antes de pausa', e); }
+    if (app._latidoInt) { clearInterval(app._latidoInt); app._latidoInt = null; }
+    app._lockReadOnly = true;              // mientras está en pausa no sube nada
+    await _schedSoltarCandado();
+    let ov = document.getElementById('schedPausa');
+    if (!ov) {
+        ov = document.createElement('div'); ov.id = 'schedPausa';
+        ov.style.cssText = 'position:fixed;inset:0;z-index:150000;background:rgba(20,30,45,0.88);display:flex;align-items:center;justify-content:center;padding:20px;';
+        ov.innerHTML = '<div style="background:#fff;border-radius:14px;padding:26px;max-width:380px;width:100%;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.4);">' +
+            '<div style="font-size:2.6rem;">⏸️</div><h2 style="margin:6px 0 8px;color:#2c3e50;">En pausa por inactividad</h2>' +
+            '<p style="color:#666;font-size:0.92rem;margin:0 0 16px;">Se guardó todo y se liberó el Scheduler para que otro equipo pueda editar.</p>' +
+            '<button id="schedPausaBtn" style="width:100%;padding:12px;background:#27ae60;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer;">▶️ Continuar</button></div>';
+        document.body.appendChild(ov);
+        document.getElementById('schedPausaBtn').onclick = schedReanudar;
+    }
+}
+async function schedReanudar() {
+    const btn = document.getElementById('schedPausaBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Bajando lo último…'; }
+    _schedUltimaActividad = Date.now();
+    try { await app._candadoCheck(); app.render(); } catch (e) { console.warn('reanudar', e); }
+    _schedPausado = false;
+    document.getElementById('schedPausa')?.remove();
+}
+setInterval(() => {
+    const s = schedSesion();
+    if (_schedPausado || !s || s.rol === 'lectura') return;
+    if (!app.driveConnected || app._lockReadOnly) return;      // solo si ESTE equipo tiene el candado
+    if (Date.now() - _schedUltimaActividad >= SCHED_PAUSA_MIN * 60000) schedPausar();
+}, 30000);
+
 // Arranque: con sesión → conectar solo; sin sesión → pedir PIN.
 setTimeout(() => {
     schedMostrarUsuario();
