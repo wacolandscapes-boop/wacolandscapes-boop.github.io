@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-31.10';
+const SCHED_BUILD = '2026-10-31.91';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -21015,7 +21015,11 @@ Motivo de cancelación (opcional):`);
     // es vieja → solo lectura + aviso rojo. Devuelve true si se bloqueó.
     _revisarVersionDrive(d) {
         const suya = (d && d.appBuild) || '';
-        if (!suya || suya <= SCHED_BUILD) return false;
+        // 2026-10-31: comparar por NÚMEROS, no como texto. Como texto, "2026-10-31.10" quedaba
+        // ANTES que "2026-10-31.9" y una versión NUEVA se bloqueaba a sí misma como "vieja".
+        const _num = v => String(v).split(/[^0-9]+/).filter(Boolean).map(Number);
+        const _cmp = (a, b) => { const x = _num(a), y = _num(b); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; } return 0; };
+        if (!suya || _cmp(suya, SCHED_BUILD) <= 0) return false;
         if (!this._versionVieja) {
             this._versionVieja = true;
             console.warn('⛔ Versión vieja del Scheduler (' + SCHED_BUILD + ') — Drive tiene ' + suya + '. No se sube nada.');
