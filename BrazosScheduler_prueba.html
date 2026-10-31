@@ -817,6 +817,7 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
                         </button>
                         <button onclick="app.openGeneratedInvoices(); closeAllDropdowns();">📑 Enviadas</button>
                         <button onclick="app.openMensajesClientes(); closeAllDropdowns();">✉️ Mensaje a clientes</button>
+                        <button onclick="app.openFichasFacturacion(); closeAllDropdowns();">📇 Fichas de facturación</button>
                         <button onclick="app.openServiceLog(); closeAllDropdowns();">📋 Log</button>
                         <button onclick="app.openRevisarDuplicados(); closeAllDropdowns();">🔍 Revisar Duplicados</button>
                         <button onclick="app.openRevisarFacturasDuplicadas(); closeAllDropdowns();">🧾 Facturas Duplicadas</button>
@@ -1946,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-31.4';
+const SCHED_BUILD = '2026-10-31.9';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -3480,6 +3481,144 @@ class Scheduler {
         const t = arr.map(d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }));
         return t.length <= 1 ? (t[0] || '') : t.slice(0, -1).join('; ') + ' and ' + t[t.length - 1];
     }
+    // ── 📇 Fichas de facturación (2026-10-31, Ranu) ─────────────────────────────────
+    // Revisar y editar en UNA tabla los datos de facturación de todas las fichas, sin abrir
+    // y cerrar cada una. Edita los MISMOS campos de la ficha (no hay datos nuevos). Las
+    // fichas con el mismo nombre que no coinciden entre sí se marcan con ⚠️.
+    openFichasFacturacion() {
+        document.getElementById('fichasFactModal')?.remove();
+        this._fichasCambios = {};
+        const m = document.createElement('div'); m.id = 'fichasFactModal';
+        m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10050;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:20px;box-sizing:border-box;';
+        m.innerHTML = `
+        <div style="background:#fff;border-radius:12px;max-width:1150px;width:100%;padding:18px;box-sizing:border-box;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap;">
+            <h2 style="margin:0;color:var(--primary);">📇 Fichas de facturación</h2>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <input id="fichasBuscar" type="text" placeholder="🔍 Buscar cliente..." oninput="app._fichasRender()" style="padding:7px 10px;border:1px solid #ccc;border-radius:6px;min-width:200px;">
+              <label style="font-size:0.85rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input id="fichasSoloDif" type="checkbox" onchange="app._fichasRender()" style="width:auto;"> Solo ⚠️ diferencias</label>
+              <button onclick="app._fichasCerrar()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:#999;">✕</button>
+            </div>
+          </div>
+          <div style="font-size:0.78rem;color:#666;margin-bottom:8px;">Los cambios se marcan en amarillo y no se guardan hasta dar <b>💾 Guardar cambios</b>. ⚠️ = otra ficha con el mismo nombre tiene otra frecuencia, diseño o impuestos. El precio nuevo aplica a servicios que se creen desde hoy (los ya programados conservan el suyo; en Mensual Fijo la factura usa el precio de la ficha).</div>
+          <div style="overflow:auto;max-height:65vh;border:1px solid #e5e7eb;border-radius:8px;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+              <thead style="position:sticky;top:0;background:#f3f4f6;z-index:1;">
+                <tr>
+                  <th style="text-align:left;padding:7px;">Cliente / Propiedad</th>
+                  <th style="padding:7px;">Precio</th>
+                  <th style="padding:7px;">📆 Frecuencia de Facturación</th>
+                  <th style="padding:7px;">🎨 Diseño de Factura</th>
+                  <th style="padding:7px;">Impuestos</th>
+                  <th style="padding:7px;">Tasa %</th>
+                  <th style="padding:7px;" title="No facturar por Brazos">🚫 No facturar</th>
+                </tr>
+              </thead>
+              <tbody id="fichasBody"></tbody>
+            </table>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:10px;flex-wrap:wrap;">
+            <span id="fichasResumen" style="font-size:0.85rem;color:#555;"></span>
+            <button id="fichasGuardar" onclick="app._fichasGuardar()" disabled style="background:var(--success,#27ae60);color:#fff;border:none;border-radius:6px;padding:9px 18px;font-weight:700;cursor:pointer;opacity:.5;">💾 Guardar cambios</button>
+          </div>
+        </div>`;
+        document.body.appendChild(m);
+        this._fichasRender();
+    }
+    _fichasValor(c, campo) {
+        const ch = this._fichasCambios[String(c.id)] || {};
+        if (campo in ch) return ch[campo];
+        if (campo === 'billingPeriod') return c.billingPeriod || 'monthly';
+        if (campo === 'invoicingType') return c.invoicingType || 'monthly';
+        if (campo === 'cobraImpuestos') return c.cobraImpuestos !== false;
+        if (campo === 'taxRate') return (c.taxRate !== undefined && c.taxRate !== '' && c.taxRate !== null) ? c.taxRate : 8.25;
+        if (campo === 'excludeInvoicing') return !!c.excludeInvoicing;
+        if (campo === 'price') return c.price !== undefined ? c.price : '';
+        return c[campo];
+    }
+    _fichasDiferencias() {
+        const porNombre = {}, dif = new Set();
+        (this.clis || []).forEach(c => { (porNombre[c.name] = porNombre[c.name] || []).push(c); });
+        Object.values(porNombre).forEach(lista => {
+            if (lista.length < 2) return;
+            const firma = c => [this._fichasValor(c,'billingPeriod'), this._fichasValor(c,'invoicingType'), this._fichasValor(c,'cobraImpuestos'), parseFloat(this._fichasValor(c,'taxRate'))].join('|');
+            if (new Set(lista.map(firma)).size > 1) lista.forEach(c => dif.add(String(c.id)));
+        });
+        return dif;
+    }
+    _fichasRender() {
+        const body = document.getElementById('fichasBody'); if (!body) return;
+        const q = (document.getElementById('fichasBuscar')?.value || '').toLowerCase().trim();
+        const soloDif = document.getElementById('fichasSoloDif')?.checked;
+        const dif = this._fichasDiferencias();
+        const esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+        const lista = (this.clis || []).slice()
+            .filter(c => !q || (c.name || '').toLowerCase().includes(q) || (c.propId || '').toLowerCase().includes(q))
+            .filter(c => !soloDif || dif.has(String(c.id)))
+            .sort((a, b) => (a.name || '').localeCompare(b.name || '') || String(a.propId || '').localeCompare(String(b.propId || '')));
+        const freqOpts = [['weekly','Semanal'],['biweekly','Quincenal'],['monthly','Mensual'],['perservice','Por Servicio']];
+        const disOpts = [['monthly','📋 Mensual (suma de visitas)'],['fixed_monthly','📌 Mensual Fijo'],['perservice','🧾 Por Servicio']];
+        const sel = (id, campo, opts, val) => {
+            const o = opts.slice(); if (!o.some(x => x[0] === val)) o.push([val, val]);
+            return `<select data-id="${esc(id)}" data-campo="${campo}" onchange="app._fichasCambio(this)" style="padding:4px;border:1px solid #ccc;border-radius:4px;font-size:0.8rem;">` +
+                o.map(([v, t]) => `<option value="${esc(v)}" ${v === val ? 'selected' : ''}>${t}</option>`).join('') + '</select>';
+        };
+        const amarillo = (c, campo) => (this._fichasCambios[String(c.id)] && campo in this._fichasCambios[String(c.id)]) ? 'background:#fff3cd;' : '';
+        body.innerHTML = lista.map((c, i) => {
+            const id = String(c.id), d = dif.has(id);
+            const prop = (c.propId && c.propId !== c.name) ? `<div style="font-size:0.72rem;color:#888;">📍 ${esc(c.propId)}</div>` : '';
+            const td = 'padding:5px 7px;border-top:1px solid #eee;text-align:center;';
+            return `<tr style="${i % 2 ? 'background:#fafafa;' : ''}">
+              <td style="${td}text-align:left;">${d ? '<span title="Otra ficha con el mismo nombre no coincide">⚠️ </span>' : ''}<b>${esc(c.name)}</b>${prop}</td>
+              <td style="${td}${amarillo(c,'price')}"><input type="number" step="0.01" min="0" value="${esc(this._fichasValor(c,'price'))}" data-id="${esc(id)}" data-campo="price" onchange="app._fichasCambio(this)" style="width:80px;padding:4px;border:1px solid #ccc;border-radius:4px;"></td>
+              <td style="${td}${amarillo(c,'billingPeriod')}">${sel(id, 'billingPeriod', freqOpts, this._fichasValor(c,'billingPeriod'))}</td>
+              <td style="${td}${amarillo(c,'invoicingType')}">${sel(id, 'invoicingType', disOpts, this._fichasValor(c,'invoicingType'))}</td>
+              <td style="${td}${amarillo(c,'cobraImpuestos')}"><input type="checkbox" ${this._fichasValor(c,'cobraImpuestos') ? 'checked' : ''} data-id="${esc(id)}" data-campo="cobraImpuestos" onchange="app._fichasCambio(this)" style="width:16px;height:16px;"></td>
+              <td style="${td}${amarillo(c,'taxRate')}"><input type="number" step="0.01" min="0" max="20" value="${esc(this._fichasValor(c,'taxRate'))}" data-id="${esc(id)}" data-campo="taxRate" onchange="app._fichasCambio(this)" style="width:64px;padding:4px;border:1px solid #ccc;border-radius:4px;"></td>
+              <td style="${td}${amarillo(c,'excludeInvoicing')}"><input type="checkbox" ${this._fichasValor(c,'excludeInvoicing') ? 'checked' : ''} data-id="${esc(id)}" data-campo="excludeInvoicing" onchange="app._fichasCambio(this)" style="width:16px;height:16px;"></td>
+            </tr>`;
+        }).join('') || '<tr><td colspan="7" style="padding:20px;text-align:center;color:#999;">Sin resultados</td></tr>';
+        const n = Object.keys(this._fichasCambios).length;
+        const res = document.getElementById('fichasResumen');
+        if (res) res.textContent = `${lista.length} ficha(s) · ${dif.size} con ⚠️ diferencias · ${n} ficha(s) con cambios sin guardar`;
+        const btn = document.getElementById('fichasGuardar');
+        if (btn) { btn.disabled = n === 0; btn.style.opacity = n === 0 ? '.5' : '1'; btn.textContent = n ? `💾 Guardar cambios (${n})` : '💾 Guardar cambios'; }
+    }
+    _fichasCambio(el) {
+        const id = el.dataset.id, campo = el.dataset.campo;
+        const c = (this.clis || []).find(x => String(x.id) === String(id)); if (!c) return;
+        let v = el.type === 'checkbox' ? el.checked : el.value;
+        if (campo === 'price' || campo === 'taxRate') v = v === '' ? '' : (parseFloat(v) || 0);
+        const original = (() => { const ch = this._fichasCambios[id]; if (ch) { const t = ch; delete this._fichasCambios[id]; const o = this._fichasValor(c, campo); this._fichasCambios[id] = t; return o; } return this._fichasValor(c, campo); })();
+        this._fichasCambios[id] = this._fichasCambios[id] || {};
+        if (String(v) === String(original)) delete this._fichasCambios[id][campo];
+        else this._fichasCambios[id][campo] = v;
+        if (!Object.keys(this._fichasCambios[id]).length) delete this._fichasCambios[id];
+        this._fichasRender();
+    }
+    _fichasGuardar() {
+        const ids = Object.keys(this._fichasCambios || {});
+        if (!ids.length) return;
+        if (this._lockReadOnly) { alert('🔒 Este equipo está en solo lectura — los cambios no se pueden guardar ahora.'); return; }
+        if (!confirm(`¿Guardar los cambios de ${ids.length} ficha(s)?`)) return;
+        ids.forEach(id => {
+            const c = (this.clis || []).find(x => String(x.id) === String(id)); if (!c) return;
+            Object.assign(c, this._fichasCambios[id]);
+        });
+        this._fichasCambios = {};
+        this.save();
+        try { this.detectPendingInvoices(); } catch (e) {}
+        try { this.render(); } catch (e) {}
+        this._fichasRender();
+        alert(`✅ ${ids.length} ficha(s) actualizada(s).`);
+    }
+    _fichasCerrar() {
+        const n = Object.keys(this._fichasCambios || {}).length;
+        if (n && !confirm(`Tienes cambios sin guardar en ${n} ficha(s). ¿Cerrar sin guardar?`)) return;
+        this._fichasCambios = {};
+        document.getElementById('fichasFactModal')?.remove();
+    }
+
     openMensajesClientes() {
         document.getElementById('msgCliModal')?.remove();
         const m = document.createElement('div'); m.id = 'msgCliModal';
@@ -6124,7 +6263,14 @@ Brazos Cleaning Services</textarea>
 
         // Limpiar pendientes que ya tienen factura generada
         this.pendingInvoices = this.pendingInvoices.filter(p => {
-            if (hasOverlappingGeneratedInvoice(p)) return false;
+            // 2026-10-31: si la tarjeta sabe QUÉ servicios trae, se retira solo cuando TODOS
+            // ya están facturados (regla única). Las tarjetas viejas sin serviceIds siguen
+            // con el criterio anterior (traslape) — su regla las vuelve a armar con ids.
+            const _ids = (p.serviceIds || []).map(String);
+            if (_ids.length && !p.isGeneratedUnsent && !p.isDuplicateGhost) {
+                const _vivos = (this.servs || []).filter(sv => _ids.includes(String(sv.id)) && !sv.cancelled);
+                if (_vivos.length && _vivos.every(sv => this._svcFacturado(sv))) return false;
+            } else if (hasOverlappingGeneratedInvoice(p)) return false;
             const daysDiff = (today - new Date(p.createdAt)) / (1000 * 60 * 60 * 24);
             return daysDiff < 60;
         });
@@ -6282,7 +6428,7 @@ Brazos Cleaning Services</textarea>
                         String(s.cliId) === String(propCli.id) && !s.cancelled &&
                         s.date >= backlogStartStr && s.date <= todayStr
                     );
-                    const uninvoiced = propServs.filter(s => !alreadyInvoiced(s.date, propCli.id) && !this._servicioEnFacturaGenerada(s));
+                    const uninvoiced = propServs.filter(s => !this._svcFacturado(s)); // regla única (antes: + traslape de periodo)
                     if (uninvoiced.length === 0) return;
 
                     // Reemplazar la pendiente anterior de esta propiedad con la versión
@@ -6349,20 +6495,26 @@ Brazos Cleaning Services</textarea>
                 const weekStart = lastMonday.toLocaleDateString('en-CA');
                 const weekEnd = lastSunday.toLocaleDateString('en-CA');
                 const weekKey = `${clientName}-airbnb-${weekStart}`;
-                if (this.pendingInvoices.some(p => p.periodKey === weekKey)) return;
-                if ((this.generatedInvoices || []).some(g => g.clientName === clientName &&
-                    g.status !== 'cancelada' && g.startDate <= weekEnd && g.endDate >= weekStart)) return;
+                // 2026-10-31: regla única — la semana COMPLETA, solo servicios sin facturar.
                 const weekServs = this.servs.filter(s =>
                     clients.some(c => c.id == s.cliId) && !s.cancelled &&
-                    s.date >= weekStart && s.date <= weekEnd
+                    s.date >= weekStart && s.date <= weekEnd && !this._svcFacturado(s)
                 );
-                if (weekServs.length === 0) return;
-                if (weekServs.every(s => this._servicioEnFacturaGenerada(s))) return;
+                const _existeSem = this.pendingInvoices.find(p => p.periodKey === weekKey);
+                if (weekServs.length === 0) {
+                    if (_existeSem) this.pendingInvoices = this.pendingInvoices.filter(p => p !== _existeSem);
+                    return;
+                }
                 const total = weekServs.reduce((sum, s) => {
                     const c = this.clis.find(c => c.id == s.cliId);
                     return sum + parseFloat(c?.price || 0);
                 }, 0);
+                if (_existeSem) {
+                    Object.assign(_existeSem, { serviceIds: weekServs.map(s => s.id), serviceCount: weekServs.length, total });
+                    return;
+                }
                 this.pendingInvoices.push({
+                    serviceIds: weekServs.map(s => s.id),
                     id: Date.now() + Math.random(),
                     periodKey: weekKey,
                     column: 'airbnb',
@@ -6381,6 +6533,73 @@ Brazos Cleaning Services</textarea>
             // ── billingPeriod = "perservice" o "biweekly" → columna MENSUALES ──
             // Clientes frecuentes con un servicio (o pocos) por ciclo, se factura por
             // fecha exacta — semana pasada + semana actual.
+            // ── billingPeriod = "biweekly" (Facturar Quincenalmente) → columna MENSUALES ──
+            // 2026-10-31 (Ranu): antes se trataba igual que "Por Servicio" (una tarjeta por
+            // visita, solo de las últimas 2 semanas, y escondía cualquier servicio cuya fecha
+            // cayera dentro del rango de CUALQUIER factura del cliente). Ahora respeta la ficha:
+            // una tarjeta por QUINCENA (1–15 y 16–fin de mes) con TODOS los servicios de esa
+            // quincena que aún NO están en ninguna factura (etiqueta por servicio, la misma
+            // que usa Generar). Quincenas ya terminadas → atrasada; la quincena en curso
+            // aparece 2 días antes de que termine.
+            if (billingPeriod === 'biweekly') {
+                // Retirar tarjetas por-servicio que dejó la regla anterior para este cliente.
+                this.pendingInvoices = this.pendingInvoices.filter(p =>
+                    !(typeof p.periodKey === 'string' && p.periodKey.startsWith(`${clientName}-mensuales-`)));
+                const _q = [];
+                const _ini = (yy, mm, mitad) => mitad === 1
+                    ? [new Date(yy, mm, 1), new Date(yy, mm, 15)]
+                    : [new Date(yy, mm, 16), new Date(yy, mm + 1, 0)];
+                // quincena en curso + las 3 anteriores (lo más viejo lo cubre la red de seguridad)
+                let yy = currentYear, mm = currentMonth, mitad = currentDay <= 15 ? 1 : 2;
+                for (let k = 0; k < 4; k++) {
+                    _q.push({ yy, mm, mitad, actual: k === 0 });
+                    if (mitad === 2) mitad = 1; else { mitad = 2; mm--; if (mm < 0) { mm = 11; yy--; } }
+                }
+                _q.forEach(q => {
+                    const [dIni, dFin] = _ini(q.yy, q.mm, q.mitad);
+                    const qStart = dIni.toLocaleDateString('en-CA'), qEnd = dFin.toLocaleDateString('en-CA');
+                    const qKey = `${clientName}-quincena-${qStart}`;
+                    if (q.actual && currentDay < dFin.getDate() - 2) {
+                        this.pendingInvoices = this.pendingInvoices.filter(p => p.periodKey !== qKey);
+                        return;
+                    }
+                    const qServs = this.servs.filter(sv =>
+                        clients.some(c => String(c.id) === String(sv.cliId)) && !sv.cancelled &&
+                        sv.date >= qStart && sv.date <= qEnd && !this._svcFacturado(sv)
+                    ).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+                    if (qServs.length === 0) {
+                        this.pendingInvoices = this.pendingInvoices.filter(p => p.periodKey !== qKey);
+                        return;
+                    }
+                    let total = 0; const _fijas = new Set();
+                    qServs.forEach(sv => {
+                        const cp = this.clis.find(x => String(x.id) === String(sv.cliId)) || cli;
+                        if ((cp.invoicingType || '') === 'fixed_monthly') {
+                            if (!_fijas.has(String(cp.id))) { _fijas.add(String(cp.id)); total += parseFloat(cp.price) || 0; }
+                        } else {
+                            total += (sv.price !== undefined && sv.price !== null && sv.price !== '' && !isNaN(sv.price))
+                                ? parseFloat(sv.price) : (parseFloat(cp.price) || 0);
+                        }
+                    });
+                    const terminada = !q.actual;
+                    const datos = {
+                        column: 'mensuales', clientName, clientEmail: cli.email || '',
+                        clientIds: clients.map(c => c.id), serviceIds: qServs.map(sv => sv.id),
+                        serviceDates: qServs.map(sv => sv.date), type: cliType, billingPeriod,
+                        serviceType: cli.serviceType || '',
+                        startDate: qStart, endDate: qEnd, serviceCount: qServs.length, total,
+                        urgency: terminada ? 'overdue' : 'normal',
+                        reason: terminada
+                            ? `📅 Quincenal — quincena ${this.formatDateUS(qStart)}–${this.formatDateUS(qEnd)} terminada, enviar`
+                            : `📅 Quincenal — Revisar y enviar al cerrar la quincena (${this.formatDateUS(qEnd)})`
+                    };
+                    const existente = this.pendingInvoices.find(p => p.periodKey === qKey);
+                    if (existente) { Object.assign(existente, datos); return; }
+                    this.pendingInvoices.push({ id: Date.now() + Math.random(), periodKey: qKey, ...datos, createdAt: today.toISOString() });
+                });
+                return;
+            }
+
             if (billingPeriod === 'perservice' || billingPeriod === 'biweekly') {
                 const thisMonthStart = new Date(currentYear, currentMonth, 1).toLocaleDateString('en-CA');
                 const thisMonthEnd = new Date(currentYear, currentMonth + 1, 0).toLocaleDateString('en-CA');
@@ -6403,8 +6622,7 @@ Brazos Cleaning Services</textarea>
 
                 weekServs.forEach(svc => {
                     const svcKey = `${clientName}-mensuales-${svc.date}-${svc.id}`;
-                    if (this._servicioEnFacturaGenerada(svc) || (this.generatedInvoices || []).some(g =>
-                        g.clientName === clientName && g.status !== 'cancelada' && g.startDate <= svc.date && g.endDate >= svc.date)) return;
+                    if (this._svcFacturado(svc)) return; // regla única (antes: + traslape de periodo)
                     const total = parseFloat(cli.price || 0);
                     const isToday = svc.date === todayStr;
                     const isPast = svc.date < todayStr;
@@ -6453,18 +6671,28 @@ Brazos Cleaning Services</textarea>
                 const periodEnd = new Date(yy, mm + 1, 0).toLocaleDateString('en-CA');
                 const periodKey = `${clientName}-${yy}-${String(mm+1).padStart(2,'0')}-recurrente`;
 
-                if (this.pendingInvoices.some(p => p.periodKey === periodKey)) return;
-                if (hasGeneratedInvoice(clientName, periodStart, periodEnd)) return;
-                if (esMesAnterior && (this.generatedInvoices || []).some(g =>
-                    g.clientName === clientName && g.status !== 'cancelada' &&
-                    g.startDate && g.endDate && g.startDate <= periodEnd && g.endDate >= periodStart)) return;
-
-                const monthServs = this.servs.filter(s =>
+                // 2026-10-31: regla única — el MES COMPLETO, solo servicios sin facturar. Antes,
+                // si el mes ya tenía CUALQUIER factura (aunque estuviera cortada a la mitad) no se
+                // armaba la tarjeta y lo que faltaba se quedaba sin cobrar (fin de septiembre).
+                const _existeMes = this.pendingInvoices.find(p => p.periodKey === periodKey);
+                let monthServs = this.servs.filter(s =>
                     clients.some(c => c.id == s.cliId) &&
                     !s.cancelled &&
                     s.date >= periodStart && s.date <= periodEnd
                 );
-                if (monthServs.length === 0) return;
+                // Propiedad de MONTO FIJO con algo de ese mes ya facturado → el mes ya se cobró.
+                const _fijaCobrada = new Set();
+                monthServs.forEach(s => {
+                    const cp = this.clis.find(x => String(x.id) === String(s.cliId)) || cli;
+                    const fija = (cp.invoicingType === 'fixed_monthly' || cp.billingPeriod === 'fixed_monthly');
+                    if (fija && this._svcFacturado(s)) _fijaCobrada.add(String(cp.id));
+                });
+                monthServs = monthServs.filter(s => !_fijaCobrada.has(String(s.cliId)) && !this._svcFacturado(s));
+                if (monthServs.length === 0) {
+                    if (_existeMes) this.pendingInvoices = this.pendingInvoices.filter(p => p !== _existeMes);
+                    return;
+                }
+                if (_existeMes) this.pendingInvoices = this.pendingInvoices.filter(p => p !== _existeMes);
                 // Si TODOS los servicios del mes YA están facturados, no re-crear el
                 // pendiente. Antes sólo se revisaba `hasGeneratedInvoice`, que exige que la
                 // factura ARRANQUE el día 1 del mes; una factura MANUAL toma su período de
@@ -6498,6 +6726,7 @@ Brazos Cleaning Services</textarea>
                     id: Date.now() + Math.random(),
                     periodKey,
                     column: 'finmes',
+                    serviceIds: monthServs.map(s => s.id),
                     clientName,
                     clientEmail: cli.email || '',
                     clientIds: clients.map(c => c.id),
@@ -6578,9 +6807,7 @@ Brazos Cleaning Services</textarea>
                 if (oldServs.length === 0) return;
 
                 const isHandled = (s) => {
-                    const inGenerated = this._servicioEnFacturaGenerada(s) || (this.generatedInvoices || []).some(g =>
-                        g.clientName === name && g.status !== 'cancelada' &&
-                        g.startDate <= s.date && g.endDate >= s.date);
+                    const inGenerated = this._svcFacturado(s); // regla única
                     if (inGenerated) return true;
                     return this.pendingInvoices.some(p =>
                         p.clientName === name &&
@@ -6678,9 +6905,7 @@ Brazos Cleaning Services</textarea>
                 if (oldServs.length === 0) return;
 
                 const isHandled = (s) => {
-                    const inGenerated = this._servicioEnFacturaGenerada(s) || (this.generatedInvoices || []).some(g =>
-                        g.clientName === propCli.name && g.status !== 'cancelada' &&
-                        g.startDate <= s.date && g.endDate >= s.date);
+                    const inGenerated = this._svcFacturado(s); // regla única
                     if (inGenerated) return true;
                     // 2026-10-15: en clientes mensuales, su PROPIA tarjeta parcial no cuenta como
                     // "ya atendido" (si no, nunca se actualizaba ni se podía retirar).
@@ -6849,7 +7074,7 @@ Brazos Cleaning Services</textarea>
             // Emily Pruitt 10/09 (📦 + 🏠) y Milo's 10/13 (📦 + 🏢).
             const _idsPorServicio = new Set();
             this.pendingInvoices.forEach(p => {
-                if (typeof p.periodKey === 'string' && p.periodKey.includes('-mensuales-'))
+                if (typeof p.periodKey === 'string' && (p.periodKey.includes('-mensuales-') || p.periodKey.includes('-quincena-')))
                     (p.serviceIds || []).forEach(id => _idsPorServicio.add(String(id)));
             });
             if (_idsPorServicio.size) {
@@ -7424,6 +7649,55 @@ Brazos Cleaning Services</textarea>
     // que se están re-agrupando (construcción). Empata por id de servicio en los items
     // (facturas nuevas, INCLUYE MANUALES), luego fecha+cliente (facturas viejas con items
     // sin id), luego rango (facturas muy viejas sin items).
+    // 2026-10-31 (Ranu): la pestaña GENERAR juntaba TODOS los servicios del rango, aunque
+    // ya estuvieran en otra factura (caso Shelby: al poner 1–31 oct se coló un servicio ya
+    // facturado y pagado). Usa la MISMA etiqueta que Pendientes (_servicioEnFacturaGenerada)
+    // y omite los ya facturados — excepto los de la factura que se está editando/regenerando.
+    _facturaQueCubre(svc) {
+        const _editNum = parseInt(document.getElementById('editingInvoiceNumber')?.value || '') || this._editingInvoiceNumber || null;
+        const _regenId = this._regeneratingInvoiceId || null;
+        return (this.generatedInvoices || []).find(g => {
+            if (_regenId && String(g.id) === String(_regenId)) return false;
+            if (_editNum && Number(g.invoiceNumber) === Number(_editNum)) return false;
+            return this._svcFacturado(svc, [g]);
+        }) || null;
+    }
+    _omitirYaFacturados(lista) {
+        const quedan = [], omitidos = [];
+        (lista || []).forEach(sv => {
+            const g = this._facturaQueCubre(sv);
+            if (g) omitidos.push({ date: sv.date, num: g.invoiceNumber, status: g.status });
+            else quedan.push(sv);
+        });
+        const aviso = omitidos.length
+            ? `ℹ️ Se omitieron ${omitidos.length} servicio(s) que YA están en otra factura:\n` +
+              omitidos.map(o => `   • ${this.formatDateUS ? this.formatDateUS(o.date) : o.date} → factura #${o.num} (${o.status})`).join('\n')
+            : '';
+        return { quedan, omitidos, aviso };
+    }
+
+    // ── REGLA ÚNICA de "ya facturado" (2026-10-31, Ranu) ─────────────────────────────
+    // Un servicio está facturado si su ETIQUETA está en una factura no cancelada: su id en
+    // las líneas (o, para facturas viejas, la regla de respaldo de _servicioEnFacturaGenerada).
+    // Respaldo extra: una línea con la MISMA fecha y el MISMO cliente/propiedad (por si la
+    // serie se regeneró después de facturar y el servicio cambió de id).
+    // Ya NO se usa "la fecha cae dentro del periodo de alguna factura": eso escondía
+    // servicios que NUNCA se cobraron (fin de septiembre, Shelby).
+    _svcFacturado(svc, facturas) {
+        const lista = facturas || this.generatedInvoices || [];
+        if (this._servicioEnFacturaGenerada.call({ generatedInvoices: lista }, svc)) return true;
+        const cli = (this.clis || []).find(c => String(c.id) === String(svc.cliId));
+        return lista.some(g => {
+            if (g.status === 'cancelada' || !g.items || !g.items.length) return false;
+            return g.items.some(it => {
+                if (!it || it.fecha !== svc.date) return false;
+                if (it.cliId !== undefined && it.cliId !== null && it.cliId !== '') return String(it.cliId) === String(svc.cliId);
+                if (g.clientIds && g.clientIds.length) return g.clientIds.some(id => String(id) === String(svc.cliId));
+                return !!(cli && g.clientName === cli.name);
+            });
+        });
+    }
+
     _servicioEnFacturaGenerada(svc) {
         return (this.generatedInvoices || []).some(g => {
             if (g.status === 'cancelada') return false;
@@ -14908,6 +15182,11 @@ Motivo de cancelación (opcional):`);
             const container = document.getElementById('taxFieldContainer');
             if (container) container.style.display = cobra ? 'block' : 'none';
         }
+        // 2026-10-31 (Ranu): el DESGLOSE lo decide la ficha ("Diseño o Estilo de Factura"),
+        // no la casilla tal como se quedó en la factura anterior. Mensual Fijo → solo el
+        // periodo; los demás diseños → lista de servicios.
+        const _chkDesglose = document.getElementById('invoiceShowDetails');
+        if (_chkDesglose) _chkDesglose.checked = ((cli.invoicingType || 'monthly') !== 'fixed_monthly');
     }
 
     toggleTaxField() {
@@ -15382,11 +15661,13 @@ Motivo de cancelación (opcional):`);
         // Mismos servicios que juntaría la factura automática: todas las propiedades que
         // comparten el nombre del cliente (Airbnb/Único/Construcción tienen varias).
         const idsDelCliente = this.clis.filter(c => c.name === client.name).map(c => String(c.id));
-        const servicios = (this.servs || [])
+        const _omE = this._omitirYaFacturados((this.servs || [])
             .filter(s => idsDelCliente.includes(String(s.cliId))
                       && s.date >= startDate && s.date <= endDate
-                      && !s.cancelled)
+                      && !s.cancelled));
+        const servicios = _omE.quedan
             .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+        if (_omE.aviso && servicios.length) alert(_omE.aviso);
 
         if (servicios.length === 0) {
             alert(`No hay servicios de ${client.name} entre ${startDate} y ${endDate}.\n\n` +
@@ -15472,7 +15753,10 @@ Motivo de cancelación (opcional):`);
             this.servs.filter(s => String(s.cliId) === String(c.id) && s.date >= startDate && s.date <= endDate && !s.cancelled)
                 .forEach(s => allServices.push({ ...s, propId: c.propId || c.name, price: parseFloat(c.price) || 0, _cliId: c.id }));
         });
-        if (allServices.length === 0) { alert('No hay servicios en ese período para pasar a Manual.'); return; }
+        const _omC = this._omitirYaFacturados(allServices);
+        allServices = _omC.quedan;
+        if (allServices.length === 0) { alert('No hay servicios en ese período para pasar a Manual.' + (_omC.aviso ? '\n\n' + _omC.aviso : '')); return; }
+        if (_omC.aviso) alert(_omC.aviso);
         allServices.sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
         // Cambiar a Manual, fijar cliente e impuesto, y limpiar filas viejas.
@@ -15577,8 +15861,10 @@ Motivo de cancelación (opcional):`);
             }));
         }
         
+        const _omP = this._omitirYaFacturados(allServices);
+        allServices = _omP.quedan;
         if (allServices.length === 0) {
-            alert('⚠️ No hay servicios para este cliente en el período seleccionado');
+            alert('⚠️ No hay servicios para este cliente en el período seleccionado' + (_omP.aviso ? '\n\n' + _omP.aviso : ''));
             return;
         }
         
@@ -15605,6 +15891,7 @@ Motivo de cancelación (opcional):`);
                                  String(prevEndD.getDate()).padStart(2, '0') + '/' + 
                                  prevEndD.getFullYear();
         preview += `Período: ${prevStartFormatted} - ${prevEndFormatted}\n\n`;
+        if (_omP.aviso) preview += _omP.aviso + '\n\n';
         
         // Obtener opción desglose
         const previewShowDetails = document.getElementById('invoiceShowDetails') ? document.getElementById('invoiceShowDetails').checked : true;
@@ -15830,10 +16117,13 @@ Motivo de cancelación (opcional):`);
             }));
         }
         
+        const _omG = this._omitirYaFacturados(allServices);
+        allServices = _omG.quedan;
         if (allServices.length === 0) {
-            alert('No hay servicios para este cliente en el rango seleccionado');
+            alert('No hay servicios para este cliente en el rango seleccionado' + (_omG.aviso ? '\n\n' + _omG.aviso : ''));
             return;
         }
+        if (_omG.aviso) alert(_omG.aviso + '\n\nLa factura se arma solo con los servicios que faltan por facturar.');
         
         allServices.sort((a, b) => new Date(a.date) - new Date(b.date));
         
@@ -16930,10 +17220,13 @@ Motivo de cancelación (opcional):`);
             }));
         }
         
+        const _omG = this._omitirYaFacturados(allServices);
+        allServices = _omG.quedan;
         if (allServices.length === 0) {
-            alert('No hay servicios para este cliente en el rango seleccionado');
+            alert('No hay servicios para este cliente en el rango seleccionado' + (_omG.aviso ? '\n\n' + _omG.aviso : ''));
             return;
         }
+        if (_omG.aviso) alert(_omG.aviso + '\n\nLa factura se arma solo con los servicios que faltan por facturar.');
 
         // ── Ajustar precio según invoicingType ──
         // fixed_monthly: el precio del cliente ES el total mensual — no multiplicar por visitas
