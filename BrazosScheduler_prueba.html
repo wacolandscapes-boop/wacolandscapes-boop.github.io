@@ -198,6 +198,7 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
             letter-spacing: 0.01em;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
+        .ev-addr { font-size: 0.62rem; font-weight: 500; opacity: 0.92; padding: 0 4px 2px 4px; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
         .ev-row { display: flex; align-items: baseline; gap: 4px; min-width: 0; overflow: hidden; }
         .ev-time-col { font-size: 0.62rem; font-weight: 700; white-space: nowrap; flex-shrink: 0; opacity: 0.9; min-width: 0; }
         .ev-name-col { font-size: 0.68rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
@@ -1945,7 +1946,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-31.3';
+const SCHED_BUILD = '2026-10-31.4';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -3666,6 +3667,25 @@ Brazos Cleaning Services</textarea>
             if (bTime) return 1;
             return 0;
         });
+        // 2026-10-31 (Ranu): si los servicios NO se hicieron en el orden programado, se
+        // acomodan según la hora de LLEGADA registrada en el Calendar. Los ya registrados van
+        // primero (por su hora); los que aún no tienen registro conservan el orden de arriba.
+        {
+            const _cin = {};
+            const _leer = (dayData) => Object.values(dayData || {}).forEach(ed => {
+                (ed && ed.services || []).forEach(r => { if (r && r.checkin && !_cin[String(r.id)]) _cin[String(r.id)] = r.checkin; });
+            });
+            try { _leer(this._prodReports && this._prodReports[dStr]); } catch(e) {}
+            try { _leer(JSON.parse(localStorage.getItem('brazos_horarios_' + dStr) || '{}')); } catch(e) {}
+            const _pos = new Map(daily.map((sv, k) => [sv, k]));
+            daily.sort((a, b) => {
+                const ca = _cin[String(a.id)] || '', cb = _cin[String(b.id)] || '';
+                if (ca && cb && ca !== cb) return ca.localeCompare(cb);
+                if (ca && !cb) return -1;
+                if (!ca && cb) return 1;
+                return _pos.get(a) - _pos.get(b);
+            });
+        }
 
         // ── Salida del Shop (se muestra ANTES del primer servicio del día) ──
         const shopTimes = this._getShopTimesForDayGroup(dStr, nombreGrupo);
@@ -3702,7 +3722,11 @@ Brazos Cleaning Services</textarea>
                 const textMode4 = this.getTextMode(typeKey4);
                 div.style.color = textMode4 === 'auto' ? getTextColor(bgColor4) : (textMode4 === 'white' ? '#fff' : '#000');
                 const propPart = showPropId && c.propId ? ` - ${c.propId}` : '';
-                const mainLine = `${prioPrefix}${c.name}${propPart}${[c.address, c.city].filter(Boolean).join(', ') ? ' - ' + [c.address, c.city].filter(Boolean).join(', ') : ''}`;
+                // 2026-10-31 (Ranu): tarjeta en renglones — Cliente / Dirección / Entrada y
+                // salida registradas / Nota (si aplica).
+                const mainLine = `${prioPrefix}${c.name}${propPart}`;
+                const _dir = [c.address, c.city].filter(Boolean).join(', ');
+                const addrLine = _dir ? `<div class="ev-addr">${_dir}</div>` : '';
                 const timeLine = (s.timeStart || s.timeEnd)
                     ? `<div class="ev-time">${this.fmt12(s.timeStart)}${s.timeEnd ? ' - ' + this.fmt12(s.timeEnd) : ''}${(() => { if(s.timeStart && s.timeEnd) { const [sh,sm]=s.timeStart.split(':').map(Number); const [eh,em]=s.timeEnd.split(':').map(Number); const d=(eh*60+em)-(sh*60+sm); if(d>0) return ` (${Math.floor(d/60)}h${d%60>0?' '+d%60+'m':''})`; } return ''; })()}</div>`
                     : '';
@@ -3750,7 +3774,9 @@ Brazos Cleaning Services</textarea>
                     const pv = this._servicePrice(c, s);
                     priceLine = `<div class="ev-price" style="font-size:0.72rem;font-weight:700;color:#1b5e20;background:rgba(255,255,255,0.88);border-radius:3px;padding:0 5px;margin-top:2px;display:inline-block;">$${pv.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>`;
                 }
-                div.innerHTML = `<div class="ev-prop">${mainLine}</div>${timeLine}${checkLine}${priceLine}`;
+                // Lo registrado en el Calendar manda; el horario programado solo se muestra
+                // si todavía no hay registro (casi no se usa).
+                div.innerHTML = `<div class="ev-prop" title="${String(c.name).replace(/"/g,'&quot;')}">${mainLine}</div>${addrLine}${checkLine || timeLine}${priceLine}`;
             }
             // Mostrar nota si existe
             if(s.airbnbNote) {
