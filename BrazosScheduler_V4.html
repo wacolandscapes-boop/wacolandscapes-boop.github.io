@@ -1908,7 +1908,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-28.2';
+const SCHED_BUILD = '2026-10-31.2';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -6109,6 +6109,34 @@ Brazos Cleaning Services</textarea>
             return hayServicioEseDia;                             // sin servicio en esa fecha → tarjeta huérfana → fuera
         });
 
+        // ── 2026-10-31: tarjetas HUÉRFANAS en CUALQUIER columna ─────────────────────────
+        // La limpieza de arriba solo revisa tarjetas por-servicio y solo que exista ALGÚN
+        // servicio ese día (aunque esté cancelado o sea otro registro). Así se quedaban
+        // pegadas: Victory Home 09/01 en Fin de Mes (sin ningún servicio — "no hay servicios
+        // para ese cliente" al facturar) y Liz Shaw 10/15 (servicio cancelado) dos veces.
+        // Regla: una tarjeta de SERVICIOS se va si ya no tiene ningún servicio real vivo:
+        //   · si trae serviceIds → ninguno existe o todos están cancelados;
+        //   · si no trae → no hay servicio no-cancelado del cliente dentro de su periodo.
+        // NO se tocan los avisos que dependen de una FACTURA (generada sin enviar /
+        // duplicado fantasma) — esos ya tienen su propia limpieza arriba.
+        this.pendingInvoices = this.pendingInvoices.filter(p => {
+            if (p.isGeneratedUnsent || p.isDuplicateGhost) return true;
+            const servs = this.servs || [];
+            const ids = (p.serviceIds || []).map(String);
+            if (ids.length > 0) {
+                return servs.some(s => ids.includes(String(s.id)) && !s.cancelled);
+            }
+            let cliIds = (p.clientIds || []).map(String);
+            if (cliIds.length === 0 && p.cliId) cliIds = [String(p.cliId)];
+            if (cliIds.length === 0 && p.clientName) {
+                cliIds = (this.clis || []).filter(c => c.name === p.clientName).map(c => String(c.id));
+            }
+            if (cliIds.length === 0 || !p.startDate) return true; // no se puede validar → se conserva
+            const fin = p.endDate || p.startDate;
+            return servs.some(s => !s.cancelled && cliIds.includes(String(s.cliId)) &&
+                s.date >= p.startDate && s.date <= fin);
+        });
+
         // Migración: pendientes viejas de ANTES de que existiera "column" (Frecuencia de
         // Facturación) se quedaban huérfanas y caían en "Otros" para siempre. Aquí se les
         // asigna la columna correcta usando el campo Frecuencia de Facturación actual del
@@ -6752,6 +6780,22 @@ Brazos Cleaning Services</textarea>
         // la tarjeta del mes, sobra y se retira. Las que traen días de meses anteriores
         // (atrasos reales de mayo/junio) NO se tocan.
         (() => {
+            // 2026-10-31: también se retira la de RED DE SEGURIDAD cuando TODOS sus servicios
+            // ya tienen su propia tarjeta por-servicio (columna Mensuales). Si las dos nacían
+            // en dispositivos distintos antes de sincronizar, quedaban ambas para siempre:
+            // Emily Pruitt 10/09 (📦 + 🏠) y Milo's 10/13 (📦 + 🏢).
+            const _idsPorServicio = new Set();
+            this.pendingInvoices.forEach(p => {
+                if (typeof p.periodKey === 'string' && p.periodKey.includes('-mensuales-'))
+                    (p.serviceIds || []).forEach(id => _idsPorServicio.add(String(id)));
+            });
+            if (_idsPorServicio.size) {
+                this.pendingInvoices = this.pendingInvoices.filter(p => {
+                    if (!p.periodKey || !String(p.periodKey).includes('-backlog-redseguridad')) return true;
+                    const ids = (p.serviceIds || []).map(String);
+                    return !(ids.length > 0 && ids.every(id => _idsPorServicio.has(id)));
+                });
+            }
             const recurrentes = this.pendingInvoices.filter(p =>
                 p.periodKey && String(p.periodKey).endsWith('-recurrente'));
             if (!recurrentes.length) return;
@@ -6821,15 +6865,56 @@ Brazos Cleaning Services</textarea>
                 (p.reason || '').toLowerCase().includes(pendingSearch))
             : this.pendingInvoices;
 
+        // ── Filtro por PERIODO (mes) — 2026-10-31 ──
+        // Una tarjeta entra en un mes si su periodo (inicio–fin) toca ese mes. Las opciones
+        // se arman con los meses que realmente aparecen en las tarjetas, con su conteo.
+        // "anteriores" = todo lo que empieza antes del mes en curso (atrasos).
+        const _MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+        const _ymHoy = new Date().toLocaleDateString('en-CA').slice(0, 7);
+        const _mesesDe = (p) => {
+            const a = String(p.startDate || '').slice(0, 7), b = String(p.endDate || p.startDate || '').slice(0, 7);
+            if (!/^\d{4}-\d{2}$/.test(a)) return [];
+            const out = []; let [y, m] = a.split('-').map(Number);
+            for (let i = 0; i < 24; i++) {
+                const ym = `${y}-${String(m).padStart(2, '0')}`; out.push(ym);
+                if (!(ym < b)) break;
+                m++; if (m > 12) { m = 1; y++; }
+            }
+            return out;
+        };
+        const _periodo = this._pendingPeriodo || '';
+        const _enPeriodo = (p) => {
+            if (!_periodo) return true;
+            if (_periodo === 'anteriores') return String(p.startDate || '').slice(0, 7) < _ymHoy;
+            return _mesesDe(p).includes(_periodo);
+        };
+        (() => {
+            const sel = document.getElementById('pendingPeriodo');
+            if (!sel) return;
+            const conteo = {};
+            filteredPending.forEach(p => _mesesDe(p).forEach(ym => { conteo[ym] = (conteo[ym] || 0) + 1; }));
+            const nAnt = filteredPending.filter(p => String(p.startDate || '').slice(0, 7) < _ymHoy).length;
+            const meses = Object.keys(conteo).sort().reverse();
+            if (_periodo && _periodo !== 'anteriores' && !meses.includes(_periodo)) meses.unshift(_periodo);
+            const lbl = (ym) => { const [y, m] = ym.split('-'); return `${_MESES[Number(m) - 1]} ${y}`; };
+            sel.innerHTML = `<option value="">📅 Todos los periodos (${filteredPending.length})</option>` +
+                `<option value="anteriores">⏪ Meses anteriores (${nAnt})</option>` +
+                meses.map(ym => `<option value="${ym}">${lbl(ym)} (${conteo[ym] || 0})</option>`).join('');
+            sel.value = _periodo;
+            sel.style.borderColor = _periodo ? '#f39c12' : '#ced4da';
+            sel.style.fontWeight = _periodo ? '700' : '400';
+        })();
+        const _listaFiltrada = filteredPending.filter(_enPeriodo);
+
         // 4 columnas simplificadas, según Frecuencia de Facturación de cada cliente —
         // ya no por tipo de cliente ni por "urgente vs no urgente".
-        const dfAirbnb = filteredPending.filter(p => p.column === 'airbnb');
-        const dfMensuales = filteredPending.filter(p => p.column === 'mensuales');
-        const dfConstruccion = filteredPending.filter(p => p.column === 'construccion');
-        const dfFinMes = filteredPending.filter(p => p.column === 'finmes');
+        const dfAirbnb = _listaFiltrada.filter(p => p.column === 'airbnb');
+        const dfMensuales = _listaFiltrada.filter(p => p.column === 'mensuales');
+        const dfConstruccion = _listaFiltrada.filter(p => p.column === 'construccion');
+        const dfFinMes = _listaFiltrada.filter(p => p.column === 'finmes');
         // Cualquier pendiente sin columna reconocida (datos viejos de antes de este cambio,
         // o casos sin Frecuencia de Facturación definida) — para no perderla de vista.
-        const dfOtros = filteredPending.filter(p => !['airbnb','mensuales','construccion','finmes'].includes(p.column));
+        const dfOtros = _listaFiltrada.filter(p => !['airbnb','mensuales','construccion','finmes'].includes(p.column));
 
         const buildCard = (pending, index) => {
             const [startYear, startMonth, startDay] = pending.startDate.split('-');
@@ -23322,9 +23407,15 @@ document.addEventListener('click', function(e) {
         </h2>
         
         <div style="padding: 8px 0 10px 0; flex-shrink:0;">
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <input type="text" id="pendingSearch" oninput="app.renderPendingInvoices()"
                 placeholder="🔍 Buscar por nombre o fecha..."
-                style="width:100%; padding:8px 12px; border:1px solid #ced4da; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
+                style="flex:1 1 240px; min-width:0; padding:8px 12px; border:1px solid #ced4da; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
+            <select id="pendingPeriodo" onchange="app._pendingPeriodo=this.value; app.renderPendingInvoices()" title="Mostrar solo las tarjetas cuyo periodo cae en ese mes"
+                style="flex:0 1 230px; padding:8px 10px; border:1px solid #ced4da; border-radius:6px; font-size:0.9rem; background:white; color:#2c3e50; box-sizing:border-box;">
+                <option value="">📅 Todos los periodos</option>
+            </select>
+            </div>
         </div>
         <div id="pendingInvoicesList" style="max-height: calc(98vh - 180px); overflow-y: auto;">
             <!-- Lista de facturas pendientes se carga dinámicamente -->
