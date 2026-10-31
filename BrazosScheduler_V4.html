@@ -1908,7 +1908,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-31.2';
+const SCHED_BUILD = '2026-10-31.3';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -8115,6 +8115,44 @@ Brazos Cleaning Services</textarea>
             }
         });
         this.refreshGeneratedInvoices();
+    }
+
+    // 2026-10-31: horario Shop→Shop de cada integrante de un grupo en un día.
+    // · Horario del GRUPO = de quien tenga Salida Y Regreso con la salida MÁS TEMPRANA
+    //   (antes: el primero que se encontrara — si alguien que llegó tarde registraba su
+    //   entrada, su hora podía volverse la de todo el grupo).
+    // · Horario PERSONAL: si una integrante registró su propia Salida y/o Regreso, se usa
+    //   lo suyo (lo que no registró se completa con el del grupo). Así, quien se une
+    //   después del primer servicio, o se va antes, no cobra la jornada completa.
+    _horarioShopDelDia(dayData) {
+        const porGrupo = {};
+        Object.values(dayData || {}).forEach(ed => {
+            if (!ed) return;
+            const grp = ed.group || 'Sin Grupo';
+            if (!porGrupo[grp]) porGrupo[grp] = { shopOut: null, shopBack: null, propios: {}, memberEmpIds: new Set() };
+            const g = porGrupo[grp];
+            if (ed.empId) {
+                g.memberEmpIds.add(String(ed.empId));
+                if (ed.shopOut || ed.shopBack) g.propios[String(ed.empId)] = { shopOut: ed.shopOut || null, shopBack: ed.shopBack || null };
+            }
+            if (ed.shopOut && ed.shopBack && (!g.shopOut || ed.shopOut < g.shopOut)) {
+                g.shopOut = ed.shopOut; g.shopBack = ed.shopBack;
+            }
+        });
+        Object.values(porGrupo).forEach(g => {
+            g.paraEmp = (empId) => {
+                const pr = g.propios[String(empId)] || {};
+                const so = pr.shopOut || g.shopOut, sb = pr.shopBack || g.shopBack;
+                if (!so || !sb) return null;
+                const [soh, som] = so.split(':').map(Number), [sbh, sbm] = sb.split(':').map(Number);
+                let minutes = (sbh * 60 + sbm) - (soh * 60 + som);
+                if (!(minutes > 0)) minutes = 0;
+                let breakApplied = false;
+                if (minutes >= 420) { minutes -= 30; breakApplied = true; }
+                return { shopOut: so, shopBack: sb, minutes, breakApplied, propio: !!(pr.shopOut || pr.shopBack) };
+            };
+        });
+        return porGrupo;
     }
 
     refreshGeneratedInvoices() {
@@ -18856,55 +18894,27 @@ Motivo de cancelación (opcional):`);
             const dayData = this._prodReports[dt];
             if (!dayData) return;
 
-            // Agrupar registros del día por grupo, para encontrar el "líder" (quien tiene shopOut/shopBack)
-            const dayByGroup = {}; // grupo -> { leaderShopOut, leaderShopBack, memberEmpIds:Set }
-            Object.values(dayData).forEach(empData => {
-                const grp = empData.group || 'Sin Grupo';
-                if (!dayByGroup[grp]) dayByGroup[grp] = { shopOut: null, shopBack: null, memberEmpIds: new Set() };
-                dayByGroup[grp].memberEmpIds.add(String(empData.empId));
-                // El líder es quien tiene ambos registros de shop
-                if (empData.shopOut && empData.shopBack && !dayByGroup[grp].shopOut) {
-                    dayByGroup[grp].shopOut = empData.shopOut;
-                    dayByGroup[grp].shopBack = empData.shopBack;
-                }
-            });
+            // 2026-10-31: horario del grupo (salida más temprana) + horario PERSONAL de quien
+            // registró el suyo — ver _horarioShopDelDia().
+            const dayByGroup = this._horarioShopDelDia(dayData);
 
-            // Para cada grupo con horario de líder, aplicar a TODOS los miembros configurados del grupo
             Object.keys(dayByGroup).forEach(grp => {
                 const groupInfo = dayByGroup[grp];
-                if (!groupInfo.shopOut || !groupInfo.shopBack) return; // sin líder con horario ese día
-
-                const [soh, som] = groupInfo.shopOut.split(':').map(Number);
-                const [sbh, sbm] = groupInfo.shopBack.split(':').map(Number);
-                let minutes = (sbh * 60 + sbm) - (soh * 60 + som);
-                if (minutes < 0) minutes = 0;
-
-                // Descontar 30 min de break si trabajó 7+ horas (420+ min)
-                let breakApplied = false;
-                if (minutes >= 420) {
-                    minutes -= 30;
-                    breakApplied = true;
-                }
-
-                // FIX 2026-09-18: usar la composición del grupo PARA ESE DÍA (dt) vía
-                // _rosterParaFecha — igual que ya hace renderProductionReport() desde el
-                // fix del 17-sep — en vez de siempre la lista VIGENTE (this.grupos[grp]).
-                // Antes, si el grupo cambiaba de integrantes después de esa fecha, este
-                // resumen de Horas seguía aplicando la composición de HOY a fechas
-                // pasadas — mostrando a alguien que no trabajó ese día, o un ID que ya no
-                // corresponde a ningún empleado actual ("Empleado: Desconocido").
+                // FIX 2026-09-18: composición del grupo PARA ESE DÍA (_rosterParaFecha).
                 const officialMemberIds = this._rosterParaFecha(grp, dt).filter(id => id);
                 const memberIds = officialMemberIds.length > 0 ? officialMemberIds : [...groupInfo.memberEmpIds];
 
                 memberIds.forEach(empId => {
                     const emp = this.emps.find(e => String(e.id) === String(empId));
-                    if (!emp) return; // ID de un empleado ya borrado/no encontrado — se omite en vez de mostrar "Desconocido"
+                    if (!emp) return; // ID de un empleado ya borrado/no encontrado
+                    const h = groupInfo.paraEmp(empId);
+                    if (!h) return; // sin horario de grupo ni propio ese día
                     const empName = emp.name;
                     if (!empHours[empId]) empHours[empId] = { empId, name: empName, totalMin: 0, days: [] };
-                    empHours[empId].totalMin += minutes;
+                    empHours[empId].totalMin += h.minutes;
                     empHours[empId].days.push({
-                        date: dt, shopOut: groupInfo.shopOut, shopBack: groupInfo.shopBack,
-                        netMin: minutes, breakApplied
+                        date: dt, shopOut: h.shopOut, shopBack: h.shopBack,
+                        netMin: h.minutes, breakApplied: h.breakApplied, propio: h.propio
                     });
                 });
             });
@@ -19038,36 +19048,25 @@ Motivo de cancelación (opcional):`);
         const excludeKey = (empId) => `${startStr}_${endStr}_${empId}`;
         const isExcluded = (empId) => !!(this._hoursExcluded && this._hoursExcluded[excludeKey(empId)]);
 
-        // BrazosCalendar (líder del grupo con shopOut/shopBack)
+        // BrazosCalendar — 2026-10-31: horario del grupo (salida más temprana) + horario
+        // PERSONAL de quien registró el suyo — ver _horarioShopDelDia().
         dates.forEach(dt => {
             const dayData = this._prodReports && this._prodReports[dt];
             if (!dayData) return;
-            const dayByGroup = {};
-            Object.values(dayData).forEach(empData => {
-                const grp = empData.group || 'Sin Grupo';
-                if (!dayByGroup[grp]) dayByGroup[grp] = { shopOut: null, shopBack: null };
-                if (empData.shopOut && empData.shopBack && !dayByGroup[grp].shopOut) {
-                    dayByGroup[grp].shopOut = empData.shopOut;
-                    dayByGroup[grp].shopBack = empData.shopBack;
-                }
-            });
+            const dayByGroup = this._horarioShopDelDia(dayData);
             Object.keys(dayByGroup).forEach(grp => {
                 const gi = dayByGroup[grp];
-                if (!gi.shopOut || !gi.shopBack) return;
-                const [soh, som] = gi.shopOut.split(':').map(Number);
-                const [sbh, sbm] = gi.shopBack.split(':').map(Number);
-                let minutes = (sbh * 60 + sbm) - (soh * 60 + som);
-                if (minutes < 0) minutes = 0;
-                if (minutes >= 420) minutes -= 30; // break de 30 min si la jornada fue de 7+ horas
                 const memberIds = (this.grupos[grp] || []).filter(id => id);
                 memberIds.forEach(empId => {
                     if (isExcluded(empId)) return;
                     const emp = this.emps.find(e => String(e.id) === String(empId));
                     if (!emp) return;
+                    const h = gi.paraEmp(empId);
+                    if (!h) return;
                     entries.push({
                         employeeId: String(empId), employeeName: emp.name, date: dt,
-                        checkIn: gi.shopOut, checkOut: gi.shopBack,
-                        hours: Math.round((minutes / 60) * 100) / 100,
+                        checkIn: h.shopOut, checkOut: h.shopBack,
+                        hours: Math.round((h.minutes / 60) * 100) / 100,
                         source: 'calendario'
                     });
                 });
