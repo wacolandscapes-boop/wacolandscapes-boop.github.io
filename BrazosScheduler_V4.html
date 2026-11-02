@@ -15,7 +15,43 @@ icons:ic?[{src:ic.href,sizes:'192x192',type:'image/png',purpose:'any'}]:[]};
 document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.stringify(m)],{type:'application/manifest+json'}));}catch(e){}})();
 </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://accounts.google.com/gsi/client" async></script>
+    <script>
+    /* ═══ 2026-10-30 FASE 1 CLOUDFLARE ═══════════════════════════════════════
+       El Scheduler ya NO inicia sesión con Google. Entra con nombre + PIN de la
+       Nómina y TODAS sus llamadas a Google Drive se desvían al Worker
+       brazos-scheduler-worker, que les pone la llave real. El resto del código
+       (sync, fusión, candado, lápidas, horarios) queda igual. */
+    (function () {
+      const API = new URLSearchParams(location.search).get('api') || 'https://brazos-scheduler-worker.ranulfocast.workers.dev';
+      const KEY = 'brazos_sched_jwt';
+      window.SCHED_API = API;
+      window.schedJwt = () => { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
+      const _fetch = window.fetch.bind(window);
+      const G = 'https://www.googleapis.com';
+      window.fetch = function (input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (url.startsWith(G + '/drive/v3/') || url.startsWith(G + '/upload/drive/v3/')) {
+          init = Object.assign({}, init || {});
+          const h = new Headers(init.headers || {});
+          h.set('Authorization', 'Bearer ' + window.schedJwt());
+          init.headers = h;
+          return _fetch(API + '/g' + url.slice(G.length), init).then(r => {
+            if (r.status === 401 && window.schedSesionVencida) window.schedSesionVencida();
+            return r;
+          });
+        }
+        return _fetch(input, init);
+      };
+      // Reemplazo de Google Sign-In: el "token" es la sesión con PIN.
+      window.google = { accounts: { oauth2: { initTokenClient(cfg) {
+        return { callback: cfg.callback, requestAccessToken() {
+          const cb = this.callback || cfg.callback;
+          if (!window.schedJwt()) { if (window.schedPedirLogin) window.schedPedirLogin(); if (cb) setTimeout(() => cb({ error: 'sin_sesion' }), 0); return; }
+          setTimeout(() => cb && cb({ access_token: 'worker', expires_in: 60 * 60 * 24 * 365 }), 0);
+        } };
+      } } } };
+    })();
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script>
@@ -803,6 +839,7 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
 
 
                 <button class="btn-action" id="driveSyncBtn" onclick="app.driveSync()" style="background:#4285f4; color:white;">☁️ <span id="driveSyncLabel">Drive</span></button>
+                <span id="schedUserChip" style="display:none;align-items:center;gap:6px;font-size:0.8rem;color:#555;white-space:nowrap;"><span id="schedUserName"></span><button onclick="schedCerrarSesion()" style="background:none;border:1px solid #e74c3c;color:#e74c3c;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:0.75rem;font-weight:700;">🔌 Salir</button></span>
                 <button onclick="app.openEmergencyModal()" title="Crear Servicio de Emergencia"
                     style="background:#e74c3c; color:white; border:none; padding:7px 14px; border-radius:6px; cursor:pointer; font-size:0.85rem; font-weight:700; white-space:nowrap; flex-shrink:0;">
                     🚨 Emergency
@@ -11473,14 +11510,9 @@ Motivo de cancelación (opcional):`);
         btn.disabled = true;
         try {
             // Leer token compartido por la App de Nómina
-            const token = localStorage.getItem('brazos_drive_token');
-            const expiry = localStorage.getItem('brazos_drive_token_expiry');
-            
-            if (!token || !expiry || Date.now() > parseInt(expiry)) {
-                throw new Error('Token no disponible. Abre la App de Nómina y conecta Google Drive primero.');
-            }
-            
-            this.driveToken = token;
+            // 2026-10-30: con el Worker ya no hace falta el token de la App de Nómina.
+            if (!window.schedJwt()) throw new Error('Primero entra con tu nombre y PIN.');
+            if (!this.driveToken) this.driveToken = 'worker';
             const totales = await this.driveReadNominaTotales();
             if (totales && totales.periodos) {
                 this.nominaTotales = totales.periodos;
@@ -20480,7 +20512,7 @@ Motivo de cancelación (opcional):`);
             prompt: '',
             login_hint: this.DRIVE_ACCOUNT_HINT,
             callback: async (response) => {
-                if (response.error) { alert('❌ Error: ' + response.error); return; }
+                if (response.error) { if (response.error !== 'sin_sesion') alert('❌ Error: ' + response.error); return; }
                 this.driveToken = response.access_token;
                 this.driveConnected = true;
                 this._fijarTokenExpiry(response);
@@ -22918,6 +22950,137 @@ let _schedDriveReconnectPromise = null;
 let _schedDriveReconnectLastTry = 0;
 
 const app = new Scheduler();
+
+// ═══ 2026-10-30 FASE 1 CLOUDFLARE: entrar con nombre + PIN de Nómina ═════
+function schedSesion() { try { return JSON.parse(localStorage.getItem('brazos_sched_sesion') || 'null'); } catch (e) { return null; } }
+function schedMostrarUsuario() {
+    const s = schedSesion(), chip = document.getElementById('schedUserChip'), nm = document.getElementById('schedUserName');
+    if (!chip || !nm) return;
+    if (s && window.schedJwt()) { nm.textContent = '👤 ' + s.name + (s.rol === 'lectura' ? ' (solo ver)' : ''); chip.style.display = 'inline-flex'; }
+    else chip.style.display = 'none';
+}
+// Usuarios de SOLO LECTURA: nunca toman el candado ni suben; ven los cambios cada 45 s.
+function schedAplicarRol() {
+    const s = schedSesion();
+    if (!s || s.rol !== 'lectura') return;
+    app._lockReadOnly = true;
+    app._iniciarLatido = function () {};
+    app._candadoCheck = async function () {
+        this._entrarSoloLectura('');
+        const b = document.getElementById('brazosLockBanner');
+        if (b) { b.style.background = '#2c3e50'; b.textContent = '👁️ SOLO LECTURA — tu usuario solo puede ver. Los cambios que hagas aquí NO se guardan.'; }
+        try { await this.driveDownloadData(); this.render(); } catch (e) { console.warn('refresco solo lectura', e); }
+    };
+}
+function schedPedirLogin() {
+    if (document.getElementById('schedLogin')) return;
+    const ov = document.createElement('div');
+    ov.id = 'schedLogin';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:200000;background:rgba(20,30,45,0.95);display:flex;align-items:center;justify-content:center;padding:20px;';
+    ov.innerHTML = '<div style="background:#fff;border-radius:14px;padding:26px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.4);font-family:inherit;">' +
+        '<h2 style="margin:0 0 4px;color:#1A6BC8;">Brazos Scheduler</h2>' +
+        '<p style="margin:0 0 16px;color:#666;font-size:0.9rem;">Entra con tu nombre y el PIN de la Nómina.</p>' +
+        '<select id="schedLoginEmp" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;margin-bottom:10px;font-size:1rem;"><option value="">Cargando…</option></select>' +
+        '<input id="schedLoginPin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;margin-bottom:10px;font-size:1rem;box-sizing:border-box;">' +
+        '<div id="schedLoginMsg" style="color:#e74c3c;font-size:0.85rem;min-height:18px;margin-bottom:8px;"></div>' +
+        '<button id="schedLoginBtn" style="width:100%;padding:11px;background:#27ae60;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer;">Entrar</button></div>';
+    document.body.appendChild(ov);
+    const msg = t => { document.getElementById('schedLoginMsg').textContent = t || ''; };
+    fetch(window.SCHED_API + '/api/empleados').then(r => r.json()).then(d => {
+        const sel = document.getElementById('schedLoginEmp');
+        if (!d.empleados) { sel.innerHTML = '<option value="">No se pudo cargar</option>'; msg(d.error || 'Sin conexión'); return; }
+        sel.innerHTML = '<option value="">Elige tu nombre</option>' + d.empleados.map(e => '<option value="' + e.id + '">' + e.name + '</option>').join('');
+    }).catch(() => msg('Sin conexión con el servidor. Revisa internet y recarga.'));
+    const entrar = async () => {
+        const id = document.getElementById('schedLoginEmp').value, pin = document.getElementById('schedLoginPin').value.trim();
+        if (!id || !pin) return msg('Elige tu nombre y escribe tu PIN.');
+        const btn = document.getElementById('schedLoginBtn'); btn.disabled = true; btn.textContent = 'Entrando…'; msg('');
+        try {
+            const r = await fetch(window.SCHED_API + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, pin }) });
+            const d = await r.json();
+            if (!r.ok || !d.token) throw new Error(d.error || 'No se pudo entrar');
+            localStorage.setItem('brazos_sched_jwt', d.token);
+            localStorage.setItem('brazos_sched_sesion', JSON.stringify({ name: d.name, rol: d.rol }));
+            ov.remove();
+            schedMostrarUsuario(); schedAplicarRol();
+            app.driveConnect();
+        } catch (e) { msg(e.message); btn.disabled = false; btn.textContent = 'Entrar'; }
+    };
+    document.getElementById('schedLoginBtn').onclick = entrar;
+    document.getElementById('schedLoginPin').addEventListener('keydown', e => { if (e.key === 'Enter') entrar(); });
+}
+function schedSesionVencida() {
+    if (document.getElementById('schedLogin')) return;
+    try { localStorage.removeItem('brazos_sched_jwt'); } catch (e) {}
+    app.driveConnected = false; app.driveToken = null;
+    schedMostrarUsuario();
+    schedPedirLogin();
+}
+function schedCerrarSesion() {
+    if (!confirm('¿Cerrar sesión en este equipo?\n\nAntes, espera a que el botón diga "Sync" en verde para no perder cambios.')) return;
+    try { localStorage.removeItem('brazos_sched_jwt'); localStorage.removeItem('brazos_sched_sesion'); } catch (e) {}
+    location.reload();
+}
+// ═══ 2026-10-30: PAUSA POR INACTIVIDAD (10 min) ═════════════════════════
+// Si este equipo tiene el candado y nadie usa mouse/teclado/pantalla por 10 min:
+// guarda lo pendiente, SUELTA el candado (otro equipo puede editar de inmediato)
+// y muestra "En pausa". Al tocar "Continuar" revisa el candado: baja lo último y
+// vuelve a editar, o queda en solo lectura si otro equipo lo tomó mientras.
+const SCHED_PAUSA_MIN = 10;
+let _schedUltimaActividad = Date.now(), _schedPausado = false;
+['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach(ev =>
+    window.addEventListener(ev, () => { _schedUltimaActividad = Date.now(); }, { passive: true, capture: true }));
+async function _schedSoltarCandado() {
+    try {
+        const { fileId } = await app._lockLeer();
+        if (!fileId) return;
+        const form = new FormData();
+        form.append('metadata', new Blob([JSON.stringify({ name: app._lockNombre() })], { type: 'application/json' }));
+        form.append('file', new Blob([JSON.stringify({ owner: '', heartbeat: '1970-01-01T00:00:00.000Z', label: 'libre (pausa)' })], { type: 'application/json' }));
+        await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`,
+            { method: 'PATCH', headers: { Authorization: `Bearer ${app.driveToken}` }, body: form });
+    } catch (e) { console.warn('soltar candado', e); }
+}
+async function schedPausar() {
+    if (_schedPausado) return;
+    _schedPausado = true;
+    try { await app.driveSyncNow(); } catch (e) { console.warn('guardar antes de pausa', e); }
+    if (app._latidoInt) { clearInterval(app._latidoInt); app._latidoInt = null; }
+    app._lockReadOnly = true;              // mientras está en pausa no sube nada
+    await _schedSoltarCandado();
+    let ov = document.getElementById('schedPausa');
+    if (!ov) {
+        ov = document.createElement('div'); ov.id = 'schedPausa';
+        ov.style.cssText = 'position:fixed;inset:0;z-index:150000;background:rgba(20,30,45,0.88);display:flex;align-items:center;justify-content:center;padding:20px;';
+        ov.innerHTML = '<div style="background:#fff;border-radius:14px;padding:26px;max-width:380px;width:100%;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.4);">' +
+            '<div style="font-size:2.6rem;">⏸️</div><h2 style="margin:6px 0 8px;color:#2c3e50;">En pausa por inactividad</h2>' +
+            '<p style="color:#666;font-size:0.92rem;margin:0 0 16px;">Se guardó todo y se liberó el Scheduler para que otro equipo pueda editar.</p>' +
+            '<button id="schedPausaBtn" style="width:100%;padding:12px;background:#27ae60;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer;">▶️ Continuar</button></div>';
+        document.body.appendChild(ov);
+        document.getElementById('schedPausaBtn').onclick = schedReanudar;
+    }
+}
+async function schedReanudar() {
+    const btn = document.getElementById('schedPausaBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Bajando lo último…'; }
+    _schedUltimaActividad = Date.now();
+    try { await app._candadoCheck(); app.render(); } catch (e) { console.warn('reanudar', e); }
+    _schedPausado = false;
+    document.getElementById('schedPausa')?.remove();
+}
+setInterval(() => {
+    const s = schedSesion();
+    if (_schedPausado || !s || s.rol === 'lectura') return;
+    if (!app.driveConnected || app._lockReadOnly) return;      // solo si ESTE equipo tiene el candado
+    if (Date.now() - _schedUltimaActividad >= SCHED_PAUSA_MIN * 60000) schedPausar();
+}, 30000);
+
+// Arranque: con sesión → conectar solo; sin sesión → pedir PIN.
+setTimeout(() => {
+    schedMostrarUsuario();
+    if (window.schedJwt()) { schedAplicarRol(); app.driveConnect(); }
+    else schedPedirLogin();
+}, 300);
 
 // Mismo patrón usado en BrazosCalendar: si Mariela olvida conectar Drive al hacer
 // ajustes, mostramos un banner imposible de ignorar e intentamos reconectar sola
