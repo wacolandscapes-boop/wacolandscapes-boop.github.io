@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-02.2';
+const SCHED_BUILD = '2026-11-02.3';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -20760,9 +20760,25 @@ Motivo de cancelación (opcional):`);
         } catch(e) { console.warn('_lockLeer error', e); return { fileId: null, data: null }; }
     }
 
-    async _lockEscribir(fileId, owner) {
+    // 2026-11-02: comparar builds por números (mismo criterio que _revisarVersionDrive).
+    _cmpBuild(a, b) {
+        const n = v => String(v || '').split(/[^0-9]+/).filter(Boolean).map(Number);
+        const x = n(a), y = n(b);
+        for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; }
+        return 0;
+    }
+    async _lockEscribir(fileId, owner, forzado) {
+        // 2026-11-02: el candado ahora dice QUIÉN (usuario del PIN), desde qué equipo y con
+        // qué versión. Copias viejas (sin "build") ya no pueden subir datos, así que su
+        // candado ya no bloquea a una versión nueva.
+        let _usr = ''; try { _usr = (typeof schedSesion === 'function' && schedSesion() && schedSesion().name) || ''; } catch (e) {}
         const cuerpo = { owner, heartbeat: new Date().toISOString(),
-                         label: (localStorage.getItem('brazos_pcLabel') || '') };
+                         label: (localStorage.getItem('brazos_pcLabel') || ''),
+                         usuario: _usr,
+                         equipo: /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? 'teléfono' : 'PC',
+                         build: SCHED_BUILD,
+                         desde: (this._lockDesde = (this._lockDesde || new Date().toISOString())),
+                         forzado: forzado ? new Date().toISOString() : undefined };
         const form = new FormData();
         const metadata = { name: this._lockNombre(), parents: fileId ? undefined : [this.driveFolderId] };
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
@@ -20784,8 +20800,9 @@ Motivo de cancelación (opcional):`);
         const hb = data && data.heartbeat ? new Date(data.heartbeat).getTime() : 0;
         const fresco = hb && (ahora - hb) < this._lockStaleMs();
         const duenoOtro = data && data.owner && data.owner !== yo;
-        if (fresco && duenoOtro) {
-            this._entrarSoloLectura(data.label || 'otra PC');
+        const lockViejo = !!(data && (!data.build || this._cmpBuild(data.build, SCHED_BUILD) < 0));
+        if (fresco && duenoOtro && !lockViejo) {
+            this._entrarSoloLectura(data);
             // Sep11: aunque siga en Solo Lectura, refrescar los datos en CADA revisión
             // del candado (cada 45s) — antes sólo se bajaba una vez al conectar y
             // luego se quedaba con esa foto mientras el candado siguiera activo (bug
@@ -20820,13 +20837,23 @@ Motivo de cancelación (opcional):`);
         const yo = localStorage.getItem('anaCS_deviceId') || 'unknown';
         this._latidoInt = setInterval(async () => {
             if (this._lockReadOnly) return;
-            const { fileId } = await this._lockLeer();
+            const { fileId, data } = await this._lockLeer();
             this._lockFileId = fileId;
+            // 2026-11-02: si OTRA sesión (versión igual o nueva) tomó el control, este equipo
+            // se baja a solo lectura en vez de pisarle el candado.
+            const hb = data && data.heartbeat ? new Date(data.heartbeat).getTime() : 0;
+            const otro = data && data.owner && data.owner !== yo && hb && (Date.now() - hb) < this._lockStaleMs()
+                         && data.build && this._cmpBuild(data.build, SCHED_BUILD) >= 0;
+            if (otro) {
+                clearInterval(this._latidoInt); this._latidoInt = null; this._lockDesde = null;
+                this._entrarSoloLectura(data, true);
+                return;
+            }
             await this._lockEscribir(fileId, yo);
         }, 30000);
     }
 
-    _entrarSoloLectura(quien) {
+    _entrarSoloLectura(quien, tomado) {
         this._lockReadOnly = true;
         let b = document.getElementById('brazosLockBanner');
         if (!b) {
@@ -20835,10 +20862,34 @@ Motivo de cancelación (opcional):`);
             b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#c0392b;color:#fff;padding:10px 16px;font-weight:700;text-align:center;font-size:0.95rem;box-shadow:0 2px 8px rgba(0,0,0,.3)';
             document.body.appendChild(b);
         }
-        b.textContent = '🔒 SOLO LECTURA — Brazos ya esta abierto en otra PC. NO hagas cambios aqui (no se guardaran). Se liberara solo cuando cierres la otra.';
+        // 2026-11-02: decir QUIÉN tiene el Scheduler abierto (antes solo "otra PC").
+        const d = (quien && typeof quien === 'object') ? quien : { label: quien };
+        const esc = v => String(v || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const hora = t => { try { return t ? new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : ''; } catch (e) { return ''; } };
+        const quienTxt = esc(d.usuario || d.label || 'Otra sesión') + (d.equipo ? ' (' + esc(d.equipo) + ')' : '');
+        const desde = d.desde ? ' desde las ' + hora(d.desde) : '';
+        let esAdmin = false; try { esAdmin = typeof schedSesion === 'function' && schedSesion() && schedSesion().rol === 'admin'; } catch (e) {}
+        b.innerHTML = (tomado
+            ? '🔒 ' + quienTxt + ' tomó el control del Scheduler. Este equipo quedó en SOLO LECTURA.'
+            : '🔒 SOLO LECTURA — ' + quienTxt + ' tiene el Scheduler abierto' + desde + '. Tus cambios aquí NO se guardan; se libera solo cuando lo cierre o tras 10 min sin actividad.')
+            + (esAdmin ? ' <button onclick="app._lockTomarControl()" style="margin-left:10px;background:#fff;color:#c0392b;border:none;border-radius:6px;padding:4px 10px;font-weight:800;cursor:pointer;">🔓 Tomar el control</button>' : '');
         if (!this._reintentoInt) {
             this._reintentoInt = setInterval(() => { this._candadoCheck(); }, 45000);
         }
+    }
+
+    // 2026-11-02: un ADMIN (Ranu, Victor, Claudia) puede quitarle el candado a otra sesión.
+    // La otra sesión, en su siguiente latido (≤30 s), se baja sola a solo lectura.
+    async _lockTomarControl() {
+        if (!confirm('¿Tomar el control del Scheduler?\n\nLa otra sesión quedará en SOLO LECTURA en menos de 1 minuto. Si estaba a medio cambio sin guardar, ese cambio podría perderse.')) return;
+        const yo = localStorage.getItem('anaCS_deviceId') || 'unknown';
+        const { fileId } = await this._lockLeer();
+        this._lockFileId = fileId; this._lockDesde = null;
+        await this._lockEscribir(fileId, yo, true);
+        try { await this.driveDownloadData(); } catch (e) { console.warn('bajada al tomar control', e); }
+        this._salirSoloLectura();
+        this._iniciarLatido();
+        try { this.render(); } catch (e) {}
     }
 
     _salirSoloLectura() {
