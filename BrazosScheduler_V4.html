@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-10-31.91';
+const SCHED_BUILD = '2026-11-02.2';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -2624,6 +2624,8 @@ class Scheduler {
                             if(s.empId === g) return true;
                             return this.grupos[g].includes(s.empId.toString());
                         });
+                        // 2026-11-02: la vista MES también oculta clientes ⏸️ suspendidos (como la semana).
+                        daily = daily.filter(s => !this._cliPausado(this.clis.find(c => String(c.id) === String(s.cliId)), s.date));
                         if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
                         if(fRecurrence !== 'all'){daily=daily.filter(s=>{const _c=this.clis.find(c=>c.id==s.cliId);return _c && _c.type===fRecurrence;});}
                         daily.forEach(s => { if(!seen.has(s.id)) { seen.add(s.id); allServs.push({...s, grupo: g}); } });
@@ -12958,6 +12960,9 @@ Motivo de cancelación (opcional):`);
                         if (ok) {
                             const _borrarIds = new Set(futuros.map(s => String(s.id)));
                             this.servs = this.servs.filter(s => !_borrarIds.has(String(s.id)));
+                            // 2026-11-02: LÁPIDA por cada servicio borrado. Sin esto, la siguiente
+                            // fusión con Drive los REVIVÍA (seguían en el Calendar — Overhead Door).
+                            futuros.forEach(s => this._tombstone('servs', s.id));
                         }
                         // Si cancela: se guarda la suspensión igual, pero no se borra nada.
                     }
@@ -13099,9 +13104,13 @@ Motivo de cancelación (opcional):`);
             if (regenCheck && regenFrom && regenUntil && idx !== -1) {
                 const updatedCli = this.clis[idx];
                 // Borrar servicios del cliente desde regenFrom en adelante
+                // 2026-11-02: con LÁPIDA para cada servicio borrado — sin ella la fusión con
+                // Drive revivía la serie vieja (ej. Shelby 11/11 que "no se borró").
                 this.servs = this.servs.filter(s => {
                     if (s.cliId != updatedCli.id) return true;
-                    return s.date < regenFrom;
+                    if (s.date < regenFrom) return true;
+                    this._tombstone('servs', s.id);
+                    return false;
                 });
                 // Crear servicio base en regenFrom y regenerar serie
                 const baseData = {
