@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-02.3';
+const SCHED_BUILD = '2026-11-03.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -3445,14 +3445,23 @@ class Scheduler {
                 dayData = JSON.parse(localStorage.getItem(key) || 'null');
             }
             if (!dayData) return null;
-            let shopOut = null, shopBack = null;
-            Object.values(dayData).forEach(empData => {
-                if (!empData || empData.group !== nombreGrupo) return;
-                if (empData.shopOut && !shopOut) shopOut = empData.shopOut;
-                if (empData.shopBack && !shopBack) shopBack = empData.shopBack;
-            });
-            if (!shopOut && !shopBack) return null;
-            return { shopOut, shopBack };
+            // 2026-11-03: el horario del GRUPO es la salida MÁS TEMPRANA y el regreso MÁS
+            // TARDE (antes: el primero que se encontrara — si alguien que llegó después
+            // registraba su salida, esa hora aparecía como la del grupo). Quien registró un
+            // horario distinto al del grupo se lista aparte con su nombre.
+            const regs = Object.values(dayData).filter(e => e && e.group === nombreGrupo && (e.shopOut || e.shopBack));
+            if (!regs.length) return null;
+            const outs = regs.map(e => e.shopOut).filter(Boolean).sort();
+            const backs = regs.map(e => e.shopBack).filter(Boolean).sort();
+            const shopOut = outs[0] || null, shopBack = backs.length ? backs[backs.length - 1] : null;
+            const personales = regs
+                .filter(e => (e.shopOut && e.shopOut !== shopOut) || (e.shopBack && e.shopBack !== shopBack))
+                .map(e => {
+                    const emp = (this.emps || []).find(x => String(x.id) === String(e.empId));
+                    const nom = String((emp && emp.name) || e.empName || 'Empleada').split(' ')[0];
+                    return { nombre: nom, shopOut: e.shopOut || '', shopBack: e.shopBack || '' };
+                });
+            return { shopOut, shopBack, personales };
         } catch(e) { return null; }
     }
 
@@ -3837,6 +3846,13 @@ Brazos Cleaning Services</textarea>
             const shopOutDiv = document.createElement('div');
             shopOutDiv.style.cssText = 'font-size:0.68rem;font-weight:700;color:#e91e63;background:#fce4ec;border-radius:4px;padding:2px 6px;margin-bottom:3px;text-align:center;';
             shopOutDiv.textContent = `🏠 Salida: ${this.fmt12(shopTimes.shopOut)}`;
+            // 2026-11-03: horarios personales distintos al del grupo (ej. alguien que llegó después)
+            (shopTimes.personales || []).forEach(p => {
+                const pd = document.createElement('div');
+                pd.style.cssText = 'font-size:0.62rem;color:#ad1457;text-align:center;margin-top:1px;';
+                pd.textContent = `👤 ${p.nombre}: ${p.shopOut ? this.fmt12(p.shopOut) : '—'} – ${p.shopBack ? this.fmt12(p.shopBack) : '—'}`;
+                shopOutDiv.appendChild(pd);
+            });
             cell.appendChild(shopOutDiv);
         }
 
