@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-04.4';
+const SCHED_BUILD = '2026-11-04.7';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -1984,6 +1984,7 @@ class Scheduler {
         // gruposHistorialTs = { 'YYYY-MM-DD': { 'Grupo A': ISO } } · gruposTs = ISO
         this.gruposHistorialTs = JSON.parse(localStorage.getItem('v35_gruposHistorialTs')) || {};
         this.gruposTs = localStorage.getItem('v35_gruposTs') || '';
+        this.horarioCampo = JSON.parse(localStorage.getItem('v35_horarioCampo') || '{}') || {}; // 2026-11-04
         this.gastos = JSON.parse(localStorage.getItem('v35_gastos')) || [];
         this.estimates = JSON.parse(localStorage.getItem('v35_estimates')) || [];
         this.serviceCatalog = JSON.parse(localStorage.getItem('v35_serviceCatalog')) || this.getDefaultServiceCatalog();
@@ -3437,6 +3438,85 @@ class Scheduler {
     // en memoria (_prodReports, si ya se abrió el reporte de Producción) y si no
     // existe cae a localStorage directamente — así funciona aunque el reporte de
     // Producción nunca se haya abierto en esta sesión.
+    // ── 2026-11-04 (Ranu): HORARIO DE CAMPO DEL GRUPO (solo administrador) ──────────
+    // Para PRODUCCIÓN: la hora real en que el grupo salió del shop y regresó, aunque
+    // quien salió primero no registre horas (p. ej. María, pagada por %) o el admin no
+    // haya ido al campo. Lo registra/edita el ADMIN desde el Scheduler (clic en 🏠 del día).
+    // NO toca la Nómina: cada empleada se sigue pagando con SUS propias horas del Calendar.
+    // horarioCampo = { 'YYYY-MM-DD': { 'Grupo A': { salida, regreso, por, at } } }
+    // Borrar = salida/regreso vacíos con su marca de tiempo (para que el borrado viaje).
+    _horarioCampo(dStr, grupo) {
+        const h = ((this.horarioCampo || {})[dStr] || {})[grupo];
+        return (h && (h.salida || h.regreso)) ? h : null;
+    }
+    _esAdminSched() {
+        try { return typeof schedSesion === 'function' && schedSesion() && schedSesion().rol === 'admin'; } catch (e) { return false; }
+    }
+    _mergeHorarioCampo(a = {}, b = {}) {
+        const out = {};
+        [a || {}, b || {}].forEach(src => Object.keys(src).forEach(fq => {
+            out[fq] = out[fq] || {};
+            Object.keys(src[fq] || {}).forEach(g => {
+                const v = src[fq][g];
+                if (v && (!out[fq][g] || String(v.at || '') > String(out[fq][g].at || ''))) out[fq][g] = v;
+            });
+        }));
+        return out;
+    }
+    abrirHorarioCampo(dStr, grupo) {
+        if (!this._esAdminSched()) { alert('Solo un administrador puede registrar el horario de campo del grupo.'); return; }
+        document.getElementById('horarioCampoModal')?.remove();
+        const actual = this._horarioCampo(dStr, grupo) || {};
+        // Lo que registró cada quien en su Calendar (referencia)
+        let dayData = (this._prodReports && this._prodReports[dStr]) || null;
+        if (!dayData) { try { dayData = JSON.parse(localStorage.getItem('brazos_horarios_' + dStr) || 'null'); } catch (e) {} }
+        const regs = Object.values(dayData || {}).filter(e => e && e.group === grupo && (e.shopOut || e.shopBack));
+        const nombre = (e) => { const emp = (this.emps || []).find(x => String(x.id) === String(e.empId)); return (emp && emp.name) || e.empName || 'Empleada'; };
+        const f12 = (t) => t ? this.fmt12(t) : '—';
+        const outs = regs.map(e => e.shopOut).filter(Boolean).sort();
+        const backs = regs.map(e => e.shopBack).filter(Boolean).sort();
+        const [y, m, d] = dStr.split('-');
+        const m_ = document.createElement('div');
+        m_.id = 'horarioCampoModal';
+        m_.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10050;display:flex;align-items:center;justify-content:center;';
+        m_.innerHTML = `
+          <div style="background:#fff;border-radius:12px;padding:20px 22px;width:340px;max-width:92vw;font-family:inherit;color:#2c3e50;">
+            <div style="font-size:1.05rem;font-weight:800;margin-bottom:2px;">🏠 Horario de campo — ${grupo}</div>
+            <div style="font-size:0.82rem;color:#7f8c8d;margin-bottom:12px;">${m}/${d}/${y} · Para Producción. No cambia la Nómina.</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+              <label style="font-size:0.8rem;font-weight:700;">Salida del shop<input type="time" id="hcSalida" value="${actual.salida || outs[0] || ''}" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;font-size:1rem;margin-top:3px;"></label>
+              <label style="font-size:0.8rem;font-weight:700;">Regreso al shop<input type="time" id="hcRegreso" value="${actual.regreso || backs[backs.length - 1] || ''}" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;font-size:1rem;margin-top:3px;"></label>
+            </div>
+            <div style="font-size:0.78rem;background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:8px 10px;margin-bottom:12px;">
+              <div style="font-weight:700;margin-bottom:4px;">Registrado en el Calendar:</div>
+              ${regs.length ? regs.map(e => `<div>👤 ${nombre(e)}: ${f12(e.shopOut)} – ${f12(e.shopBack)}</div>`).join('') : '<div style="color:#95a5a6;">Nadie registró horas de shop.</div>'}
+              ${actual.por ? `<div style="margin-top:6px;color:#7f8c8d;">✏️ Horario de campo puesto por ${actual.por}</div>` : ''}
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+              ${actual.salida || actual.regreso ? `<button onclick="app.guardarHorarioCampo('${dStr}','${grupo.replace(/'/g, "\\'")}',true)" class="btn" style="background:#95a5a6;color:#fff;padding:8px 12px;" title="Quitar el horario de campo y volver a usar lo registrado en el Calendar">Quitar</button>` : ''}
+              <button onclick="document.getElementById('horarioCampoModal').remove()" class="btn" style="background:#bdc3c7;color:#2c3e50;padding:8px 12px;">Cancelar</button>
+              <button onclick="app.guardarHorarioCampo('${dStr}','${grupo.replace(/'/g, "\\'")}')" class="btn" style="background:#e91e63;color:#fff;padding:8px 14px;font-weight:700;">💾 Guardar</button>
+            </div>
+          </div>`;
+        m_.addEventListener('click', ev => { if (ev.target === m_) m_.remove(); });
+        document.body.appendChild(m_);
+    }
+    guardarHorarioCampo(dStr, grupo, quitar = false) {
+        if (!this._esAdminSched()) return;
+        const salida = quitar ? '' : (document.getElementById('hcSalida')?.value || '');
+        const regreso = quitar ? '' : (document.getElementById('hcRegreso')?.value || '');
+        if (!quitar && !salida && !regreso) { alert('Pon al menos la salida o el regreso.'); return; }
+        if (!quitar && salida && regreso && regreso <= salida) { alert('El regreso debe ser después de la salida.'); return; }
+        if (!this.horarioCampo) this.horarioCampo = {};
+        if (!this.horarioCampo[dStr]) this.horarioCampo[dStr] = {};
+        let por = ''; try { por = (schedSesion() || {}).name || ''; } catch (e) {}
+        this.horarioCampo[dStr][grupo] = { salida, regreso, por, at: new Date().toISOString() };
+        localStorage.setItem('v35_horarioCampo', JSON.stringify(this.horarioCampo));
+        document.getElementById('horarioCampoModal')?.remove();
+        this.save();
+        this.render();
+    }
+
     _getShopTimesForDayGroup(dStr, nombreGrupo) {
         try {
             let dayData = (this._prodReports && this._prodReports[dStr]) || null;
@@ -3444,16 +3524,20 @@ class Scheduler {
                 const key = 'brazos_horarios_' + dStr;
                 dayData = JSON.parse(localStorage.getItem(key) || 'null');
             }
-            if (!dayData) return null;
+            const _campo = this._horarioCampo(dStr, nombreGrupo); // 2026-11-04 (admin)
+            if (!dayData && !_campo) return null;
+            if (!dayData) dayData = {};
             // 2026-11-03: el horario del GRUPO es la salida MÁS TEMPRANA y el regreso MÁS
             // TARDE (antes: el primero que se encontrara — si alguien que llegó después
             // registraba su salida, esa hora aparecía como la del grupo). Quien registró un
             // horario distinto al del grupo se lista aparte con su nombre.
             const regs = Object.values(dayData).filter(e => e && e.group === nombreGrupo && (e.shopOut || e.shopBack));
-            if (!regs.length) return null;
+            if (!regs.length && !_campo) return null;
             const outs = regs.map(e => e.shopOut).filter(Boolean).sort();
             const backs = regs.map(e => e.shopBack).filter(Boolean).sort();
-            const shopOut = outs[0] || null, shopBack = backs.length ? backs[backs.length - 1] : null;
+            // Si el admin puso el horario de campo, ESE manda (lo que falte, se completa con lo registrado)
+            const shopOut = (_campo && _campo.salida) || outs[0] || null;
+            const shopBack = (_campo && _campo.regreso) || (backs.length ? backs[backs.length - 1] : null);
             const personales = regs
                 .filter(e => (e.shopOut && e.shopOut !== shopOut) || (e.shopBack && e.shopBack !== shopBack))
                 .map(e => {
@@ -3461,7 +3545,7 @@ class Scheduler {
                     const nom = String((emp && emp.name) || e.empName || 'Empleada').split(' ')[0];
                     return { nombre: nom, shopOut: e.shopOut || '', shopBack: e.shopBack || '' };
                 });
-            return { shopOut, shopBack, personales };
+            return { shopOut, shopBack, personales, campo: !!_campo };
         } catch(e) { return null; }
     }
 
@@ -3842,10 +3926,25 @@ Brazos Cleaning Services</textarea>
 
         // ── Salida del Shop (se muestra ANTES del primer servicio del día) ──
         const shopTimes = this._getShopTimesForDayGroup(dStr, nombreGrupo);
+        const _adminHC = this._esAdminSched(); // 2026-11-04: el admin edita el horario de campo con clic
+        const _clicHC = (el) => {
+            if (!_adminHC) return;
+            el.style.cursor = 'pointer';
+            el.title = 'Clic para registrar o editar el horario de campo del grupo (Producción)';
+            el.addEventListener('click', ev => { ev.stopPropagation(); this.abrirHorarioCampo(dStr, nombreGrupo); });
+        };
+        if (_adminHC && !(shopTimes && (shopTimes.shopOut || shopTimes.shopBack)) && daily.length && dStr <= new Date().toLocaleDateString('en-CA')) {
+            const add = document.createElement('div');
+            add.style.cssText = 'font-size:0.62rem;color:#e91e63;opacity:0.55;text-align:center;margin-bottom:2px;';
+            add.textContent = '🏠 + horario de campo';
+            _clicHC(add);
+            cell.appendChild(add);
+        }
         if (shopTimes && shopTimes.shopOut) {
             const shopOutDiv = document.createElement('div');
             shopOutDiv.style.cssText = 'font-size:0.68rem;font-weight:700;color:#e91e63;background:#fce4ec;border-radius:4px;padding:2px 6px;margin-bottom:3px;text-align:center;';
-            shopOutDiv.textContent = `🏠 Salida: ${this.fmt12(shopTimes.shopOut)}`;
+            shopOutDiv.textContent = `🏠 Salida: ${this.fmt12(shopTimes.shopOut)}${shopTimes.campo ? ' ✏️' : ''}`;
+            _clicHC(shopOutDiv);
             // 2026-11-03: horarios personales distintos al del grupo (ej. alguien que llegó después)
             (shopTimes.personales || []).forEach(p => {
                 const pd = document.createElement('div');
@@ -3893,14 +3992,14 @@ Brazos Cleaning Services</textarea>
                 // Leer check-in/check-out — primero _prodReports (memoria), luego localStorage
                 let checkLine = '';
                 try {
-                    let svcRpt = null;
+                    let svcRpt = null, svcPor = null; // svcPor: registro del empleado que anotó las horas
                     // 1. Buscar en _prodReports[date][empId].services
                     if (this._prodReports && this._prodReports[dStr]) {
                         Object.values(this._prodReports[dStr]).forEach(empData => {
                             if (svcRpt) return;
                             if (empData && empData.services) {
                                 const found = empData.services.find(r => String(r.id) === String(s.id));
-                                if (found) svcRpt = found;
+                                if (found) { svcRpt = found; svcPor = empData; }
                             }
                         });
                     }
@@ -3912,7 +4011,7 @@ Brazos Cleaning Services</textarea>
                             if (svcRpt) return;
                             if (empData && empData.services) {
                                 const found = empData.services.find(r => String(r.id) === String(s.id));
-                                if (found) svcRpt = found;
+                                if (found) { svcRpt = found; svcPor = empData; }
                             }
                         });
                     }
@@ -3926,7 +4025,15 @@ Brazos Cleaning Services</textarea>
                             const d = (eh*60+em)-(sh*60+sm);
                             if (d>0) durStr = ` (${Math.floor(d/60)}h${d%60>0?' '+d%60+'m':''})`;
                         }
-                        checkLine = `<div class="ev-checkin">▶ ${cin}${svcRpt.checkout ? ' ✓ ' + cout + durStr : ''}</div>`;
+                        // 2026-11-04: quién registró las horas — SOLO en el globito (sin ocupar espacio)
+                        let _tip = '';
+                        if (svcPor) {
+                            const _e = (this.emps || []).find(x => String(x.id) === String(svcPor.empId));
+                            const _nom = (_e && _e.name) || svcPor.empName || '';
+                            const _at = (iso) => { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${this.fmt12(String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'))}`; };
+                            if (_nom) _tip = `Registró: ${_nom}` + (svcRpt.checkinAt ? ` · llegada anotada ${_at(svcRpt.checkinAt)}` : '') + (svcRpt.checkoutAt ? ` · salida anotada ${_at(svcRpt.checkoutAt)}` : '');
+                        }
+                        checkLine = `<div class="ev-checkin"${_tip ? ` title="${_tip.replace(/"/g,'&quot;')}"` : ''}>▶ ${cin}${svcRpt.checkout ? ' ✓ ' + cout + durStr : ''}</div>`;
                     }
                 } catch(e) {}
                 let priceLine = '';
@@ -3967,7 +4074,8 @@ Brazos Cleaning Services</textarea>
         if (shopTimes && shopTimes.shopBack) {
             const shopBackDiv = document.createElement('div');
             shopBackDiv.style.cssText = 'font-size:0.68rem;font-weight:700;color:#e91e63;background:#fce4ec;border-radius:4px;padding:2px 6px;margin-top:3px;margin-bottom:3px;text-align:center;';
-            shopBackDiv.textContent = `🏁 Regreso: ${this.fmt12(shopTimes.shopBack)}`;
+            shopBackDiv.textContent = `🏁 Regreso: ${this.fmt12(shopTimes.shopBack)}${shopTimes.campo ? ' ✏️' : ''}`;
+            _clicHC(shopBackDiv);
             cell.appendChild(shopBackDiv);
         }
 
@@ -7706,7 +7814,7 @@ Brazos Cleaning Services</textarea>
     // servicios que NUNCA se cobraron (fin de septiembre, Shelby).
     _svcFacturado(svc, facturas) {
         const lista = facturas || this.generatedInvoices || [];
-        if (this._servicioEnFacturaGenerada.call({ generatedInvoices: lista }, svc)) return true;
+        if (this._servicioEnFacturaGenerada(svc, lista)) return true;
         const cli = (this.clis || []).find(c => String(c.id) === String(svc.cliId));
         return lista.some(g => {
             if (g.status === 'cancelada' || !g.items || !g.items.length) return false;
@@ -7719,17 +7827,28 @@ Brazos Cleaning Services</textarea>
         });
     }
 
-    _servicioEnFacturaGenerada(svc) {
-        return (this.generatedInvoices || []).some(g => {
+    // 2026-11-04 (Ranu, #7621 / #7534 de Brazos Family Dental): una factura SOLO puede
+    // cubrir servicios de SU MISMO cliente. Antes, las facturas viejas sin clientIds (o con
+    // líneas cuyo id coincidía por casualidad) "cubrían" servicios de CUALQUIER cliente con
+    // la misma fecha — así la #7530 de Sherry Williams y la #7521 de Linda Laroque
+    // aparecían cubriendo servicios de Brazos Family Dental.
+    // Mismo cliente = la línea trae su cliId, o la factura trae el cliId en clientIds, o el
+    // NOMBRE del cliente de la factura es el del cliente del servicio (cubre multipropiedad).
+    _facturaDelMismoCliente(g, svc, it) {
+        if (!g || !svc) return false;
+        if (it && it.cliId !== undefined && it.cliId !== null && it.cliId !== '' && String(it.cliId) === String(svc.cliId)) return true;
+        if (g.clientIds && g.clientIds.some(id => String(id) === String(svc.cliId))) return true;
+        const cli = (this.clis || []).find(c => String(c.id) === String(svc.cliId));
+        return !!(cli && g.clientName && g.clientName === cli.name);
+    }
+
+    _servicioEnFacturaGenerada(svc, lista) {
+        return (lista || this.generatedInvoices || []).some(g => {
             if (g.status === 'cancelada') return false;
-            if (g.items && g.items.some(it => it && it.id !== undefined && it.id !== null && String(it.id) === String(svc.id))) return true;
-            if (g.items && g.items.length > 0 && g.items.some(it => it && (it.id === undefined || it.id === null) && it.fecha === svc.date)) {
-                if (!g.clientIds || g.clientIds.length === 0) return true;
-                return g.clientIds.some(id => String(id) === String(svc.cliId));
-            }
+            if (g.items && g.items.some(it => it && it.id !== undefined && it.id !== null && String(it.id) === String(svc.id) && this._facturaDelMismoCliente(g, svc, it))) return true;
+            if (g.items && g.items.length > 0 && g.items.some(it => it && (it.id === undefined || it.id === null) && it.fecha === svc.date && this._facturaDelMismoCliente(g, svc, it))) return true;
             if ((!g.items || g.items.length === 0) && g.startDate && g.endDate && g.startDate <= svc.date && g.endDate >= svc.date) {
-                if (!g.clientIds || g.clientIds.length === 0) return true;
-                return g.clientIds.some(id => String(id) === String(svc.cliId));
+                return this._facturaDelMismoCliente(g, svc, null);
             }
             return false;
         });
@@ -7751,14 +7870,14 @@ Brazos Cleaning Services</textarea>
                 continue;
             }
             // 1) Empate exacto por id de servicio (facturas nuevas, incluye manuales)
-            const byId = g.items.find(it => it && it.id !== undefined && it.id !== null && String(it.id) === String(svc.id));
+            const byId = g.items.find(it => it && it.id !== undefined && it.id !== null && String(it.id) === String(svc.id) && this._facturaDelMismoCliente(g, svc, it));
             if (byId && byId.precio !== undefined && byId.precio !== null) {
                 return { monto: parseFloat(byId.precio) || 0, fuente: 'facturado' };
             }
             // 2) Fallback por fecha+cliente (facturas viejas con items sin id)
-            const byFecha = g.items.find(it => it && (it.id === undefined || it.id === null) && it.fecha === svc.date);
+            const byFecha = g.items.find(it => it && (it.id === undefined || it.id === null) && it.fecha === svc.date && this._facturaDelMismoCliente(g, svc, it));
             if (byFecha) {
-                const clienteOk = !g.clientIds || g.clientIds.length === 0 || g.clientIds.some(id => String(id) === String(svc.cliId));
+                const clienteOk = true; // 2026-11-04: ya se verificó que es del mismo cliente
                 if (clienteOk && byFecha.precio !== undefined && byFecha.precio !== null) {
                     return { monto: parseFloat(byFecha.precio) || 0, fuente: 'facturado' };
                 }
@@ -7772,20 +7891,17 @@ Brazos Cleaning Services</textarea>
             if (g.status === 'cancelada') return false;
             // 1) Match preciso por ID de servicio — facturas generadas después de este
             //    cambio guardan el id exacto en cada línea (items[].id).
-            if (g.items && g.items.some(it => it && it.id !== undefined && it.id !== null && String(it.id) === String(svc.id))) return true;
+            if (g.items && g.items.some(it => it && it.id !== undefined && it.id !== null && String(it.id) === String(svc.id) && this._facturaDelMismoCliente(g, svc, it))) return true;
             // 2) Fallback para facturas viejas cuyos items no tienen "id" — coincide por
             //    fecha exacta + que la propiedad/cliente esté entre los clientIds de la
             //    factura (o la factura no tenga clientIds, en cuyo caso se asume que sí
             //    aplica, igual que hacía el chequeo original).
-            if (g.items && g.items.length > 0 && g.items.some(it => it && (it.id === undefined || it.id === null) && it.fecha === svc.date)) {
-                if (!g.clientIds || g.clientIds.length === 0) return true;
-                return g.clientIds.some(id => String(id) === String(svc.cliId));
-            }
+            // 2026-11-04: SIEMPRE del mismo cliente (ver _facturaDelMismoCliente)
+            if (g.items && g.items.length > 0 && g.items.some(it => it && (it.id === undefined || it.id === null) && it.fecha === svc.date && this._facturaDelMismoCliente(g, svc, it))) return true;
             // 3) Último fallback — facturas sin "items" guardados en absoluto (de antes de
             //    que existiera este registro): usar el rango de fechas de la factura.
             if ((!g.items || g.items.length === 0) && g.startDate && g.endDate && g.startDate <= svc.date && g.endDate >= svc.date) {
-                if (!g.clientIds || g.clientIds.length === 0) return true;
-                return g.clientIds.some(id => String(id) === String(svc.cliId));
+                return this._facturaDelMismoCliente(g, svc, null);
             }
             return false;
         });
@@ -14265,6 +14381,7 @@ Motivo de cancelación (opcional):`);
             gruposHistorial: this.gruposHistorial || {},
             gruposHistorialTs: this.gruposHistorialTs || {},
             gruposTs: this.gruposTs || '',
+            horarioCampo: this.horarioCampo || {},
             gastos: this.gastos || [],
             gastosCategories: this.gastosCategories || {},
             generatedInvoices: this.generatedInvoices || [],
@@ -14338,6 +14455,7 @@ Motivo de cancelación (opcional):`);
                             if (d.gruposHistorial) { this.gruposHistorial = d.gruposHistorial; localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial)); }
                             if (d.gruposHistorialTs) { this.gruposHistorialTs = d.gruposHistorialTs; localStorage.setItem('v35_gruposHistorialTs', JSON.stringify(this.gruposHistorialTs)); }
                             if (d.gruposTs) this._marcarGrupos(d.gruposTs);
+                            if (d.horarioCampo) { this.horarioCampo = d.horarioCampo; localStorage.setItem('v35_horarioCampo', JSON.stringify(this.horarioCampo)); }
                             this.gastos = d.gastos || [];
                             this.gastosCategories = d.gastosCategories || {};
                             this.generatedInvoices = d.generatedInvoices || [];
@@ -20368,6 +20486,22 @@ Motivo de cancelación (opcional):`);
             });
         });
 
+        // 2026-11-04: el horario de shop de cada grupo/día sale de la MISMA regla que la
+        // etiqueta del calendario (_getShopTimesForDayGroup): horario de campo del admin si
+        // existe; si no, la salida MÁS TEMPRANA y el regreso MÁS TARDE registrados. Antes
+        // se tomaba el primero que se encontrara.
+        Object.keys(groupRows).forEach(grp => {
+            const row = groupRows[grp];
+            row.shopByDate = {}; row.shopOut = null; row.shopBack = null;
+            dates.forEach(dt => {
+                const t = this._getShopTimesForDayGroup(dt, grp);
+                if (!t || !(t.shopOut || t.shopBack)) return;
+                row.shopByDate[dt] = { shopOut: t.shopOut || null, shopBack: t.shopBack || null };
+                if (!row.shopOut && t.shopOut) row.shopOut = t.shopOut;
+                if (!row.shopBack && t.shopBack) row.shopBack = t.shopBack;
+            });
+        });
+
         // Save for CSV export
         // ── CALCULAR TIEMPOS DE TRASLADO ENTRE SERVICIOS Y TRASLADO SHOP ──
         // Se calcula DÍA POR DÍA y luego se suma. Antes, en vista semanal, se usaba
@@ -21566,6 +21700,7 @@ Motivo de cancelación (opcional):`);
                 gruposHistorial: this.gruposHistorial || {},
                 gruposHistorialTs: this.gruposHistorialTs || {},
                 gruposTs: this.gruposTs || '',
+                horarioCampo: this.horarioCampo || {},
                 gastos: this.gastos || [],
                 gastosCategories: this.gastosCategories || {},
                 generatedInvoices: this.generatedInvoices || [],
@@ -21840,6 +21975,7 @@ Motivo de cancelación (opcional):`);
                 if (data.gruposHistorial)  { this.gruposHistorial = data.gruposHistorial; localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial)); }
                 if (data.gruposHistorialTs){ this.gruposHistorialTs = data.gruposHistorialTs; localStorage.setItem('v35_gruposHistorialTs', JSON.stringify(this.gruposHistorialTs)); }
                 if (data.gruposTs)         this._marcarGrupos(data.gruposTs);
+                if (data.horarioCampo)     { this.horarioCampo = data.horarioCampo; localStorage.setItem('v35_horarioCampo', JSON.stringify(this.horarioCampo)); }
                 if (data.gastos)           { this.gastos = data.gastos; localStorage.setItem('v35_gastos', JSON.stringify(this.gastos)); }
                 if (data.gastosCategories) { this.gastosCategories = data.gastosCategories; localStorage.setItem('v35_gastosCategories', JSON.stringify(this.gastosCategories)); }
                 if (data.generatedInvoices){ this.generatedInvoices = data.generatedInvoices; localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices)); }
@@ -22103,6 +22239,9 @@ Motivo de cancelación (opcional):`);
             localStorage.setItem('v35_gruposHistorial', JSON.stringify(this.gruposHistorial));
             this.gruposHistorialTs = this._mergeTsHist(this.gruposHistorialTs, data.gruposHistorialTs);
             localStorage.setItem('v35_gruposHistorialTs', JSON.stringify(this.gruposHistorialTs));
+            // 2026-11-04: horario de campo — por fecha/grupo gana el guardado más reciente
+            this.horarioCampo = this._mergeHorarioCampo(this.horarioCampo, data.horarioCampo);
+            localStorage.setItem('v35_horarioCampo', JSON.stringify(this.horarioCampo));
             this._aplicarRotacionDeHoy();
             localStorage.setItem('v35_grupos', JSON.stringify(this.grupos));
 
