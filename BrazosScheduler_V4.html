@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-04.3';
+const SCHED_BUILD = '2026-11-04.4';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -8673,6 +8673,7 @@ Brazos Cleaning Services</textarea>
                         if (!this._entregaPendiente(inv) || inv.sendChannel !== 'impresa') return '';
                         return `<div style="font-size:0.66rem;color:#8a8f98;margin-top:2px;">🖨️ Impresa · <a href="#" onclick="event.preventDefault();app.confirmarEntregaFactura('${_idE}')" style="color:#8a8f98;text-decoration:underline;">¿ya se entregó?</a></div>`;
                     })()}
+                    ${(() => { const _a = this._atrasoFactura(inv); return _a ? `<div title="Venció el ${String(_a.vence.getMonth()+1).padStart(2,'0')}/${String(_a.vence.getDate()).padStart(2,'0')}/${_a.vence.getFullYear()} (Términos de Pago de la ficha)" style="font-size:0.7rem;color:#c0392b;font-weight:700;margin-top:2px;">🔴 Atrasada ${_a.dias} día${_a.dias === 1 ? '' : 's'}</div>` : ''; })()}
                     ${this._avisoAchHTML(inv)}
                     ${(inv.status==='pagada' || inv.status==='parcial') && inv.paidAt ? (() => {
                         // Antes la fecha del pago SOLO se mostraba en las pagadas: en las
@@ -10335,6 +10336,70 @@ Motivo de cancelación (opcional):`);
     // desglose) y lo que quedó FACTURADO en ella (sus líneas guardadas). Si las líneas no
     // cuadran con el total guardado, se prueba con los servicios del calendario; si aún
     // así no cuadra, se imprime y se avisa cuál revisar.
+    // ── 2026-11-04 (Ranu): FACTURA ATRASADA ─────────────────────────────────────────
+    // MISMA regla que Cobranza: plazo = PRIMER envío + Términos de Pago de la ficha
+    // (Inmediato / Net 7 / 15 / 30; si no tiene, 15). Solo facturas enviadas, parciales
+    // o vencidas (no pagadas ni canceladas). Cuenta como atrasada desde el día SIGUIENTE
+    // a la fecha límite. Devuelve { dias, vence, saldo, parcial } o null.
+    _atrasoFactura(inv) {
+        if (!inv || !['enviada', 'parcial', 'vencida'].includes(inv.status)) return null;
+        const cli = ((inv.clientIds && inv.clientIds.length)
+                ? (this.clis || []).find(c => String(c.id) === String(inv.clientIds[0])) : null)
+            || (this.clis || []).find(c => c.name === inv.clientName) || {};
+        let terms = (cli.paymentTerms !== undefined) ? parseInt(cli.paymentTerms) : 15;
+        if (isNaN(terms)) terms = 15;
+        const hist = inv.sentHistory || [];
+        const base = hist.length > 0 ? String(hist[0].date).split('T')[0] : (inv.sentAt || inv.generatedDate);
+        if (!base) return null;
+        const vence = new Date(base + 'T00:00:00');
+        vence.setDate(vence.getDate() + terms);
+        const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+        const dias = Math.round((hoy - vence) / 86400000);
+        if (dias < 1) return null;
+        const parcial = inv.status === 'parcial';
+        const saldo = parcial ? Math.max(0, parseFloat(inv.total || 0) - parseFloat(inv.paidAmount || 0)) : parseFloat(inv.total || 0);
+        return { dias, vence, saldo, parcial };
+    }
+
+    // Sello rojo "PAST DUE" en la página 1 del PDF de una factura YA registrada que esté
+    // atrasada. Se llama desde createPDFBlob solo al reabrir/reimprimir (número existente).
+    _sellarAtrasada(doc, invoiceNumber) {
+        try {
+            const inv = (this.generatedInvoices || []).find(i =>
+                Number(i.invoiceNumber) === Number(invoiceNumber) && i.status !== 'cancelada');
+            const a = this._atrasoFactura(inv);
+            if (!a) return;
+            doc.setPage(1);
+            if (doc.saveGraphicsState) doc.saveGraphicsState();
+            if (doc.GState && doc.setGState) doc.setGState(new doc.GState({ opacity: 0.6 }));
+            const ang = 12, t = ang * Math.PI / 180, cos = Math.cos(t), sin = Math.sin(t);
+            const cx = 148, cy = 150;
+            // punto (dx,dy) relativo al centro, girado en pantalla (y hacia abajo)
+            const P = (dx, dy) => [cx + dx * cos + dy * sin, cy - dx * sin + dy * cos];
+            const w = 84, h = a.parcial ? 36 : 28;
+            const caja = (m) => {
+                const pts = [P(-w/2 + m, -h/2 + m), P(w/2 - m, -h/2 + m), P(w/2 - m, h/2 - m), P(-w/2 + m, h/2 - m)];
+                for (let i = 0; i < 4; i++) { const p = pts[i], q = pts[(i + 1) % 4]; doc.line(p[0], p[1], q[0], q[1]); }
+            };
+            doc.setDrawColor(200, 30, 30);
+            doc.setLineWidth(1.4); caja(0);
+            doc.setLineWidth(0.4); caja(2.5);
+            doc.setTextColor(200, 30, 30);
+            const linea = (txt, size, dy) => {
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(size);
+                const tw = doc.getTextWidth(txt);
+                const p = P(-tw / 2, dy);
+                doc.text(txt, p[0], p[1], { angle: ang });
+            };
+            const top = a.parcial ? -4 : -1;
+            linea('PAST DUE', 28, top);
+            linea(`${a.dias} DAY${a.dias === 1 ? '' : 'S'} LATE`, 12, top + 9);
+            if (a.parcial) linea(`BALANCE DUE: $${a.saldo.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`, 10, top + 16);
+            if (doc.restoreGraphicsState) doc.restoreGraphicsState();
+            doc.setTextColor(0, 0, 0);
+        } catch (e) { console.warn('Sello PAST DUE:', e); }
+    }
+
     _selFacturasSet() { if (!this._selFacturasImp) this._selFacturasImp = new Set(); return this._selFacturasImp; }
 
     toggleSelFactura(id, on) {
@@ -17863,6 +17928,7 @@ Motivo de cancelación (opcional):`);
             this.drawPaymentOptions(doc, 18, noteYa, 174, invoiceNumber, client.name, grandTotal_a || total);
 
             // Retornar sin ejecutar el bloque genérico
+            if (isEditingExisting) this._sellarAtrasada(doc, invoiceNumber); // 2026-11-04
             return {
                 blob: doc.output('blob'),
                 // 2026-11-04: la config REAL con la que se armó este PDF (ver displayPDFPreview)
@@ -18064,6 +18130,7 @@ Motivo de cancelación (opcional):`);
         this.drawPaymentOptions(doc, 20, noteY, 170, invoiceNumber, client.name, typeof grandTotal !== 'undefined' ? grandTotal : total);
         
         // Retornar el PDF y el número de factura
+        if (isEditingExisting) this._sellarAtrasada(doc, invoiceNumber); // 2026-11-04
         return {
             blob: doc.output('blob'),
             // 2026-11-04: la config REAL con la que se armó este PDF (ver displayPDFPreview)
