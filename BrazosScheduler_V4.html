@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-04.7';
+const SCHED_BUILD = '2026-11-04.8';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -10541,8 +10541,11 @@ Motivo de cancelación (opcional):`);
         [...s].forEach(id => { if (!vivas.has(id)) s.delete(id); });
         const n = s.size;
         const c = document.getElementById('genInvSelCount'); if (c) c.innerText = n;
-        const b = document.getElementById('btnImprimirSelFacturas');
-        if (b) { b.disabled = n === 0; b.style.opacity = n === 0 ? '0.5' : '1'; }
+        const c2 = document.getElementById('genInvSelCount2'); if (c2) c2.innerText = n;
+        ['btnImprimirSelFacturas', 'btnEmailSelFacturas'].forEach(idB => {
+            const b = document.getElementById(idB);
+            if (b) { b.disabled = n === 0; b.style.opacity = n === 0 ? '0.5' : '1'; }
+        });
         const lim = document.getElementById('btnLimpiarSelFacturas'); if (lim) lim.style.display = n ? 'inline-block' : 'none';
         const all = document.getElementById('genInvSelAll');
         if (all) {
@@ -10620,6 +10623,131 @@ Motivo de cancelación (opcional):`);
         if (!elegido) return { blob: null, aviso: 'no tiene líneas ni servicios para imprimir' };
         return { blob: elegido.blob,
                  aviso: `el total impreso ($${(parseFloat(elegido.total) || 0).toFixed(2)}) no coincide con el guardado ($${(parseFloat(invoice.total) || 0).toFixed(2)}) — revísala con ✏️ Editar` };
+    }
+
+    // ── 2026-11-04 (Ranu): ENVIAR VARIAS FACTURAS POR EMAIL, cada una en SU correo ──
+    // Mismo envío que una sola (EmailJS, misma plantilla, PDF adjunto con sello PAST DUE
+    // si está atrasada). NO cambia ningún status (decisión de Ranu). Solo anota el envío en
+    // el historial y el medio (email). Se omiten: sin email, o total que no cuadra.
+    _emailsDeFactura(inv) {
+        const cli = ((inv.clientIds && inv.clientIds.length)
+                ? (this.clis || []).find(c => String(c.id) === String(inv.clientIds[0])) : null)
+            || (this.clis || []).find(c => c.name === inv.clientName);
+        const raw = inv.clientEmail || this.getClientEmail(cli) || '';
+        return raw.split(',').map(e => e.trim()).filter(e => e.length > 0);
+    }
+
+    prepararEmailFacturasSeleccionadas() {
+        const sel = this._selFacturasSet();
+        const visibles = (this._lastFilteredInvoices || []);
+        const lista = [
+            ...visibles.filter(i => sel.has(String(i.id))),
+            ...(this.generatedInvoices || []).filter(i => sel.has(String(i.id)) && !visibles.includes(i))
+        ].filter(i => i.status !== 'cancelada');
+        if (!lista.length) { alert('Marca primero las facturas que quieres enviar (casilla a la izquierda).'); return; }
+        this._loteEmail = lista;
+        const esc = t => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        const filas = lista.map(inv => {
+            const em = this._emailsDeFactura(inv);
+            const a = this._atrasoFactura(inv);
+            return `<tr style="border-bottom:1px solid #eee;">
+                <td style="padding:5px 6px;white-space:nowrap;"><b>#${String(inv.invoiceNumber).padStart(4, '0')}</b></td>
+                <td style="padding:5px 6px;">${esc(inv.clientName)}${a ? ` <span style="color:#c0392b;font-size:0.72rem;font-weight:700;">PAST DUE</span>` : ''}</td>
+                <td style="padding:5px 6px;font-size:0.8rem;${em.length ? '' : 'color:#c0392b;font-weight:700;'}">${em.length ? esc(em.join(', ')) : '⚠️ Sin email — no se envía'}</td>
+            </tr>`;
+        }).join('');
+        const nCorreos = lista.filter(i => this._emailsDeFactura(i).length).length;
+        document.getElementById('loteEmailModal')?.remove();
+        const m = document.createElement('div');
+        m.id = 'loteEmailModal';
+        m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10060;display:flex;align-items:center;justify-content:center;';
+        m.innerHTML = `
+          <div style="background:#fff;border-radius:12px;padding:20px 22px;width:640px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;color:#2c3e50;">
+            <div style="font-size:1.1rem;font-weight:800;margin-bottom:4px;">📧 Enviar ${lista.length} factura(s) por email</div>
+            <div style="font-size:0.82rem;color:#7f8c8d;margin-bottom:10px;">Cada factura sale en su propio correo, con su PDF. No se cambia ningún status.</div>
+            <div style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:10px;">
+              <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">${filas}</table>
+            </div>
+            <label style="font-size:0.82rem;font-weight:700;color:#555;">📝 Nota para el cliente (opcional, la misma para todos — en inglés)</label>
+            <textarea id="loteEmailNota" rows="2" placeholder="Ej: This is a friendly reminder that the attached invoice is past due." style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem;font-family:inherit;resize:vertical;box-sizing:border-box;margin:4px 0 12px;"></textarea>
+            <div id="loteEmailProgreso" style="font-size:0.85rem;color:#1A4FCC;font-weight:700;min-height:1.2em;margin-bottom:8px;"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+              <button id="loteEmailCancelar" onclick="document.getElementById('loteEmailModal').remove()" class="btn" style="background:#bdc3c7;color:#2c3e50;padding:9px 14px;">Cancelar</button>
+              <button id="loteEmailEnviar" onclick="app.enviarEmailFacturasSeleccionadas()" ${nCorreos ? '' : 'disabled'} class="btn" style="background:#ea4335;color:#fff;padding:9px 16px;font-weight:700;">📧 Enviar ${nCorreos} factura(s)</button>
+            </div>
+          </div>`;
+        document.body.appendChild(m);
+    }
+
+    async enviarEmailFacturasSeleccionadas() {
+        const lista = this._loteEmail || [];
+        if (!lista.length) return;
+        if (typeof emailjs === 'undefined') { alert('❌ El servicio de correo no está cargado (¿sin internet?). Recarga la página e intenta de nuevo.'); return; }
+        const nota = (document.getElementById('loteEmailNota')?.value || '').trim();
+        const customNote = nota ? `\n${nota}\n` : '';
+        const btn = document.getElementById('loteEmailEnviar');
+        const btnC = document.getElementById('loteEmailCancelar');
+        const prog = document.getElementById('loteEmailProgreso');
+        if (btn) btn.disabled = true; if (btnC) btnC.disabled = true;
+        const numEl = document.getElementById('editingInvoiceNumber');
+        const numAntes = numEl ? numEl.value : '';
+        const editAntes = this._editingInvoiceNumber;
+        const enviadas = [], omitidas = [], errores = [];
+        const espera = ms => new Promise(r => setTimeout(r, ms));
+        let i = 0;
+        for (const inv of lista) {
+            i++;
+            const etq = `#${String(inv.invoiceNumber).padStart(4, '0')} ${inv.clientName}`;
+            if (prog) prog.textContent = `⏳ Enviando ${i} de ${lista.length}: ${etq}…`;
+            const emails = this._emailsDeFactura(inv);
+            if (!emails.length) { omitidas.push(`${etq}: sin email`); continue; }
+            let r;
+            try {
+                if (numEl) numEl.value = inv.invoiceNumber;
+                this._editingInvoiceNumber = inv.invoiceNumber;
+                r = this._pdfDeFacturaGuardada(inv);
+            } finally {
+                if (numEl) numEl.value = numAntes;
+                this._editingInvoiceNumber = editAntes;
+            }
+            // Nunca mandar al cliente una factura cuyo total no cuadra con lo guardado
+            if (!r || !r.blob || r.aviso) { omitidas.push(`${etq}: ${(r && r.aviso) || 'no se pudo armar el PDF'}`); continue; }
+            try {
+                const u8 = new Uint8Array(await r.blob.arrayBuffer());
+                let bin = ''; for (let k = 0; k < u8.length; k++) bin += String.fromCharCode(u8[k]);
+                const base64PDF = btoa(bin);
+                const invoiceNum = String(inv.invoiceNumber).padStart(4, '0');
+                const fileName = `Invoice_${invoiceNum}_${String(inv.clientName || '').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                for (const email of emails) {
+                    await emailjs.send('service_mamjtia', 'template_ygaa3xa', {
+                        client_name: inv.clientName, invoice_number: invoiceNum, to_email: email,
+                        pdf_content: base64PDF, pdf_name: fileName, custom_note: customNote
+                    });
+                    await espera(1100); // EmailJS acepta ~1 envío por segundo
+                }
+                // Historial: si la factura no tenía historial, primero se anota su envío
+                // ORIGINAL (sentAt), para que el reloj de atraso no se reinicie con este reenvío.
+                if ((!inv.sentHistory || !inv.sentHistory.length) && inv.sentAt) {
+                    inv.sentHistory = [{ date: inv.sentAt + 'T12:00:00', method: 'envío original' }];
+                }
+                this._addSentHistory(inv, 'email');
+                this._marcarCanalEnvio(inv, 'email');
+                inv.updatedAt = new Date().toISOString();
+                enviadas.push(`${etq} → ${emails.join(', ')}`);
+            } catch (e) {
+                errores.push(`${etq}: ${(e && (e.text || e.message)) || 'error desconocido'}`);
+            }
+        }
+        if (enviadas.length) {
+            this.save();
+            if (this.driveConnected && this.driveSyncNow) this.driveSyncNow().catch(() => {});
+        }
+        document.getElementById('loteEmailModal')?.remove();
+        this.refreshGeneratedInvoices();
+        alert(`📧 Envío terminado\n\n✅ Enviadas: ${enviadas.length}` +
+              (enviadas.length ? '\n' + enviadas.map(t => '   • ' + t).join('\n') : '') +
+              (omitidas.length ? `\n\n⚠️ NO enviadas (${omitidas.length}):\n` + omitidas.map(t => '   • ' + t).join('\n') : '') +
+              (errores.length ? `\n\n❌ Error al enviar (${errores.length}):\n` + errores.map(t => '   • ' + t).join('\n') : ''));
     }
 
     _cargarPdfLib() {
@@ -24247,6 +24375,9 @@ document.addEventListener('click', function(e) {
                 </button>
                 <button id="btnImprimirSelFacturas" onclick="app.imprimirFacturasSeleccionadas()" disabled title="Imprime juntas, en un solo PDF, las facturas marcadas con la casilla" class="btn" style="padding:8px 14px; background:#1A4FCC; color:white; font-size:0.85rem; font-weight:bold; white-space:nowrap; opacity:0.5;">
                     🖨️ Imprimir facturas marcadas (<span id="genInvSelCount">0</span>)
+                </button>
+                <button id="btnEmailSelFacturas" onclick="app.prepararEmailFacturasSeleccionadas()" disabled title="Envía por email las facturas marcadas, cada una en su propio correo" class="btn" style="padding:8px 14px; background:#ea4335; color:white; font-size:0.85rem; font-weight:bold; white-space:nowrap; opacity:0.5;">
+                    📧 Enviar marcadas (<span id="genInvSelCount2">0</span>)
                 </button>
                 <button id="btnLimpiarSelFacturas" onclick="app.limpiarSelFacturas()" title="Quitar todas las marcas" class="btn" style="display:none; padding:8px 10px; background:#adb5bd; color:white; font-size:0.85rem; white-space:nowrap;">✖</button>
             </div>
