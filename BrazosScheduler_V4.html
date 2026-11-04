@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-03.1';
+const SCHED_BUILD = '2026-11-04.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -8625,7 +8625,9 @@ Brazos Cleaning Services</textarea>
             const statusLabel = statusLabels[inv.status] || inv.status;
             const isDuplicate = !isCancelled && numCounts[inv.invoiceNumber] > 1;
 
+            const _marcada = this._selFacturasSet().has(String(inv.id));
             html += `<tr style="${rowStyle}${isDuplicate ? 'background:#fff3cd;' : ''}">
+                <td style="text-align:center;">${isCancelled ? '' : `<input type="checkbox" class="genInvSel" ${_marcada ? 'checked' : ''} onchange="app.toggleSelFactura('${inv.id}', this.checked)" title="Marcar para imprimir">`}</td>
                 <td><strong>#${invoiceNumberFormatted}</strong>${isDuplicate ? ' <span title="Número duplicado" style="color:#e74c3c;font-size:0.8rem;">⚠️</span>' : ''}</td>
                 <td>${genFormatted}</td>
                 <td>${inv.clientName}${isCancelled ? `<br><small style="color:#c0392b;font-style:italic;text-decoration:none;display:inline-block;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;" title="${(inv.cancelledReason||'Cancelada').replace(/"/g,'&quot;')}">${inv.cancelledReason||'Cancelada'}</small> <a href="#" onclick="event.preventDefault();app.editarMotivoCancelacion('${inv.id}')" title="Editar motivo de cancelación" style="text-decoration:none;font-size:0.7rem;">✏️</a>` : ''}</td>
@@ -8711,13 +8713,14 @@ Brazos Cleaning Services</textarea>
         });
         
         if (filtered.length === 0) {
-            html = `<tr><td colspan="9" style="text-align: center; padding: 40px; color: #95a5a6;">
+            html = `<tr><td colspan="10" style="text-align: center; padding: 40px; color: #95a5a6;">
                 No hay facturas en este período
             </td></tr>`;
         }
         
         this._lastFilteredInvoices = filtered;
         document.getElementById('genInvBody').innerHTML = html;
+        this._pintarContadorSelFacturas();
         document.getElementById('genInvCount').innerText = filtered.length;
         const badge = document.getElementById('genInvBadge'); if(badge) badge.innerText = filtered.length + ' facturas';
         const sc = document.getElementById('genInvSentCount'); if(sc) sc.innerText = sentCount;
@@ -10322,6 +10325,203 @@ Motivo de cancelación (opcional):`);
 
 
     
+    // ── 2026-11-04 (Ranu): IMPRIMIR VARIAS FACTURAS JUNTAS desde Enviadas ─────────
+    // Antes había que abrir cada factura con ✏️ Editar para reimprimirla. Ahora se marcan
+    // con la casilla de cada fila y "🖨️ Imprimir seleccionadas" las junta en UN solo PDF.
+    // SOLO REIMPRIME: no cambia status, ni número, ni canal de envío, ni nada guardado.
+    // Cada factura se rearma con su MISMO número, su misma config (plantilla, impuesto,
+    // desglose) y lo que quedó FACTURADO en ella (sus líneas guardadas). Si las líneas no
+    // cuadran con el total guardado, se prueba con los servicios del calendario; si aún
+    // así no cuadra, se imprime y se avisa cuál revisar.
+    _selFacturasSet() { if (!this._selFacturasImp) this._selFacturasImp = new Set(); return this._selFacturasImp; }
+
+    toggleSelFactura(id, on) {
+        const s = this._selFacturasSet();
+        if (on) s.add(String(id)); else s.delete(String(id));
+        this._pintarContadorSelFacturas();
+    }
+
+    toggleSelTodasFacturas(on) {
+        const s = this._selFacturasSet();
+        (this._lastFilteredInvoices || []).forEach(inv => {
+            if (inv.status === 'cancelada') return;
+            if (on) s.add(String(inv.id)); else s.delete(String(inv.id));
+        });
+        document.querySelectorAll('#genInvBody .genInvSel').forEach(cb => { cb.checked = !!on; });
+        this._pintarContadorSelFacturas();
+    }
+
+    _pintarContadorSelFacturas() {
+        const s = this._selFacturasSet();
+        // Solo cuentan las que siguen existiendo y no están canceladas
+        const vivas = new Set((this.generatedInvoices || []).filter(i => i.status !== 'cancelada').map(i => String(i.id)));
+        [...s].forEach(id => { if (!vivas.has(id)) s.delete(id); });
+        const n = s.size;
+        const c = document.getElementById('genInvSelCount'); if (c) c.innerText = n;
+        const b = document.getElementById('btnImprimirSelFacturas');
+        if (b) { b.disabled = n === 0; b.style.opacity = n === 0 ? '0.5' : '1'; }
+        const lim = document.getElementById('btnLimpiarSelFacturas'); if (lim) lim.style.display = n ? 'inline-block' : 'none';
+        const all = document.getElementById('genInvSelAll');
+        if (all) {
+            const vis = (this._lastFilteredInvoices || []).filter(i => i.status !== 'cancelada');
+            const marcadas = vis.filter(i => s.has(String(i.id))).length;
+            all.checked = vis.length > 0 && marcadas === vis.length;
+            all.indeterminate = marcadas > 0 && marcadas < vis.length;
+        }
+    }
+
+    limpiarSelFacturas() {
+        this._selFacturasSet().clear();
+        document.querySelectorAll('#genInvBody .genInvSel').forEach(cb => { cb.checked = false; });
+        this._pintarContadorSelFacturas();
+    }
+
+    // Arma el PDF de UNA factura guardada, sin tocar nada de los datos.
+    // Devuelve { blob, aviso } — aviso = texto si algo no cuadró, o '' si todo bien.
+    _pdfDeFacturaGuardada(invoice) {
+        const _cliIdItems = (invoice.items || []).map(it => it && it.cliId).find(v => v);
+        const _fichaItems = _cliIdItems ? this.clis.find(c => String(c.id) === String(_cliIdItems)) : null;
+        const _fichaOk = (_fichaItems && _fichaItems.name === invoice.clientName) ? _fichaItems : null;
+        const _fichaIds = (invoice.clientIds && invoice.clientIds.length)
+            ? this.clis.find(c => String(c.id) === String(invoice.clientIds[0])) : null;
+        const rawClient = _fichaOk || _fichaIds ||
+                       this.clis.find(c => c.name === invoice.clientName) ||
+                       this.clis.find(c => invoice.clientName && invoice.clientName.startsWith(c.name));
+        if (!rawClient) return { blob: null, aviso: 'cliente no encontrado' };
+        // El correo con el que SE ENVIÓ esta factura (no se modifica la ficha)
+        const client = invoice.clientEmail ? { ...rawClient, email: invoice.clientEmail } : rawClient;
+
+        const currentConfig = JSON.parse(localStorage.getItem('invoiceConfig') || '{}');
+        const iCfg = invoice.invoiceConfig || currentConfig;
+        const template = iCfg.template || currentConfig.template || 'modern';
+        const paymentDue = iCfg.paymentDue || currentConfig.paymentDue || '';
+        const showDetails = iCfg.showDetails !== undefined ? iCfg.showDetails
+            : (currentConfig.showDetails !== undefined ? currentConfig.showDetails : true);
+        const applyTax = (iCfg.applyTax !== undefined && iCfg.applyTax !== null) ? !!iCfg.applyTax : !!invoice.applyTax;
+        const taxRate = applyTax ? (parseFloat(iCfg.taxRate) || parseFloat(invoice.taxRate) || 0) : 0;
+
+        const esperado = Math.round((parseFloat(invoice.total) || 0) * 100);
+        const cuadra = (pdf) => pdf && pdf.blob && Math.round((parseFloat(pdf.total) || 0) * 100) === esperado;
+        const armar = (lista, detalles) => {
+            if (!lista || !lista.length) return null;
+            try {
+                return this.createPDFBlob(client, lista, invoice.startDate, invoice.endDate,
+                    template, paymentDue, detalles, applyTax, taxRate);
+            } catch (e) { console.error('Reimpresión #' + invoice.invoiceNumber, e); return null; }
+        };
+
+        // Opción A: las líneas que quedaron FACTURADAS en la factura
+        const deItems = (invoice.items || []).map(it => ({
+            id: it.id, cliId: it.cliId || client.id,
+            date: it.fecha || it.date || invoice.startDate,
+            name: it.descripcion || it.name || 'Cleaning Service',
+            price: parseFloat(it.precio !== undefined ? it.precio : it.price) || 0
+        })).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+        const pdfA = armar(deItems, invoice.isManual === true ? true : showDetails);
+        if (cuadra(pdfA)) return { blob: pdfA.blob, aviso: '' };
+
+        // Opción B: los servicios del calendario (mismo criterio que la regeneración)
+        const idsItems = new Set((invoice.items || []).map(it => it && it.id).filter(v => v !== undefined && v !== null).map(String));
+        const servicios = this.servs.filter(s => {
+            if (s.cancelled) return false;
+            if (idsItems.size) return idsItems.has(String(s.id));
+            return String(s.cliId) === String(rawClient.id) && s.date >= invoice.startDate && s.date <= invoice.endDate;
+        }).map(s => {
+            const real = this._montoRealDelServicio(s);
+            return real ? { ...s, price: real.monto } : s;
+        }).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+        const pdfB = armar(servicios, showDetails);
+        if (cuadra(pdfB)) return { blob: pdfB.blob, aviso: '' };
+
+        const elegido = pdfA || pdfB;
+        if (!elegido) return { blob: null, aviso: 'no tiene líneas ni servicios para imprimir' };
+        return { blob: elegido.blob,
+                 aviso: `el total impreso ($${(parseFloat(elegido.total) || 0).toFixed(2)}) no coincide con el guardado ($${(parseFloat(invoice.total) || 0).toFixed(2)}) — revísala con ✏️ Editar` };
+    }
+
+    _cargarPdfLib() {
+        if (window.PDFLib) return Promise.resolve(window.PDFLib);
+        const urls = ['https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
+                      'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js'];
+        const probar = (i) => new Promise((ok, mal) => {
+            if (i >= urls.length) return mal(new Error('No se pudo cargar la librería para unir PDFs (¿sin internet?)'));
+            const sc = document.createElement('script');
+            sc.src = urls[i];
+            sc.onload = () => window.PDFLib ? ok(window.PDFLib) : probar(i + 1).then(ok, mal);
+            sc.onerror = () => probar(i + 1).then(ok, mal);
+            document.head.appendChild(sc);
+        });
+        return probar(0);
+    }
+
+    async imprimirFacturasSeleccionadas() {
+        const sel = this._selFacturasSet();
+        // Mismo orden en que se ven en la lista
+        const visibles = (this._lastFilteredInvoices || []);
+        const ordenadas = [
+            ...visibles.filter(i => sel.has(String(i.id))),
+            ...(this.generatedInvoices || []).filter(i => sel.has(String(i.id)) && !visibles.includes(i))
+        ].filter(i => i.status !== 'cancelada');
+        if (!ordenadas.length) { alert('Marca primero las facturas que quieres imprimir (casilla a la izquierda).'); return; }
+
+        const btn = document.getElementById('btnImprimirSelFacturas');
+        const txtBtn = btn ? btn.innerHTML : '';
+        if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Preparando…'; }
+
+        // createPDFBlob toma el número del campo oculto — se pone el de cada factura y al
+        // final se deja EXACTAMENTE como estaba.
+        const numEl = document.getElementById('editingInvoiceNumber');
+        const numAntes = numEl ? numEl.value : '';
+        const editAntes = this._editingInvoiceNumber;
+        const blobs = [], avisos = [];
+        try {
+            for (const inv of ordenadas) {
+                if (numEl) numEl.value = inv.invoiceNumber;
+                this._editingInvoiceNumber = inv.invoiceNumber;
+                const r = this._pdfDeFacturaGuardada(inv);
+                const etiqueta = `#${String(inv.invoiceNumber).padStart(4, '0')} ${inv.clientName}`;
+                if (r.blob) blobs.push(r.blob);
+                if (r.aviso) avisos.push(`${etiqueta}: ${r.aviso}${r.blob ? '' : ' (NO se imprimió)'}`);
+            }
+        } finally {
+            if (numEl) numEl.value = numAntes;
+            this._editingInvoiceNumber = editAntes;
+        }
+
+        try {
+            if (!blobs.length) throw new Error('Ninguna factura se pudo armar.');
+            let final;
+            if (blobs.length === 1) {
+                final = blobs[0];
+            } else {
+                const PDFLib = await this._cargarPdfLib();
+                const unido = await PDFLib.PDFDocument.create();
+                for (const b of blobs) {
+                    const src = await PDFLib.PDFDocument.load(await b.arrayBuffer());
+                    const pags = await unido.copyPages(src, src.getPageIndices());
+                    pags.forEach(p => unido.addPage(p));
+                }
+                final = new Blob([await unido.save()], { type: 'application/pdf' });
+            }
+            if (avisos.length) {
+                alert(`⚠️ Revisa estas facturas:\n\n${avisos.join('\n')}\n\nLas demás salen normales.`);
+            }
+            const url = URL.createObjectURL(final);
+            const w = window.open(url);
+            if (!w) {
+                alert('El navegador bloqueó la ventana. Permite ventanas emergentes para esta página y vuelve a intentar.');
+            } else {
+                w.onload = function () { try { w.print(); } catch (e) {} };
+            }
+            this._ultimoPdfVarias = final; // para pruebas / volver a abrir
+        } catch (e) {
+            alert('❌ No se pudo preparar la impresión: ' + e.message);
+        } finally {
+            if (btn) { btn.innerHTML = txtBtn; }
+            this._pintarContadorSelFacturas();
+        }
+    }
+
     setHistFilter(period) {
         const today = new Date();
         const startInput = document.getElementById('histStart');
@@ -23835,6 +24035,10 @@ document.addEventListener('click', function(e) {
                 <button onclick="app.printInvoicesList()" title="Imprime la lista filtrada actual" class="btn" style="padding:8px 14px; background:#495057; color:white; font-size:0.85rem; font-weight:bold; white-space:nowrap;">
                     🖨️ Imprimir
                 </button>
+                <button id="btnImprimirSelFacturas" onclick="app.imprimirFacturasSeleccionadas()" disabled title="Imprime juntas, en un solo PDF, las facturas marcadas con la casilla" class="btn" style="padding:8px 14px; background:#1A4FCC; color:white; font-size:0.85rem; font-weight:bold; white-space:nowrap; opacity:0.5;">
+                    🖨️ Imprimir facturas marcadas (<span id="genInvSelCount">0</span>)
+                </button>
+                <button id="btnLimpiarSelFacturas" onclick="app.limpiarSelFacturas()" title="Quitar todas las marcas" class="btn" style="display:none; padding:8px 10px; background:#adb5bd; color:white; font-size:0.85rem; white-space:nowrap;">✖</button>
             </div>
         </div>
         
@@ -23843,6 +24047,7 @@ document.addEventListener('click', function(e) {
             <table class="finance-table">
                 <thead>
                     <tr>
+                        <th style="width:26px;text-align:center;"><input type="checkbox" id="genInvSelAll" onchange="app.toggleSelTodasFacturas(this.checked)" title="Marcar / desmarcar todas las que se ven"></th>
                         <th onclick="app.sortInvBy('num')" style="cursor:pointer; user-select:none;" title="Ordenar por número de factura">Nº Factura <span id="sortArrow_num" style="opacity:0.4;">⇅</span></th>
                         <th onclick="app.sortInvBy('date')" style="cursor:pointer; user-select:none;" title="Ordenar por fecha">Fecha Gen. <span id="sortArrow_date" style="opacity:0.4;">⇅</span></th>
                         <th onclick="app.sortInvBy('name')" style="cursor:pointer; user-select:none;" title="Ordenar por cliente">Cliente <span id="sortArrow_name" style="opacity:0.4;">⇅</span></th>
