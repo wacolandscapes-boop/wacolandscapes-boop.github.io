@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-04.1';
+const SCHED_BUILD = '2026-11-04.3';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -10122,8 +10122,10 @@ Brazos Cleaning Services</textarea>
         const rate = document.getElementById(idTasa);
         if (!chk || !cli) return;
         chk.checked = cli.cobraImpuestos !== false;
-        if (rate) rate.value = parseFloat(cli.taxRate) || 8.25;
+        // 2026-11-04: el toggle va ANTES de poner la tasa — toggleTaxField() la pisaba con la
+        // de la config general (o 16 %) y se perdía la tasa de la ficha/factura.
         if (typeof this[nombreToggle] === 'function') this[nombreToggle]();
+        if (rate) rate.value = parseFloat(cli.taxRate) || 8.25;
     }
 
     // Pone el checkbox y la tasa de impuesto según LA FACTURA MISMA (su invoiceConfig).
@@ -10137,10 +10139,10 @@ Brazos Cleaning Services</textarea>
             const chk = document.getElementById(idCheckbox);
             const rate = document.getElementById(idTasa);
             if (chk) chk.checked = !!cfg.applyTax;
-            if (rate) rate.value = (cfg.taxRate !== undefined && cfg.taxRate !== null && cfg.taxRate !== '')
+            if (typeof this[nombreToggle] === 'function') this[nombreToggle](); // antes de la tasa (ver arriba)
+            if (rate) rate.value = (cfg.taxRate !== undefined && cfg.taxRate !== null && cfg.taxRate !== '' && parseFloat(cfg.taxRate) > 0)
                 ? parseFloat(cfg.taxRate)
                 : (parseFloat(cli && cli.taxRate) || 8.25);
-            if (typeof this[nombreToggle] === 'function') this[nombreToggle]();
             return;
         }
         // Factura vieja sin decisión propia → respaldo: el perfil del cliente
@@ -16674,16 +16676,8 @@ Motivo de cancelación (opcional):`);
                     <textarea id="previewCustomNote" rows="2" placeholder="Ej: Notamos que el pago de Julio no llegó junto con el de Agosto..." style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
                 </div>` : ''}
                 <div style="padding: 20px; border-top: ${client.email ? '0' : '2px solid #ddd'}; display: flex; gap: 15px; justify-content: center; flex-wrap:wrap;">
-                    <!-- Tax controls in preview -->
-                    <div style="display:flex;align-items:center;gap:8px;background:#f8f9fa;padding:10px 15px;border-radius:8px;border:1px solid #ddd;">
-                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;font-size:0.9rem;">
-                            <input type="checkbox" id="previewApplyTax" onchange="app.togglePreviewTax()" style="width:16px;height:16px;">
-                            💵 Tax
-                        </label>
-                        <input type="number" id="previewTaxRate" value="8.25" min="0" max="100" step="0.01" style="width:70px;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem;" placeholder="8.25">
-                        <span style="font-size:0.85rem;color:#666;">%</span>
-                        <button onclick="app.regenWithTax()" class="btn" style="background:#e67e22;color:white;padding:8px 14px;font-size:0.85rem;border:none;border-radius:6px;cursor:pointer;font-weight:600;">🔄 Aplicar</button>
-                    </div>
+                    <!-- 2026-11-04 (Ranu): se quitó la casilla "💵 Tax" de la vista previa — siempre salía
+                         desmarcada y confundía. Las taxas se deciden SOLO en el formulario de la factura. -->
                     <button onclick="app.printPDF('${pdfUrl}')" class="btn" style="background: #1A4FCC; color: white; padding: 15px 30px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                         🖨️ Imprimir
                     </button>
@@ -16719,8 +16713,14 @@ Motivo de cancelación (opcional):`);
         window.currentPDFData.serviceCount = pdfData._serviceCount || (pdfData.services ? pdfData.services.length : 0);
         if (pdfData._services) window.currentPDFData._services = pdfData._services;
         // Use override if provided (from regenerate), else capture from modal vars
+        // 2026-11-04 (Ranu, Brazos Family Dental): las variables template/applyTax/taxRate/
+        // showDetails/paymentDue NO existen dentro de esta función, así que el bloque de abajo
+        // SIEMPRE guardaba "sin taxas, con desglose" aunque el PDF sí llevara taxas. Al editar,
+        // la casilla salía desmarcada. Ahora se guarda la config REAL que usó createPDFBlob.
         if (invoiceConfigOverride) {
             window.currentPDFData.invoiceConfig = invoiceConfigOverride;
+        } else if (pdfData && pdfData._cfg) {
+            window.currentPDFData.invoiceConfig = { ...pdfData._cfg };
         } else {
             try {
                 const _t = typeof template !== 'undefined' ? template : (document.querySelector('input[name="invoiceTemplate"]:checked')?.value || 'modern');
@@ -17865,6 +17865,8 @@ Motivo de cancelación (opcional):`);
             // Retornar sin ejecutar el bloque genérico
             return {
                 blob: doc.output('blob'),
+                // 2026-11-04: la config REAL con la que se armó este PDF (ver displayPDFPreview)
+                _cfg: { template, paymentDue, showDetails, applyTax: !!applyTax, taxRate: applyTax ? (parseFloat(taxRate) || 0) : 0 },
                 invoiceNumber: invoiceNumber,
                 client: client,
                 startDate: startDate,
@@ -18064,6 +18066,8 @@ Motivo de cancelación (opcional):`);
         // Retornar el PDF y el número de factura
         return {
             blob: doc.output('blob'),
+            // 2026-11-04: la config REAL con la que se armó este PDF (ver displayPDFPreview)
+            _cfg: { template, paymentDue, showDetails, applyTax: !!applyTax, taxRate: applyTax ? (parseFloat(taxRate) || 0) : 0 },
             invoiceNumber: invoiceNumber,
             client: client,
             startDate: startDate,
