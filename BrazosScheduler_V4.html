@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-04.8';
+const SCHED_BUILD = '2026-11-05.2';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -3503,9 +3503,17 @@ class Scheduler {
     }
     guardarHorarioCampo(dStr, grupo, quitar = false) {
         if (!this._esAdminSched()) return;
+        // 2026-11-04: una hora a medio escribir (p. ej. sin AM/PM) el navegador la entrega
+        // VACÍA y se perdía sin aviso — el regreso "no se guardaba". Ahora se avisa.
+        if (!quitar) {
+            const inc = [['hcSalida', 'Salida'], ['hcRegreso', 'Regreso']]
+                .filter(([id]) => document.getElementById(id)?.validity?.badInput).map(([, n]) => n);
+            if (inc.length) { alert(`⚠️ La hora de ${inc.join(' y ')} está incompleta.\n\nLlena hora, minutos y AM/PM (p. ej. 03:30 PM).`); return; }
+        }
         const salida = quitar ? '' : (document.getElementById('hcSalida')?.value || '');
         const regreso = quitar ? '' : (document.getElementById('hcRegreso')?.value || '');
         if (!quitar && !salida && !regreso) { alert('Pon al menos la salida o el regreso.'); return; }
+        if (!quitar && salida && !regreso && !confirm('No pusiste hora de Regreso. ¿Guardar solo la Salida?')) return;
         if (!quitar && salida && regreso && regreso <= salida) { alert('El regreso debe ser después de la salida.'); return; }
         if (!this.horarioCampo) this.horarioCampo = {};
         if (!this.horarioCampo[dStr]) this.horarioCampo[dStr] = {};
@@ -9023,12 +9031,19 @@ Brazos Cleaning Services</textarea>
             }
         });
 
-        // Línea 1: Cheque
-        doc.setFontSize(7.5); doc.setFont(undefined, 'bold');
-        doc.setTextColor(44, 62, 80);
-        doc.text('CHECK:', x + 4, y + 13);
-        doc.setFont(undefined, 'normal');
-        doc.text('Make payable to "Brazos Cleaning Services"  |  Mail to: P.O Box 7543, Waco, TX. 76714', x + 22, y + 13);
+        // Línea 1: Cheque — 2026-11-05 (Ranu): más grande; se ajusta solo al ancho de la caja
+        {
+            const txtChk = 'Make payable to "Brazos Cleaning Services"  |  Mail to: P.O Box 7543, Waco, TX. 76714';
+            let fs = 10;
+            const anchoDe = (f) => { doc.setFontSize(f); doc.setFont(undefined, 'bold'); const wl = doc.getTextWidth('CHECK:  '); doc.setFont(undefined, 'normal'); return wl + doc.getTextWidth(txtChk); };
+            while (fs > 7.5 && anchoDe(fs) > width - 8) fs -= 0.25;
+            doc.setFontSize(fs); doc.setFont(undefined, 'bold');
+            doc.setTextColor(44, 62, 80);
+            doc.text('CHECK:', x + 4, y + 13.5);
+            const xTxt = x + 4 + doc.getTextWidth('CHECK:  ');
+            doc.setFont(undefined, 'normal');
+            doc.text(txtChk, xTxt, y + 13.5);
+        }
 
         // Línea 2: Tarjeta con link
         doc.setFontSize(8); doc.setFont(undefined, 'bold');
@@ -10479,17 +10494,30 @@ Motivo de cancelación (opcional):`);
 
     // Sello rojo "PAST DUE" en la página 1 del PDF de una factura YA registrada que esté
     // atrasada. Se llama desde createPDFBlob solo al reabrir/reimprimir (número existente).
+    // 2026-11-05 (Ranu): nota para facturas VENCIDAS — va en el PDF (bajo el sello) y en el
+    // correo (sola o en lote). Un solo texto para ambos.
+    _notaVencida() {
+        return 'If you have already made this payment, please disregard this notice. To help us update our records, kindly reply with the payment date and reference (check number or transaction ID) for this invoice or invoices. Thank you!';
+    }
     _sellarAtrasada(doc, invoiceNumber) {
         try {
             const inv = (this.generatedInvoices || []).find(i =>
                 Number(i.invoiceNumber) === Number(invoiceNumber) && i.status !== 'cancelada');
             const a = this._atrasoFactura(inv);
             if (!a) return;
-            doc.setPage(1);
+            // 2026-11-05: si la plantilla dejó anotado el espacio libre entre la última línea
+            // y el total (doc.__zonaLibre), sello + nota van centrados AHÍ (sin tapar líneas).
+            // Si no cabe, se usa la posición de antes (página 1, a la derecha).
+            const z = doc.__zonaLibre;
+            // alto REAL del sello girado 12° (caja 84 × 28/36) + margen
+            const hNota = 16, hSello = Math.ceil((a.parcial ? 36 : 28) * Math.cos(12 * Math.PI / 180) + 84 * Math.sin(12 * Math.PI / 180)) + 2;
+            const enZona = !!(z && (z.bottom - z.top) >= hSello + hNota + 4);
+            doc.setPage(enZona ? z.page : 1);
+            const cx = enZona ? 105 : 148;
+            const cy = enZona ? (z.top + ((z.bottom - z.top) - (hSello + hNota)) / 2 + hSello / 2) : 150;
             if (doc.saveGraphicsState) doc.saveGraphicsState();
             if (doc.GState && doc.setGState) doc.setGState(new doc.GState({ opacity: 0.6 }));
             const ang = 12, t = ang * Math.PI / 180, cos = Math.cos(t), sin = Math.sin(t);
-            const cx = 148, cy = 150;
             // punto (dx,dy) relativo al centro, girado en pantalla (y hacia abajo)
             const P = (dx, dy) => [cx + dx * cos + dy * sin, cy - dx * sin + dy * cos];
             const w = 84, h = a.parcial ? 36 : 28;
@@ -10512,6 +10540,14 @@ Motivo de cancelación (opcional):`);
             linea(`${a.dias} DAY${a.dias === 1 ? '' : 'S'} LATE`, 12, top + 9);
             if (a.parcial) linea(`BALANCE DUE: $${a.saldo.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`, 10, top + 16);
             if (doc.restoreGraphicsState) doc.restoreGraphicsState();
+            // Nota (derecha, sin girar). Si hay espacio libre: centrada bajo el sello. Si no
+            // (factura larga) y la plantilla es 'modern': en la franja libre del encabezado,
+            // para no encimarse en las líneas de servicio.
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(170, 30, 30);
+            let xN = cx, yN = cy + hSello / 2 + 4, anchoNota = enZona ? 150 : 100;
+            if (!enZona && doc.__plantilla === 'modern') { doc.setPage(1); xN = 105; yN = 36; anchoNota = 165; }
+            const lineas = doc.splitTextToSize(this._notaVencida(), anchoNota);
+            lineas.forEach(l => { doc.text(l, xN, yN, { align: 'center' }); yN += 3.8; });
             doc.setTextColor(0, 0, 0);
         } catch (e) { console.warn('Sello PAST DUE:', e); }
     }
@@ -10664,7 +10700,7 @@ Motivo de cancelación (opcional):`);
         m.innerHTML = `
           <div style="background:#fff;border-radius:12px;padding:20px 22px;width:640px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;color:#2c3e50;">
             <div style="font-size:1.1rem;font-weight:800;margin-bottom:4px;">📧 Enviar ${lista.length} factura(s) por email</div>
-            <div style="font-size:0.82rem;color:#7f8c8d;margin-bottom:10px;">Cada factura sale en su propio correo, con su PDF. No se cambia ningún status.</div>
+            <div style="font-size:0.82rem;color:#7f8c8d;margin-bottom:10px;">Cada factura sale en su propio correo, con su PDF. No se cambia ningún status. Las <b style="color:#c0392b;">PAST DUE</b> llevan además, sola, la nota de "si ya pagó, ignore esta factura y envíenos fecha y referencia del pago".</div>
             <div style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:10px;">
               <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">${filas}</table>
             </div>
@@ -10718,10 +10754,14 @@ Motivo de cancelación (opcional):`);
                 const base64PDF = btoa(bin);
                 const invoiceNum = String(inv.invoiceNumber).padStart(4, '0');
                 const fileName = `Invoice_${invoiceNum}_${String(inv.clientName || '').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                // 2026-11-05: si está vencida, va primero la nota de "si ya pagó, ignore…"
+                const _nv = this._atrasoFactura(inv) ? this._notaVencida() : '';
+                const _nt = [_nv, nota].filter(Boolean).join('\n\n');
+                const noteInv = _nt ? `\n${_nt}\n` : '';
                 for (const email of emails) {
                     await emailjs.send('service_mamjtia', 'template_ygaa3xa', {
                         client_name: inv.clientName, invoice_number: invoiceNum, to_email: email,
-                        pdf_content: base64PDF, pdf_name: fileName, custom_note: customNote
+                        pdf_content: base64PDF, pdf_name: fileName, custom_note: noteInv
                     });
                     await espera(1100); // EmailJS acepta ~1 envío por segundo
                 }
@@ -11294,16 +11334,75 @@ Motivo de cancelación (opcional):`);
         if (empty) empty.style.display = visible === 0 ? 'block' : 'none';
     }
 
-    generarEstadoCuenta(clientName) {
+    // 2026-11-05 (Ranu): elegir el o los PERIODOS (facturas) que entran al estado de cuenta.
+    // Si el cliente tiene una sola factura pendiente, se genera directo como antes.
+    _elegirPeriodosEstadoCuenta(clientName, facturas) {
+        document.getElementById('ecPeriodosModal')?.remove();
+        const f = d => { const [y, m, dd] = String(d || '').split('-'); return y ? `${m}/${dd}/${y}` : ''; };
+        const saldo = inv => Math.max(0, parseFloat(inv.total || 0) - parseFloat(inv.paidAmount || 0));
+        const esc = t => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        const m = document.createElement('div');
+        m.id = 'ecPeriodosModal';
+        m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10003;display:flex;align-items:center;justify-content:center;';
+        m.innerHTML = `
+          <div style="background:#fff;width:92%;max-width:560px;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;max-height:88vh;">
+            <div style="background:#2563eb;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;">
+              <h2 style="margin:0;font-size:1.1rem;">📄 ${esc(clientName)} — elige los periodos</h2>
+              <button onclick="document.getElementById('ecPeriodosModal').remove()" style="background:rgba(255,255,255,0.25);color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">✕</button>
+            </div>
+            <div style="padding:16px 18px;overflow:auto;">
+              <label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:0.9rem;margin-bottom:8px;cursor:pointer;">
+                <input type="checkbox" id="ecpTodas" checked onchange="document.querySelectorAll('#ecPeriodosModal .ecp').forEach(c=>c.checked=this.checked);app._ecpTotal()" style="width:16px;height:16px;"> Todas
+              </label>
+              <div style="border:1px solid #e5e7eb;border-radius:8px;">
+                ${facturas.map(inv => `
+                  <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f0f0f0;cursor:pointer;">
+                    <input type="checkbox" class="ecp" value="${esc(inv.id)}" data-saldo="${saldo(inv).toFixed(2)}" checked onchange="app._ecpTotal()" style="width:16px;height:16px;">
+                    <span style="flex:1;"><b>#${String(inv.invoiceNumber).padStart(4, '0')}</b> · ${f(inv.startDate)} – ${f(inv.endDate)}${inv.status === 'parcial' ? ' <span style="color:#d4a017;font-size:0.75rem;">(parcial)</span>' : ''}</span>
+                    <span style="color:#dc2626;font-weight:700;">$${saldo(inv).toFixed(2)}</span>
+                  </label>`).join('')}
+              </div>
+            </div>
+            <div style="padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+              <span style="font-size:0.95rem;">Total: <b id="ecpTotal" style="color:#dc2626;"></b></span>
+              <button id="ecpGenerar" onclick="app._ecpGenerar('${String(clientName).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" style="background:#2563eb;color:#fff;border:none;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:bold;">📄 Generar estado de cuenta</button>
+            </div>
+          </div>`;
+        document.body.appendChild(m);
+        this._ecpTotal();
+    }
+    _ecpTotal() {
+        const cbs = [...document.querySelectorAll('#ecPeriodosModal .ecp')];
+        const sel = cbs.filter(c => c.checked);
+        const tot = sel.reduce((a, c) => a + parseFloat(c.dataset.saldo || 0), 0);
+        const t = document.getElementById('ecpTotal'); if (t) t.textContent = `$${tot.toFixed(2)} (${sel.length} de ${cbs.length})`;
+        const b = document.getElementById('ecpGenerar'); if (b) { b.disabled = !sel.length; b.style.opacity = sel.length ? '1' : '0.5'; }
+        const all = document.getElementById('ecpTodas'); if (all) { all.checked = sel.length === cbs.length; all.indeterminate = sel.length > 0 && sel.length < cbs.length; }
+    }
+    _ecpGenerar(clientName) {
+        const ids = [...document.querySelectorAll('#ecPeriodosModal .ecp')].filter(c => c.checked).map(c => c.value);
+        if (!ids.length) return;
+        document.getElementById('ecPeriodosModal')?.remove();
+        this.generarEstadoCuenta(clientName, ids);
+    }
+
+    generarEstadoCuenta(clientName, idsElegidos) {
         document.getElementById('estadoCuentaModal')?.remove();
 
-        const facturas = (this.generatedInvoices || [])
+        let facturas = (this.generatedInvoices || [])
             .filter(inv => inv.clientName === clientName
                         && inv.status !== 'cancelada' && inv.status !== 'pagada'
                         && (parseFloat(inv.total || 0) - parseFloat(inv.paidAmount || 0)) > 0.01)
             .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)));
 
         if (facturas.length === 0) { alert('Ese cliente ya no tiene facturas pendientes.'); return; }
+        // 2026-11-05: con 2+ facturas, primero se eligen los periodos
+        if (!idsElegidos && facturas.length > 1) { this._elegirPeriodosEstadoCuenta(clientName, facturas); return; }
+        if (idsElegidos) {
+            const set = new Set(idsElegidos.map(String));
+            facturas = facturas.filter(inv => set.has(String(inv.id)));
+            if (!facturas.length) return;
+        }
 
         const client = (this.clis || []).find(c => c.name === clientName) || { name: clientName };
         const emailCliente = this.getClientEmail(client);   // busca también en propiedades hermanas
@@ -17537,7 +17636,11 @@ Motivo de cancelación (opcional):`);
             // solo si el usuario escribió algo; si se deja vacío, el placeholder
             // {{custom_note}} de la plantilla queda en blanco sin afectar el resto.
             const _notaCliente = (notaOverride !== undefined ? notaOverride : (document.getElementById('previewCustomNote')?.value || '')).trim();
-            const customNote = _notaCliente ? `\n${_notaCliente}\n` : '';
+            // 2026-11-05: factura VENCIDA → se agrega sola la nota de "si ya pagó, ignore…"
+            let _notaVenc = '';
+            try { if (this._atrasoFactura(this._invDelPDFActual())) _notaVenc = this._notaVencida(); } catch (e) {}
+            const _notas = [_notaVenc, _notaCliente].filter(Boolean).join('\n\n');
+            const customNote = _notas ? `\n${_notas}\n` : '';
 
             // Enviar a cada email
             for (const email of emails) {
@@ -17822,6 +17925,7 @@ Motivo de cancelación (opcional):`);
 	createPDFBlob(client, services, startDate, endDate, template, paymentDue, showDetails, applyTax, taxRate) {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
+        doc.__plantilla = template; // 2026-11-05: para ubicar la nota PAST DUE
         
         // Cargar configuración de empresa
         // FIX: companyConfig puede quedar como STRING JSON doble-escapado tras importar el sync;
@@ -18334,6 +18438,8 @@ Motivo de cancelación (opcional):`);
         const noteOffset = (applyTax && taxRate > 0) ? 44 : 37;
         const totalNeeded = noteOffset + 32 + 5;
         const minY = pageHeight - totalNeeded;
+        // 2026-11-05: espacio libre entre la última línea y el total (para sello/nota PAST DUE)
+        doc.__zonaLibre = (y <= minY) ? { top: y - 2, bottom: minY + 2, page: doc.internal.getNumberOfPages() } : null;
         if (y > minY) { doc.addPage(); y = 20; }
         else { y = minY; } // Siempre al fondo de la página
 
