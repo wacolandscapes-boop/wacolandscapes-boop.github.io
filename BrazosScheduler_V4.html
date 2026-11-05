@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-05.4';
+const SCHED_BUILD = '2026-11-05.5';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -3954,7 +3954,24 @@ Brazos Cleaning Services</textarea>
             shopOutDiv.textContent = `🏠 Salida: ${this.fmt12(shopTimes.shopOut)}${shopTimes.campo ? ' ✏️' : ''}`;
             _clicHC(shopOutDiv);
             // 2026-11-03: horarios personales distintos al del grupo (ej. alguien que llegó después)
-            (shopTimes.personales || []).forEach(p => {
+            // 2026-11-05 (Ranu): RETRÁCTILES. Por defecto ocultos; "👤 N ▸" los muestra/oculta
+            // en TODAS las celdas a la vez (se recuerda en este equipo).
+            const _pers = shopTimes.personales || [];
+            let _verPers = false;
+            try { _verPers = localStorage.getItem('sched_verPersonales') === '1'; } catch (e) {}
+            if (_pers.length) {
+                const tg = document.createElement('span');
+                tg.textContent = ` 👤${_pers.length} ${_verPers ? '▾' : '▸'}`;
+                tg.title = _verPers ? 'Ocultar los horarios de cada persona' : 'Ver los horarios de cada persona';
+                tg.style.cssText = 'cursor:pointer;font-weight:700;color:#ad1457;margin-left:2px;';
+                tg.addEventListener('click', ev => {
+                    ev.stopPropagation();
+                    try { localStorage.setItem('sched_verPersonales', _verPers ? '0' : '1'); } catch (e) {}
+                    this.render();
+                });
+                shopOutDiv.appendChild(tg);
+            }
+            (_verPers ? _pers : []).forEach(p => {
                 const pd = document.createElement('div');
                 pd.style.cssText = 'font-size:0.62rem;color:#ad1457;text-align:center;margin-top:1px;';
                 pd.textContent = `👤 ${p.nombre}: ${p.shopOut ? this.fmt12(p.shopOut) : '—'} – ${p.shopBack ? this.fmt12(p.shopBack) : '—'}`;
