@@ -809,7 +809,7 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
                 <div class="dropdown" id="dropdownFacturacion">
                     <button class="btn-action" style="background:#e67e22; color:white" onclick="toggleDropdown('dropdownFacturacion')">💼 Facturación</button>
                     <div class="dropdown-content">
-                        <button onclick="app.openInvoice(); closeAllDropdowns();">📄 Crear Factura</button>
+                        <button onclick="app._origenFactura=null; app.openInvoice(); closeAllDropdowns();">📄 Crear Factura</button>
                         <button onclick="app.openEstimateForm(); closeAllDropdowns();">📐 Crear Estimado</button>
                         <button onclick="app.openPendingInvoices(); closeAllDropdowns();" style="position:relative">
                             📋 Pendientes
@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-05.2';
+const SCHED_BUILD = '2026-11-05.4';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -7517,6 +7517,7 @@ Brazos Cleaning Services</textarea>
         
         // Guardar índice y datos del pending
         this.currentPendingIndex = index;
+        this._origenFactura = 'pendientes'; // 2026-11-05: al terminar, regresar a Pendientes
         this.pendingToLoad = pending;
         this.fromPending = true; // Marcar que venimos de pendientes
         
@@ -10119,6 +10120,7 @@ Brazos Cleaning Services</textarea>
 
         this.closeGeneratedInvoices();
         this.openInvoice();
+        this._origenFactura = 'enviadas'; // 2026-11-05: al terminar, regresar a Enviadas
 
         setTimeout(() => {
             // Limpiar AMBAS pestañas ANTES de llenar la que corresponda: así la pestaña que
@@ -11310,8 +11312,25 @@ Motivo de cancelación (opcional):`);
         setTimeout(() => { const si = document.getElementById('ecSearch'); if (si) si.focus(); }, 50);
     }
 
+    // 2026-11-05 (Ranu): al cerrar la vista previa del estado de cuenta (✕, Cancelar o
+    // después de enviarlo por email) se regresa a la lista de clientes, con la misma búsqueda.
+    _volverAEstadoCuenta() {
+        document.getElementById('statementPreviewModal')?.remove();
+        document.getElementById('ecPeriodosModal')?.remove();
+        const hay = (this.generatedInvoices || []).some(inv => inv.status !== 'cancelada' && inv.status !== 'pagada'
+            && (parseFloat(inv.total || 0) - parseFloat(inv.paidAmount || 0)) > 0.01);
+        if (!hay) return;
+        const q = this._ecBusqueda || '';
+        this.openEstadoCuenta();
+        if (q) {
+            const si = document.getElementById('ecSearch');
+            if (si) { si.value = q; this._filterEstadoCuenta(q); }
+        }
+    }
+
     // Filtro dinámico del buscador de Estado de Cuenta
     _filterEstadoCuenta(q) {
+        this._ecBusqueda = q || ''; // 2026-11-05: se restaura al volver a la lista
         const term = (q || '').trim().toLowerCase();
         const modal = document.getElementById('estadoCuentaModal');
         if (!modal) return;
@@ -11348,7 +11367,7 @@ Motivo de cancelación (opcional):`);
           <div style="background:#fff;width:92%;max-width:560px;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;max-height:88vh;">
             <div style="background:#2563eb;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;">
               <h2 style="margin:0;font-size:1.1rem;">📄 ${esc(clientName)} — elige los periodos</h2>
-              <button onclick="document.getElementById('ecPeriodosModal').remove()" style="background:rgba(255,255,255,0.25);color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">✕</button>
+              <button onclick="document.getElementById('ecPeriodosModal').remove();app._volverAEstadoCuenta()" style="background:rgba(255,255,255,0.25);color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">✕</button>
             </div>
             <div style="padding:16px 18px;overflow:auto;">
               <label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:0.9rem;margin-bottom:8px;cursor:pointer;">
@@ -11424,7 +11443,7 @@ Motivo de cancelación (opcional):`);
                         <h2 style="margin:0;color:#1f2937;">📄 Estado de Cuenta — ${clientName}</h2>
                         <div style="margin-top:5px;font-size:0.9rem;color:#555;">${facturas.length} factura(s) · Total: <b style="color:#dc2626;">$${data.grandTotal.toFixed(2)}</b>${email ? ` · 📧 <span style="color:#2563eb;">${email}</span>` : ' · <span style="color:#e67e22;">⚠ Sin email — agrégalo en la ficha del cliente para poder enviarlo. Por ahora, imprímelo o descárgalo.</span>'}</div>
                     </div>
-                    <button onclick="document.getElementById('statementPreviewModal').remove();" style="background:#e74c3c;color:white;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cerrar</button>
+                    <button onclick="app._volverAEstadoCuenta();" style="background:#e74c3c;color:white;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cerrar</button>
                 </div>
                 <div style="flex:1;padding:10px;background:#525659;">
                     <iframe src="${url}" style="width:100%;height:100%;border:none;border-radius:6px;"></iframe>
@@ -11433,7 +11452,7 @@ Motivo de cancelación (opcional):`);
                     <button onclick="app.printStatement()" style="background:#2c3e50;color:white;padding:14px 26px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">🖨️ Imprimir</button>
                     <button onclick="app.downloadStatement()" style="background:#27ae60;color:white;padding:14px 26px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">💾 Descargar PDF</button>
                     ${email ? `<button id="btnSendStatement" onclick="app.sendStatementByGmail()" style="background:#ea4335;color:white;padding:14px 26px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">📧 Enviar por Email</button>` : ''}
-                    <button onclick="document.getElementById('statementPreviewModal').remove();" style="background:#95a5a6;color:white;padding:14px 26px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">❌ Cancelar</button>
+                    <button onclick="app._volverAEstadoCuenta();" style="background:#95a5a6;color:white;padding:14px 26px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">❌ Cancelar</button>
                 </div>
             </div>`;
         document.body.appendChild(modal);
@@ -11598,7 +11617,7 @@ Motivo de cancelación (opcional):`);
                 });
             }
             alert(`✅ Estado de cuenta enviado a ${destino}`);
-            document.getElementById('statementPreviewModal')?.remove();
+            this._volverAEstadoCuenta();
         } catch(e) { alert('Error enviando: ' + e.message); rehab(); }
     }
 
@@ -15766,6 +15785,7 @@ Motivo de cancelación (opcional):`);
     }
     
     backToPending() {
+        this._origenFactura = null;
         // Cerrar facturación
         this.closeInvoice();
         
@@ -16595,6 +16615,22 @@ Motivo de cancelación (opcional):`);
         }
     }
     
+    // 2026-11-05 (Ranu): al TERMINAR una factura abierta desde Enviadas (✏️ Editar) o desde
+    // Pendientes (imprimir, enviar por email, guardar como enviada, guardar cambios o
+    // guardar + descargar), se regresa a esa lista en vez de dejarte fuera. Enviadas vuelve
+    // con el mismo filtro que tenía. Si la factura se abrió desde el menú, no hace nada.
+    _regresarAlOrigen() {
+        const origen = this._origenFactura;
+        this._origenFactura = null;
+        if (!origen) return;
+        document.getElementById('pdfPreviewModal')?.remove();
+        try { this.closeInvoice(); } catch (e) {}
+        setTimeout(() => {
+            if (origen === 'enviadas') this.openGeneratedInvoices();
+            else if (origen === 'pendientes') this.openPendingInvoices();
+        }, 50);
+    }
+
     closeInvoice() {
         const modal = document.getElementById('invoiceModal');
         modal.style.display = 'none';
@@ -17266,6 +17302,7 @@ Motivo de cancelación (opcional):`);
               `Período: ${periodo}\n` +
               `Total: $${parseFloat(existing.total || 0).toFixed(2)}\n` +
               `Estado: ${existing.status}${_estadoCambio ? ' (actualizado desde: ' + estadoAntes + ')' : ' (sin cambios)'}`);
+        this._regresarAlOrigen(); // 2026-11-05
     }
 
     saveAsEnviada() {
@@ -17325,6 +17362,7 @@ Motivo de cancelación (opcional):`);
         this.refreshGeneratedInvoices();
         alert('✅ Registrada en Enviadas correctamente!');
         this.closeInvoice();
+        this._regresarAlOrigen(); // 2026-11-05
     }
 
     togglePreviewTax() {
@@ -17389,7 +17427,8 @@ Motivo de cancelación (opcional):`);
         this.save();
         this.markPendingAsGenerated();
         const printWindow = window.open(pdfUrl);
-        printWindow.onload = function() { printWindow.print(); };
+        if (printWindow) printWindow.onload = function() { printWindow.print(); };
+        this._regresarAlOrigen(); // 2026-11-05
     }
 
     // Calcula el siguiente número de factura cruzando el contador local (localStorage,
@@ -17679,6 +17718,7 @@ Motivo de cancelación (opcional):`);
             // Actualizar contador de pendientes si está visible
             const pendBadge = document.getElementById('pendingInvoicesBadge');
             if (pendBadge) pendBadge.textContent = (this.pendingInvoices || []).length;
+            this._regresarAlOrigen(); // 2026-11-05
 
         } catch(e) {
             alert('❌ Error al enviar: ' + (e?.text || e.message || 'Error desconocido'));
@@ -17797,6 +17837,7 @@ Motivo de cancelación (opcional):`);
 
         alert('✅ Factura guardada correctamente!');
         this.closeInvoice();
+        this._regresarAlOrigen(); // 2026-11-05
     }
 
     generateInvoice() {
@@ -23988,7 +24029,7 @@ document.addEventListener('click', function(e) {
     <div class="modal-content" style="max-width: 800px;">
         <input type="hidden" id="editingInvoiceNumber" value="">
         <div style="position: relative; background: #e67e22; color: white; padding: 10px 15px; margin: -20px -20px 15px -20px; border-radius: 8px 8px 0 0;">
-            <button onclick="app.closeInvoice()" style="position: absolute; top: 8px; right: 8px; background: #e74c3c; color: white; border: none; width: 30px; height: 30px; border-radius: 50%; font-size: 1.1rem; font-weight: bold; cursor: pointer; line-height: 1; z-index: 10;">✕</button>
+            <button onclick="app._origenFactura=null; app.closeInvoice()" style="position: absolute; top: 8px; right: 8px; background: #e74c3c; color: white; border: none; width: 30px; height: 30px; border-radius: 50%; font-size: 1.1rem; font-weight: bold; cursor: pointer; line-height: 1; z-index: 10;">✕</button>
             <button onclick="app.toggleMinimizeInvoice()" id="btnMinimizeInvoice" title="Minimizar" style="position: absolute; top: 8px; right: 45px; background: rgba(255,255,255,0.25); color: white; border: none; width: 30px; height: 30px; border-radius: 50%; font-size: 1rem; font-weight: bold; cursor: pointer; line-height: 1; z-index: 10;">—</button>
             
             <div style="display: flex; justify-content: space-between; align-items: center; padding-right: 45px;">
