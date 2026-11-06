@@ -1843,6 +1843,16 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
         
         <!-- Tabla scrollable (Cliente/Tipo tabs) -->
         <div id="finTabClienteTipoContent" style="display: flex; flex-direction: column; flex: 1;">
+        <!-- 2026-11-06: ordenar la lista de clientes -->
+        <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin:4px 0;">
+            <label for="finOrden" style="font-size:0.8rem; color:#555;">Ordenar:</label>
+            <select id="finOrden" onchange="app.refreshFinance()" style="padding:4px 6px; font-size:0.85rem; width:auto;">
+                <option value="total-desc">Total (mayor a menor)</option>
+                <option value="total-asc">Total (menor a mayor)</option>
+                <option value="nombre-asc">Cliente A → Z</option>
+                <option value="nombre-desc">Cliente Z → A</option>
+            </select>
+        </div>
         <!-- Tabla scrollable -->
         <div style="flex: 1; overflow-y: auto; border: 1px solid #ddd; max-height: 400px;">
             <table class="finance-table">
@@ -1861,6 +1871,9 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
         <!-- Footer fijo con totales compacto -->
         <div style="background: #f8f9fa; padding: 12px 15px; border-top: 2px solid #ddd; flex-shrink: 0;">
             <div style="display: grid; grid-template-columns: auto auto 1fr; gap: 10px 15px; align-items: center;">
+                <div style="font-size: 0.8rem; color: #666; font-weight: bold;">CLIENTES:</div>
+                <div id="finClientes" style="font-size: 0.95rem; font-weight: 700; color: #666;"><b>0</b></div>
+                <div></div>
                 <div style="font-size: 0.8rem; color: #666; font-weight: bold;">SERVICIOS:</div>
                 <div id="finCount" style="font-size: 0.95rem; font-weight: 700; color: #666;"><b>0</b></div>
                 <div></div>
@@ -1947,7 +1960,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-06.2';
+const SCHED_BUILD = '2026-11-06.3';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -14449,6 +14462,14 @@ Motivo de cancelación (opcional):`);
         
         let html = '';
         let total = 0;
+        // 2026-11-06 (Ranu): orden de la lista de clientes (también los desgloses)
+        const _orden = (document.getElementById('finOrden') || {}).value || 'total-desc';
+        const _ordenar = arr => arr.sort((a, b) => {
+            if (_orden === 'nombre-asc') return String(a.name || a.type).localeCompare(String(b.name || b.type));
+            if (_orden === 'nombre-desc') return String(b.name || b.type).localeCompare(String(a.name || a.type));
+            if (_orden === 'total-asc') return a.total - b.total;
+            return b.total - a.total;
+        });
         
         // Determinar qué vista mostrar
         const currentTab = this.currentFinTab || 'cliente';
@@ -14472,8 +14493,7 @@ Motivo de cancelación (opcional):`);
                 total += item.price;
             });
             
-            // Ordenar por total descendente
-            const clientesArray = Object.values(clientesMap).sort((a, b) => b.total - a.total);
+            const clientesArray = _ordenar(Object.values(clientesMap));
             
             clientesArray.forEach(cliente => {
                 const _nEsc = String(cliente.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
@@ -14532,7 +14552,7 @@ Motivo de cancelación (opcional):`);
                 </tr>`;
                 
                 // Desglose de clientes
-                const clientesArray = Array.from(tipo.clientes.values()).sort((a, b) => b.total - a.total);
+                const clientesArray = _ordenar(Array.from(tipo.clientes.values()));
                 clientesArray.forEach(cliente => {
                     html += `<tr style="background: #ffffff;">
                         <td style="padding-left: 30px; color: #666; font-size: 0.85rem;">└─ ${cliente.name}</td>
@@ -14603,7 +14623,7 @@ Motivo de cancelación (opcional):`);
                 </tr>`;
                 
                 // Desglose de clientes
-                const clientesArray = Array.from(servicio.clientes.values()).sort((a, b) => b.total - a.total);
+                const clientesArray = _ordenar(Array.from(servicio.clientes.values()));
                 clientesArray.forEach(cliente => {
                     html += `<tr style="background: #ffffff;">
                         <td style="padding-left: 30px; color: #666; font-size: 0.85rem;">└─ ${cliente.name}</td>
@@ -14661,6 +14681,10 @@ Motivo de cancelación (opcional):`);
             ? ` <span style="color:#e67e22; font-weight:600;" title="Estos servicios son viejos y nunca fueron facturados, así que no se puede recuperar el precio exacto que tenían en su momento. Se muestran con el precio ACTUAL del cliente, que puede no ser exacto.">⚠️ ${estimadoCount} ${estimadoCount === 1 ? 'servicio' : 'servicios'} con precio estimado</span>`
             : '';
         document.getElementById('finCount').innerHTML = `<b>${serviceCount}</b> ${countText}${avisoEstimado}`;
+        // 2026-11-06: número de clientes incluidos en el reporte (por nombre; ya sin descartados)
+        const _nCli = new Set(servicesWithClient.map(it => it.client.name)).size;
+        const _elCli = document.getElementById('finClientes');
+        if (_elCli) _elCli.innerHTML = `<b>${_nCli}</b> ${_nCli === 1 ? 'cliente' : 'clientes'}`;
     }
 
     exportar() { 
