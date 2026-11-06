@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-06.1';
+const SCHED_BUILD = '2026-11-06.2';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -14305,6 +14305,15 @@ Motivo de cancelación (opcional):`);
         }
     }
 
+    _finDescartados() { try { return JSON.parse(localStorage.getItem('fin_descartados') || '[]') || []; } catch (e) { return []; } }
+    _finDescartar(nombre, descartar) {
+        const set = new Set(this._finDescartados());
+        if (descartar) set.add(nombre); else set.delete(nombre);
+        try { localStorage.setItem('fin_descartados', JSON.stringify([...set].sort())); } catch (e) {}
+        this.refreshFinance();
+    }
+    _finDescartarTodos() { try { localStorage.removeItem('fin_descartados'); } catch (e) {} this.refreshFinance(); }
+
     refreshFinance() {
         const start = document.getElementById('finStart').value;
         const end = document.getElementById('finEnd').value;
@@ -14338,9 +14347,13 @@ Motivo de cancelación (opcional):`);
             }
         }
         
+        // 2026-11-06 (Ranu): clientes DESCARTADOS a mano del reporte (p. ej. los que
+        // cancelaron), por nombre. Se recuerdan en este equipo. No cambian nada del cliente.
+        const _descartados = this._finDescartados();
         const filtered = this.servs.filter(s => {
             // Excluir servicios cancelados que se deben descontar del ingreso
             if (s.cancelled && s.deductIncome) return false;
+            { const _c = this.clis.find(c => c.id == s.cliId); if (_c && _descartados.includes(_c.name)) return false; }
             
             // Filtro de fechas
             if(start && s.date < start) return false;
@@ -14463,8 +14476,9 @@ Motivo de cancelación (opcional):`);
             const clientesArray = Object.values(clientesMap).sort((a, b) => b.total - a.total);
             
             clientesArray.forEach(cliente => {
+                const _nEsc = String(cliente.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
                 html += `<tr>
-                    <td><b>${cliente.name}</b></td>
+                    <td><button onclick="app._finDescartar('${_nEsc}', true)" title="Descartar este cliente del reporte (no cambia nada del cliente)" style="border:none;background:none;cursor:pointer;font-size:0.85rem;padding:0 4px 0 0;opacity:0.6;">🚫</button><b>${cliente.name}</b></td>
                     <td><span style="background:var(--color-${cliente.type}); color:white; padding:3px 8px; border-radius:4px; font-size:0.7rem">${cliente.type.toUpperCase()}</span></td>
                     <td style="text-align: center;">${cliente.count}</td>
                     <td style="text-align: right;"><b>${cliente.total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</b></td>
@@ -14603,6 +14617,23 @@ Motivo de cancelación (opcional):`);
         
         document.getElementById('finBody').innerHTML = html;
         document.getElementById('finTotal').innerText = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+        // 2026-11-06: barra de clientes descartados (con su opción de regresarlos)
+        try {
+            let bar = document.getElementById('finDescartados');
+            if (!bar) {
+                const tbl = document.getElementById('finBody').closest('table');
+                bar = document.createElement('div'); bar.id = 'finDescartados';
+                tbl.parentNode.insertBefore(bar, tbl);
+            }
+            if (!_descartados.length) { bar.innerHTML = ''; bar.style.display = 'none'; }
+            else {
+                const esc = n => String(n).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                bar.style.cssText = 'display:block;background:#fff3cd;border:1px solid #f0c36d;border-radius:6px;padding:6px 10px;margin:6px 0;font-size:0.82rem;';
+                bar.innerHTML = `🚫 <b>Descartados del reporte (${_descartados.length}):</b> ` +
+                    _descartados.map(n => `<span style="display:inline-block;background:#fff;border:1px solid #e0c080;border-radius:10px;padding:1px 8px;margin:2px;">${n} <a href="#" onclick="event.preventDefault();app._finDescartar('${esc(n)}', false)" title="Regresarlo al reporte" style="text-decoration:none;">↩️</a></span>`).join('') +
+                    ` <a href="#" onclick="event.preventDefault();app._finDescartarTodos()" style="margin-left:6px;">Regresar todos</a>`;
+            }
+        } catch (e) {}
         
         // ✅ Calcular gastos del mismo período
         const gastosPeriodo = (this.gastos || []).filter(g => {
