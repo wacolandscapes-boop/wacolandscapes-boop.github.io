@@ -1835,6 +1835,12 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
                     <button onclick="app.setFinResumenPeriod('semester')" class="btn" id="btnResumenSemestre" style="background:#95a5a6; color:white; padding: 6px 12px; font-size: 0.85rem;">Semestre</button>
                     <button onclick="app.setFinResumenPeriod('year')" class="btn" id="btnResumenAno" style="background:#95a5a6; color:white; padding: 6px 12px; font-size: 0.85rem;">Año</button>
                 </div>
+                <!-- 2026-11-06.5: rango de fechas libre -->
+                <div style="display:flex; gap:6px; justify-content:center; align-items:center; flex-wrap:wrap; margin-top:8px; font-size:0.85rem;">
+                    <label>Desde <input type="date" id="resumenDesde" style="padding:4px 6px;"></label>
+                    <label>Hasta <input type="date" id="resumenHasta" style="padding:4px 6px;"></label>
+                    <button onclick="app.setFinResumenPeriod('range')" class="btn" id="btnResumenRango" style="background:#95a5a6; color:white; padding: 6px 12px; font-size: 0.85rem;">Ver rango</button>
+                </div>
             </div>
             
             <div id="resumenContent" style="max-height: 500px; overflow-y: auto;"></div>
@@ -1960,7 +1966,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-06.3';
+const SCHED_BUILD = '2026-11-06.8';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -11959,8 +11965,18 @@ Motivo de cancelación (opcional):`);
         this.refreshFinance();
     }
     
+    // 2026-11-06.5: fechas del rango libre del Resumen ([inicio, fin] o null).
+    _resumenRango() {
+        let d = document.getElementById('resumenDesde')?.value || '';
+        let h = document.getElementById('resumenHasta')?.value || '';
+        if (!d || !h) return null;
+        if (d > h) { const t = d; d = h; h = t; }
+        const aFecha = iso => { const [y, m, dd] = iso.split('-').map(Number); return new Date(y, m - 1, dd); };
+        return [aFecha(d), aFecha(h)];
+    }
     setFinResumenPeriod(period) {
         console.log('setFinResumenPeriod called with:', period);
+        if (period === 'range' && !this._resumenRango()) { alert('Elige las fechas Desde y Hasta.'); return; }
         
         // Guardar período actual para exportar
         this.currentResumenPeriod = period;
@@ -11980,6 +11996,8 @@ Motivo de cancelación (opcional):`);
         btnTrimestre.style.background = period === 'quarter' ? '#27ae60' : '#95a5a6';
         btnSemestre.style.background = period === 'semester' ? '#27ae60' : '#95a5a6';
         btnAno.style.background = period === 'year' ? '#27ae60' : '#95a5a6';
+        const btnRango = document.getElementById('btnResumenRango');
+        if (btnRango) btnRango.style.background = period === 'range' ? '#27ae60' : '#95a5a6';
         
         this.generateResumenFinanciero(period);
     }
@@ -12002,6 +12020,8 @@ Motivo de cancelación (opcional):`);
         } else if (period === 'year') {
             start = new Date(today.getFullYear(), 0, 1);
             end = new Date(today.getFullYear(), 11, 31);
+        } else if (period === 'range' && this._resumenRango()) {
+            [start, end] = this._resumenRango();
         }
         
         const formatDate = (date) => {
@@ -12015,7 +12035,9 @@ Motivo de cancelación (opcional):`);
         const endStr = formatDate(end);
         
         // Filtrar servicios por período
-        const filtered = this.servs.filter(s => s.date >= startStr && s.date <= endStr);
+        // 2026-11-06.4 (Ranu): mismas reglas que "Por Cliente" — sin descartados,
+        // sin cancelados que descuentan, y sin servicios futuros de clientes pausados.
+        const filtered = this.servs.filter(s => s.date >= startStr && s.date <= endStr && this._finSvcCuentaResumen(s));
         
         // Calcular total ingresos (el precio está en el cliente, no en el servicio)
         let totalIngresos = 0;
@@ -12028,7 +12050,9 @@ Motivo de cancelación (opcional):`);
         });
         
         // Filtrar gastos por período
-        const filteredGastos = this.gastos.filter(g => g.fecha >= startStr && g.fecha <= endStr);
+        // 2026-11-06.6: gastos = los de la app de Gastos (solo lectura)
+        this._gcfRefrescarSiViejo(() => this.generateResumenFinanciero(period));
+        const filteredGastos = this._gastosFinanzas().filter(g => g.fecha >= startStr && g.fecha <= endStr);
         
         // 💰 Calcular nómina del período
         let totalNomina = 0;
@@ -12067,7 +12091,9 @@ Motivo de cancelación (opcional):`);
             totalGastos += g.monto;
         });
         
-        const gananciaNeta = totalIngresos - totalGastos - totalNomina;
+        const _cob = this._cobrosPeriodo(startStr, endStr);
+        const gananciaNeta = _cob.cobrado - totalGastos - totalNomina;   // 2026-11-06.7: base cobrado
+        const _ganEst = totalIngresos - totalGastos - totalNomina;      // 2026-11-06.8: estimado con lo agendado
         const gananciaColor = gananciaNeta >= 0 ? '#007bff' : '#dc3545';  // Azul si positivo, rojo si negativo
         
         console.log('Resumen Debug:', {
@@ -12086,14 +12112,19 @@ Motivo de cancelación (opcional):`);
                     ${String(start.getMonth() + 1).padStart(2, '0')}/${String(start.getDate()).padStart(2, '0')}/${start.getFullYear()} - ${String(end.getMonth() + 1).padStart(2, '0')}/${String(end.getDate()).padStart(2, '0')}/${end.getFullYear()}
                 </p>
                 
-                <!-- Ingresos -->
-                <div style="display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid #e9ecef;">
-                    <span style="font-weight: 600; color: #2c3e50;">Ingresos</span>
-                    <span style="color: #6c757d; font-size: 0.85rem; margin-left: 10px;">(${filtered.length} servicios)</span>
+                <!-- Ingresos (2026-11-06.7: lo COBRADO; lo demás es referencia) -->
+                <div style="display: flex; align-items: center; padding: 12px 0 6px;">
+                    <span style="font-weight: 600; color: #2c3e50;">Ingresos cobrados</span>
+                    <span style="color: #6c757d; font-size: 0.85rem; margin-left: 10px;">(${_cob.nPagos} pagos)</span>
                     <span style="flex: 1; border-bottom: 2px dotted #ddd; margin: 0 10px;"></span>
                     <div style="font-size: 1.2rem; font-weight: 700; color: #28a745;">
-                        $${totalIngresos.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        $${_cob.cobrado.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                     </div>
+                </div>
+                <div style="padding: 0 0 12px 20px; border-bottom: 1px solid #e9ecef; font-size: 0.85rem; color: #6c757d; display: grid; gap: 3px;">
+                    <div style="display:flex; gap:10px;"><span>Facturado en el período (${_cob.nFact} facturas)</span><span style="flex:1; border-bottom:1px dotted #ddd;"></span><span>$${_cob.facturado.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></div>
+                    <div style="display:flex; gap:10px;"><span>Por cobrar al cierre (${_cob.nPend} facturas con saldo)</span><span style="flex:1; border-bottom:1px dotted #ddd;"></span><span style="color:${_cob.porCobrar > 0 ? '#e67e22' : '#6c757d'}; font-weight:${_cob.porCobrar > 0 ? 600 : 400};">$${_cob.porCobrar.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></div>
+                    <div style="display:flex; gap:10px;"><span>Servicios agendados (${filtered.length}, estimado)</span><span style="flex:1; border-bottom:1px dotted #ddd;"></span><span>$${totalIngresos.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></div>
                 </div>
                 
                 <!-- Gastos con desglose -->
@@ -12170,6 +12201,14 @@ Motivo de cancelación (opcional):`);
                     $${gananciaNeta.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                 </div>
             </div>
+            <div style="display: flex; align-items: center; padding: 0 20px 4px; color: #6c757d;">
+                <div style="font-weight: 600; font-size: 0.95rem;">Ganancia estimada <span style="font-weight:400; font-size:0.8rem;">(servicios agendados − gastos − nómina)</span></div>
+                <span style="flex: 1; border-bottom: 1px dotted #bbb; margin: 0 15px;"></span>
+                <div style="font-size: 1.15rem; font-weight: 700; color: ${_ganEst >= 0 ? '#5a7fa8' : '#dc3545'};">
+                    $${_ganEst.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                </div>
+            </div>
+            <div style="padding: 0 20px 12px; font-size: 0.75rem; color: #999;">Si todos los servicios agendados del período se cobran. Las Ganancias Netas usan solo lo ya cobrado.</div>
         `;
         
         document.getElementById('resumenContent').innerHTML = html;
@@ -12250,7 +12289,178 @@ Motivo de cancelación (opcional):`);
         return await fileRes.json();
     }
 
-    openGastos() {
+    // ═══ 2026-11-06.6: GASTOS DE SOLO LECTURA (app de Gastos en Cloudflare) ═══
+    // El Scheduler ya no registra gastos: solo lee /api/export del brazos-gastos-worker
+    // con la EXPORT_KEY (guardada en este equipo, no en el código). Lo leído vive en
+    // this._gcfMem (cache local 'sched_gastosCF'); NO se sube a Drive.
+    openGastos() { this.abrirGastosCF(); }
+    _gcfApi() { try { return localStorage.getItem('sched_gastos_api') || 'https://brazos-gastos-worker.ranulfocast.workers.dev'; } catch (e) { return 'https://brazos-gastos-worker.ranulfocast.workers.dev'; } }
+    _gcfClave() { try { return localStorage.getItem('sched_gastos_key') || ''; } catch (e) { return ''; } }
+    _gcfCache() {
+        if (!this._gcfMem) { try { this._gcfMem = JSON.parse(localStorage.getItem('sched_gastosCF') || 'null'); } catch (e) { this._gcfMem = null; } }
+        return this._gcfMem || { at: '', gastos: [], cats: {} };
+    }
+    _gastosFinanzas() { return (this._gcfCache().gastos || []).filter(g => !g.deleted).map(g => Object.assign({}, g, { monto: parseFloat(g.monto) || 0 })); }
+    configurarClaveGastosCF() {
+        if (!this._esAdminSched()) { alert('Solo el administrador puede configurar la clave de la app de Gastos.'); return false; }
+        const k = prompt('Clave de lectura de la app de Gastos (la EXPORT_KEY del brazos-gastos-worker).\nSe guarda solo en esta computadora.', this._gcfClave());
+        if (k === null) return false;
+        try { if (k.trim()) localStorage.setItem('sched_gastos_key', k.trim()); else localStorage.removeItem('sched_gastos_key'); } catch (e) {}
+        this.actualizarGastosCF(true);
+        return true;
+    }
+    async actualizarGastosCF(manual) {
+        const dot = document.getElementById('gcfDot'), lbl = document.getElementById('gcfSyncLbl');
+        const pinta = (cls, t) => { if (dot) dot.className = 'gcf-dot ' + cls; if (lbl) lbl.textContent = t; };
+        const k = this._gcfClave();
+        if (!k) { pinta('err', 'Falta la clave de lectura'); this._gcfAviso(); return false; }
+        if (this._gcfCargando) return this._gcfCargando;
+        pinta('wait', 'Leyendo la app de Gastos…');
+        this._gcfCargando = (async () => {
+            try {
+                const r = await fetch(this._gcfApi() + '/api/export', { headers: { 'X-Export-Key': k } });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+                this._gcfMem = { at: new Date().toISOString(), gastos: Array.isArray(d.gastos) ? d.gastos : [], cats: d.cats || {} };
+                try { localStorage.setItem('sched_gastosCF', JSON.stringify(this._gcfMem)); } catch (e) {}
+                this._gcfPintaEstado();
+                if (document.getElementById('gcfModal')?.style.display === 'block') { this._gcfLlenarCats(); this.pintarGastosCF(); }
+                return true;
+            } catch (e) {
+                pinta('err', 'No se pudo leer: ' + (e.message || e) + (this._gcfCache().at ? ' · mostrando lo último leído' : ''));
+                if (manual && /403|Clave/i.test(String(e.message))) alert('La clave de lectura no es correcta. Revísala con 🔑 Clave.');
+                return false;
+            } finally { this._gcfCargando = null; this._gcfAviso(); }
+        })();
+        return this._gcfCargando;
+    }
+    _gcfPintaEstado() {
+        const c = this._gcfCache(), dot = document.getElementById('gcfDot'), lbl = document.getElementById('gcfSyncLbl');
+        if (!dot || !lbl) return;
+        if (!c.at) { dot.className = 'gcf-dot'; lbl.textContent = 'Sin leer todavía'; return; }
+        dot.className = 'gcf-dot ok';
+        lbl.textContent = `${(c.gastos || []).filter(g => !g.deleted).length} gastos · leído ${new Date(c.at).toLocaleString('en-US', { month: '2-digit', day: '2-digit', hour: 'numeric', minute: '2-digit' })}`;
+    }
+    _gcfAviso() {
+        const el = document.getElementById('gcfAviso'); if (!el) return;
+        const btn = document.getElementById('gcfBtnClave'); if (btn) btn.style.display = this._esAdminSched() ? '' : 'none';
+        if (this._gcfClave()) { el.innerHTML = ''; return; }
+        el.innerHTML = `<div class="gcf-aviso">Para ver los gastos, este equipo necesita la clave de lectura de la app de Gastos (EXPORT_KEY). ${this._esAdminSched() ? '<a href="#" onclick="event.preventDefault();app.configurarClaveGastosCF()">Escribir la clave</a>' : 'Pídele al administrador que la configure.'}</div>`;
+    }
+    // Lo usan Finanzas y el Resumen: si lo leído tiene más de 15 min, se vuelve a leer en
+    // segundo plano y se repinta una vez.
+    _gcfRefrescarSiViejo(repintar) {
+        const c = this._gcfCache();
+        if (!this._gcfClave() || this._gcfCargando) return;
+        if (c.at && (Date.now() - Date.parse(c.at)) < 15 * 60 * 1000) return;
+        this.actualizarGastosCF(false).then(ok => { if (ok && typeof repintar === 'function') { try { repintar(); } catch (e) {} } });
+    }
+    abrirGastosCF() {
+        this._gcfPeriodo = this._gcfPeriodo || 'month'; this._gcfOffset = this._gcfOffset || 0;
+        document.getElementById('gcfModal').style.display = 'block';
+        this._gcfLlenarCats(); this._gcfPintaEstado(); this._gcfAviso(); this.pintarGastosCF();
+        if (!this._gcfClave() && this._esAdminSched()) { this.configurarClaveGastosCF(); return; }
+        this.actualizarGastosCF(false);
+    }
+    cerrarGastosCF() { document.getElementById('gcfModal').style.display = 'none'; }
+    _gcfLlenarCats() {
+        const sel = document.getElementById('gcfCat'); if (!sel) return;
+        const cats = this._gcfCache().cats || {}; const prev = sel.value || 'all';
+        const nombres = [...new Set([...Object.keys(cats), ...(this._gcfCache().gastos || []).map(g => g.categoria).filter(Boolean)])];
+        const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        sel.innerHTML = '<option value="all">Todas</option>' + nombres.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+        sel.value = nombres.includes(prev) ? prev : 'all';
+        this._gcfLlenarSub();
+    }
+    _gcfLlenarSub() {
+        const c = document.getElementById('gcfCat')?.value || 'all', sel = document.getElementById('gcfSub'); if (!sel) return;
+        const cats = this._gcfCache().cats || {};
+        const subs = c === 'all' ? [] : [...new Set([...(cats[c] || []), ...(this._gcfCache().gastos || []).filter(g => g.categoria === c).map(g => g.subcategoria).filter(Boolean)])];
+        const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        sel.innerHTML = '<option value="all">Todas</option>' + subs.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    }
+    _gcfSetPeriodo(p) { this._gcfPeriodo = p; this._gcfOffset = 0; document.querySelectorAll('#gcfModal .gcf-chip[data-p]').forEach(c => c.classList.toggle('on', c.dataset.p === p)); this.pintarGastosCF(); }
+    _gcfMover(n) { if (this._gcfPeriodo === 'all') return; this._gcfOffset = (this._gcfOffset || 0) + n; this.pintarGastosCF(); }
+    _gcfRango() {
+        const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        const fmtF = x => { const [y, m, dd] = x.split('-'); return `${m}/${dd}/${y}`; };
+        const d = new Date(), off = this._gcfOffset || 0, per = this._gcfPeriodo || 'month'; let a, b, lbl;
+        if (per === 'week') { const lun = new Date(d); lun.setDate(d.getDate() - ((d.getDay() + 6) % 7) + off * 7); const dom = new Date(lun); dom.setDate(lun.getDate() + 6); a = iso(lun); b = iso(dom); lbl = `${fmtF(a)} – ${fmtF(b)}`; }
+        else if (per === 'month') { const m = new Date(d.getFullYear(), d.getMonth() + off, 1); a = iso(m); b = iso(new Date(m.getFullYear(), m.getMonth() + 1, 0)); lbl = m.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }); }
+        else if (per === 'year') { const y = d.getFullYear() + off; a = y + '-01-01'; b = y + '-12-31'; lbl = String(y); }
+        else { a = '0000-00-00'; b = '9999-12-31'; lbl = 'Todo'; }
+        return { a, b, lbl: lbl.charAt(0).toUpperCase() + lbl.slice(1) };
+    }
+    _gcfFiltrados() {
+        const { a, b } = this._gcfRango(); const v = id => document.getElementById(id)?.value ?? '';
+        const fc = v('gcfCat') || 'all', fs = v('gcfSub') || 'all', fp = v('gcfPago') || 'all';
+        const fm = parseFloat(v('gcfMonto')), ft = String(v('gcfTexto')).trim().toLowerCase();
+        return this._gastosFinanzas().filter(g => {
+            if (!isNaN(fm)) { if (Math.abs(g.monto - fm) > 0.001) return false; }   // monto exacto busca en todas las fechas
+            else if (g.fecha < a || g.fecha > b) return false;
+            if (fc !== 'all' && g.categoria !== fc) return false;
+            if (fs !== 'all' && g.subcategoria !== fs) return false;
+            if (fp !== 'all' && g.tipoPago !== fp) return false;
+            if (ft && !`${g.vendor} ${g.concepto} ${g.notas} ${g.categoria} ${g.subcategoria}`.toLowerCase().includes(ft)) return false;
+            return true;
+        }).sort((x, y) => String(y.fecha).localeCompare(String(x.fecha)) || String(y.createdAt).localeCompare(String(x.createdAt)));
+    }
+    pintarGastosCF() {
+        const tb = document.getElementById('gcfTbody'); if (!tb) return;
+        const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        const money = n => '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const fmtF = x => { const [y, m, d] = String(x || '').split('-'); return (y && m && d) ? `${m}/${d}/${y}` : ''; };
+        const pago = t => ({ Debito: 'Débito', Credito: 'Crédito', Cash: 'Cash', Otro: 'Otro' }[t] || esc(t || ''));
+        const r = this._gcfRango(); document.getElementById('gcfPeriodoLbl').textContent = r.lbl;
+        const nF = ['gcfCat', 'gcfSub', 'gcfPago'].filter(id => (document.getElementById(id)?.value || 'all') !== 'all').length + ['gcfMonto', 'gcfTexto'].filter(id => document.getElementById(id)?.value).length;
+        document.getElementById('gcfBtnFiltros').textContent = nF ? `🔎 Filtros (${nF} activos)` : '🔎 Filtros';
+        const L = this._gcfFiltrados(); const total = L.reduce((s, g) => s + g.monto, 0);
+        tb.innerHTML = L.map(g => `<tr>
+            <td style="white-space:nowrap">${fmtF(g.fecha)}</td>
+            <td class="col-opt">${esc(g.categoria)}${g.subcategoria ? `<div class="sub">${esc(g.subcategoria)}</div>` : ''}</td>
+            <td>${esc(g.vendor || '—')}${g.concepto ? `<div class="sub">${esc(g.concepto)}</div>` : ''}</td>
+            <td class="col-opt" style="white-space:nowrap">${pago(g.tipoPago)}${g.tarjeta4 ? ` <span class="sub">••${esc(g.tarjeta4)}</span>` : ''}${g.reembolsar ? `<div class="sub">💵 Reembolso${g.reembolsoNombre ? ' a ' + esc(String(g.reembolsoNombre).split(' ')[0]) : ''}${g.reembolsoEstado === 'pagado' ? ' · pagado' : g.reembolsoEstado === 'no' ? ' · no' : ' · pendiente'}</div>` : ''}</td>
+            <td class="num"><b>${money(g.monto)}</b></td>
+            <td>${g.foto ? '<span title="Tiene foto del recibo (se ve en la app de Gastos)">📎</span>' : ''}</td>
+            <td class="col-opt"><span class="badge">${esc(String(g.createdBy || '').split(' ')[0])}</span></td></tr>`).join('')
+            || `<tr><td colspan="7" style="text-align:center;color:#6b7686;padding:24px">${this._gcfCache().at ? 'No hay gastos en este periodo.' : 'Todavía no se han leído los gastos.'}</td></tr>`;
+        document.getElementById('gcfTotal').textContent = money(total);
+        document.getElementById('gcfCuenta').textContent = `${L.length} gasto(s) · ${r.lbl}`;
+        const pc = {}; L.forEach(g => pc[g.categoria] = (pc[g.categoria] || 0) + g.monto);
+        document.getElementById('gcfPorCat').innerHTML = Object.entries(pc).sort((x, y) => y[1] - x[1]).map(([c, m]) => `<div><span>${esc(c)}</span><b>${money(m)}</b></div>`).join('');
+    }
+    imprimirGastosCF() {
+        const L = this._gcfFiltrados(); if (!L.length) { alert('No hay gastos para imprimir con estos filtros.'); return; }
+        const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        const money = n => '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const fmtF = x => { const [y, m, d] = String(x || '').split('-'); return `${m}/${d}/${y}`; };
+        const total = L.reduce((s, g) => s + g.monto, 0); const pc = {}; L.forEach(g => pc[g.categoria] = (pc[g.categoria] || 0) + g.monto);
+        const w = window.open('', '_blank'); if (!w) { alert('El navegador bloqueó la ventana. Permite ventanas emergentes.'); return; }
+        w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Gastos Brazos ${esc(this._gcfRango().lbl)}</title><style>
+            body{font-family:Arial,sans-serif;color:#1d3557;margin:24px;font-size:12px} h1{font-size:20px;margin:0} .s{color:#666;margin:4px 0 14px}
+            table{width:100%;border-collapse:collapse} th{background:#1d3557;color:#fff;text-align:left;padding:6px} td{padding:5px 6px;border-bottom:1px solid #ddd} .n{text-align:right;white-space:nowrap}
+            .tot td{font-weight:bold;border-top:2px solid #1d3557;font-size:13px} .cats{margin-top:14px;max-width:360px} .np{margin:0 0 14px} @media print{.np{display:none}}
+        </style></head><body>
+        <div class="np"><button onclick="print()" style="padding:8px 18px;font-size:14px;background:#1d3557;color:#fff;border:none;border-radius:6px;cursor:pointer">🖨️ Imprimir / Guardar PDF</button></div>
+        <h1>Brazos Cleaning Services — Reporte de Gastos</h1>
+        <div class="s">Periodo: ${esc(this._gcfRango().lbl)} · Generado ${new Date().toLocaleDateString('en-US')} desde el Scheduler</div>
+        <table><thead><tr><th>Fecha</th><th>Categoría</th><th>Proveedor</th><th>Concepto</th><th>Pago</th><th class="n">Monto</th><th>📎</th></tr></thead><tbody>
+        ${L.map(g => `<tr><td>${fmtF(g.fecha)}</td><td>${esc(g.categoria)}${g.subcategoria ? ' / ' + esc(g.subcategoria) : ''}</td><td>${esc(g.vendor)}</td><td>${esc(g.concepto)}</td><td>${esc(g.tipoPago)}</td><td class="n">${money(g.monto)}</td><td>${g.foto ? '📎' : ''}</td></tr>`).join('')}
+        <tr class="tot"><td colspan="5">TOTAL (${L.length} gastos)</td><td class="n">${money(total)}</td><td></td></tr></tbody></table>
+        <table class="cats"><thead><tr><th>Por categoría</th><th class="n">Monto</th></tr></thead><tbody>${Object.entries(pc).sort((x, y) => y[1] - x[1]).map(([c, m]) => `<tr><td>${esc(c)}</td><td class="n">${money(m)}</td></tr>`).join('')}</tbody></table>
+        </body></html>`);
+        w.document.close(); w.focus();
+    }
+    csvGastosCF() {
+        const L = this._gcfFiltrados(); if (!L.length) { alert('No hay gastos con estos filtros.'); return; }
+        const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+        const csv = ['Fecha,Categoría,Subcategoría,Proveedor,Concepto,Tipo de pago,Monto,Notas,Registró,Foto']
+            .concat(L.map(g => [g.fecha, g.categoria, g.subcategoria, g.vendor, g.concepto, g.tipoPago, g.monto.toFixed(2), g.notas, g.createdBy, g.foto ? 'Sí' : 'No'].map(q).join(','))).join('\n');
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
+        a.download = 'gastos_brazos_' + this._gcfRango().a + '.csv'; a.click();
+    }
+    // Módulo viejo de Gastos del Scheduler (registro local). Ya no se abre desde el menú.
+    _openGastosLocal() {
         // Inicializar categorías por defecto si no existen
         if (!this.gastosCategories) {
             this.gastosCategories = {
@@ -12791,6 +13001,8 @@ Motivo de cancelación (opcional):`);
             } else if (period === 'year') {
                 periodStart = new Date(today.getFullYear(), 0, 1);
                 periodEnd = new Date(today.getFullYear(), 11, 31);
+            } else if (period === 'range' && this._resumenRango()) {
+                [periodStart, periodEnd] = this._resumenRango();
             }
             
             const formatDate = (date) => {
@@ -12804,7 +13016,7 @@ Motivo de cancelación (opcional):`);
             const endStr = formatDate(periodEnd);
             
             // Filtrar servicios
-            const filteredServs = this.servs.filter(s => s.date >= startStr && s.date <= endStr);
+            const filteredServs = this.servs.filter(s => s.date >= startStr && s.date <= endStr && this._finSvcCuentaResumen(s));
             
             // Calcular ingresos
             let totalIngresos = 0;
@@ -12816,7 +13028,7 @@ Motivo de cancelación (opcional):`);
             });
             
             // Filtrar gastos
-            const filteredGastos = this.gastos.filter(g => g.fecha >= startStr && g.fecha <= endStr);
+            const filteredGastos = this._gastosFinanzas().filter(g => g.fecha >= startStr && g.fecha <= endStr);
             
             // Agrupar gastos
             const gastosPorCategoria = {};
@@ -12840,14 +13052,19 @@ Motivo de cancelación (opcional):`);
                 totalGastos += g.monto;
             });
             
-            const gananciaNeta = totalIngresos - totalGastos;
+            // 2026-11-06.7: igual que en pantalla (cobrado − gastos − nómina)
+            const _cob = this._cobrosPeriodo(startStr, endStr);
+            let totalNomina = 0;
+            (this.nominaTotales || []).forEach(p => { if (p.fechaInicio && p.fechaFin && p.fechaInicio <= endStr && p.fechaFin >= startStr) totalNomina += p.totalNeto || 0; });
+            const gananciaNeta = _cob.cobrado - totalGastos - totalNomina;
             
             // Nombre del período para el archivo
             const periodNames = {
                 'month': 'Mes',
                 'quarter': 'Trimestre',
                 'semester': 'Semestre',
-                'year': 'Año'
+                'year': 'Año',
+                'range': 'Rango'
             };
             const periodName = periodNames[period] || 'Mes';
             
@@ -12855,7 +13072,10 @@ Motivo de cancelación (opcional):`);
             let csv = 'Resumen Financiero\n\n';
             csv += `Período,${periodName} (${startStr} a ${endStr})\n\n`;
             csv += 'Concepto,Monto\n';
-            csv += `Ingresos (${filteredServs.length} servicios),${totalIngresos.toFixed(2)}\n\n`;
+            csv += `Ingresos cobrados (${_cob.nPagos} pagos),${_cob.cobrado.toFixed(2)}\n`;
+            csv += `  Facturado en el período (${_cob.nFact} facturas) - referencia,${_cob.facturado.toFixed(2)}\n`;
+            csv += `  Por cobrar al cierre (${_cob.nPend} facturas) - referencia,${_cob.porCobrar.toFixed(2)}\n`;
+            csv += `  Servicios agendados (${filteredServs.length}) - estimado,${totalIngresos.toFixed(2)}\n\n`;
             csv += `Gastos (${filteredGastos.length} registros),-${totalGastos.toFixed(2)}\n`;
             
             // Desglose de gastos
@@ -12869,7 +13089,9 @@ Motivo de cancelación (opcional):`);
                 });
             });
             
+            csv += `\nNómina,-${totalNomina.toFixed(2)}\n`;
             csv += `\nGanancias Netas,${gananciaNeta.toFixed(2)}\n`;
+            csv += `Ganancia estimada (agendado - gastos - nómina),${(totalIngresos - totalGastos - totalNomina).toFixed(2)}\n`;
             
             // Descargar
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -13005,7 +13227,7 @@ Motivo de cancelación (opcional):`);
         }
         
  	// Calcular gastos del mismo período
- 		       const gastosPeriodo = (this.gastos || []).filter(g => {
+ 		       const gastosPeriodo = this._gastosFinanzas().filter(g => {
 	 if(start && g.fecha < start) return false;
 	 if(end && g.fecha > end) return false;
   	              return true;
@@ -14318,6 +14540,50 @@ Motivo de cancelación (opcional):`);
         }
     }
 
+    // 2026-11-06.4: ¿el servicio cuenta como ingreso en el Resumen financiero?
+    // 2026-11-06.7 (Ranu): base de EFECTIVO para el Resumen financiero.
+    // cobrado   = pagos registrados en facturas con fecha de pago en [a, b], sin los pagos
+    //             hechos con saldo a favor (method 'credito'; ese dinero ya había entrado).
+    // facturado = facturas generadas en [a, b] (referencia).
+    // porCobrar = saldo de las facturas generadas hasta b, con lo pagado hasta b.
+    // Facturas canceladas no cuentan. Facturas viejas sin payments[]: paidAt + paidAmount/total.
+    _cobrosPeriodo(a, b) {
+        const r = { cobrado: 0, nPagos: 0, facturado: 0, nFact: 0, porCobrar: 0, nPend: 0 };
+        (this.generatedInvoices || []).forEach(inv => {
+            if (!inv || inv.status === 'cancelada') return;
+            const total = parseFloat(inv.total) || 0;
+            const fGen = String(inv.generatedDate || inv.sentAt || '').slice(0, 10);
+            if (fGen && fGen >= a && fGen <= b) { r.facturado += total; r.nFact++; }
+            let pays = Array.isArray(inv.payments) ? inv.payments : [];
+            if (!pays.length && inv.paidAt) {
+                pays = [{ date: inv.paidAt, amount: parseFloat(inv.paidAmount) || (inv.status === 'pagada' ? total : 0), method: inv.paymentMethod }];
+            }
+            let pagadoHasta = 0;
+            pays.forEach(p => {
+                const d = String(p.date || '').slice(0, 10), m = parseFloat(p.amount) || 0;
+                if (d && d <= b) pagadoHasta += m;
+                if (String(p.method || '').toLowerCase() === 'credito') return;
+                if (d && d >= a && d <= b) { r.cobrado += m; r.nPagos++; }
+            });
+            if (fGen && fGen <= b && !(inv.status === 'pagada' && (!pays.length || pays.every(p => !p.date || String(p.date).slice(0, 10) <= b)))) {
+                const saldo = total - pagadoHasta;
+                if (saldo > 0.009) { r.porCobrar += saldo; r.nPend++; }
+            }
+        });
+        return r;
+    }
+    _finSvcCuentaResumen(s) {
+        if (!s) return false;
+        if (s.cancelled && s.deductIncome) return false;
+        const c = (this.clis || []).find(x => x.id == s.cliId);
+        if (!c) return false;
+        if (this._finDescartados().includes(c.name)) return false;
+        if (c.servicePaused) {
+            const d = new Date(); const hoy = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            if (s.date >= hoy) return false;
+        }
+        return true;
+    }
     _finDescartados() { try { return JSON.parse(localStorage.getItem('fin_descartados') || '[]') || []; } catch (e) { return []; } }
     _finDescartar(nombre, descartar) {
         const set = new Set(this._finDescartados());
@@ -14656,7 +14922,7 @@ Motivo de cancelación (opcional):`);
         } catch (e) {}
         
         // ✅ Calcular gastos del mismo período
-        const gastosPeriodo = (this.gastos || []).filter(g => {
+        const gastosPeriodo = this._gastosFinanzas().filter(g => {
             if(start && g.fecha < start) return false;
             if(end && g.fecha > end) return false;
             return true;
@@ -24934,6 +25200,83 @@ document.addEventListener('click', function(e) {
             Cerrar
         </button>
     </div>
+</div>
+<!-- 2026-11-06.6: Gastos de SOLO LECTURA desde la app de Gastos (Cloudflare) -->
+<style>
+#gcfModal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:9000; overflow:auto; padding:20px 10px; }
+#gcfModal .gcf { --gp:#1d3557; --ga:#e63946; --gs:#2a9d5c; --gw:#e9a23b; --gb:#d9dee7; --gm:#6b7686; background:#f1f3f7; color:var(--gp); max-width:1000px; margin:0 auto; border-radius:12px; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,.3); }
+#gcfModal .gcf-head { background:var(--gp); color:#fff; padding:0 16px; height:56px; display:flex; align-items:center; justify-content:space-between; }
+#gcfModal .gcf-logo { font-size:1.35rem; font-weight:800; } #gcfModal .gcf-logo em { color:#8ecae6; font-style:normal; }
+#gcfModal .gcf-x { background:var(--ga); color:#fff; border:none; width:32px; height:32px; border-radius:50%; font-weight:700; cursor:pointer; }
+#gcfModal .gcf-sync { background:#fff; border-bottom:1px solid var(--gb); padding:7px 16px; font-size:.8rem; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+#gcfModal .gcf-dot { width:8px; height:8px; border-radius:50%; background:#bdc3c7; } #gcfModal .gcf-dot.ok{background:var(--gs)} #gcfModal .gcf-dot.err{background:var(--ga)} #gcfModal .gcf-dot.wait{background:var(--gw)}
+#gcfModal .gcf-sync button, #gcfModal .gcf-sync a { background:none; border:1px solid var(--gb); border-radius:6px; padding:3px 10px; cursor:pointer; font-size:.78rem; font-weight:600; color:var(--gm); text-decoration:none; }
+#gcfModal .gcf-body { padding:16px; }
+#gcfModal .gcf-card { background:#fff; border-radius:12px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.06); }
+#gcfModal .gcf-chips { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+#gcfModal .gcf-chip { padding:6px 14px; border:none; border-radius:20px; cursor:pointer; font-size:.92rem; font-weight:700; background:#e3e8f0; color:var(--gp); }
+#gcfModal .gcf-chip.on { background:var(--gp); color:#fff; }
+#gcfModal .gcf-nav { display:flex; gap:6px; align-items:center; margin-left:auto; }
+#gcfModal .gcf-lbl { font-weight:800; min-width:150px; text-align:center; }
+#gcfModal .gcf-filtros { display:none; grid-template-columns:repeat(4,1fr); gap:8px; margin:8px 0 12px; }
+#gcfModal .gcf-filtros.on { display:grid; }
+#gcfModal .gcf-filtros label { display:flex; flex-direction:column; gap:4px; font-size:.72rem; font-weight:600; color:var(--gm); text-transform:uppercase; letter-spacing:.5px; }
+#gcfModal .gcf-filtros input, #gcfModal .gcf-filtros select { padding:8px 10px; border:1.5px solid var(--gb); border-radius:8px; font-size:.95rem; color:var(--gp); text-transform:none; letter-spacing:0; }
+#gcfModal .gcf-btn { padding:6px 12px; border:1.5px solid var(--gb); border-radius:8px; background:#fff; color:var(--gp); cursor:pointer; font-weight:700; font-size:.9rem; }
+#gcfModal .gcf-wrap { overflow:auto; max-height:55vh; border-radius:8px; border:1px solid var(--gb); background:#fff; }
+#gcfModal table { width:100%; border-collapse:collapse; font-size:.9rem; }
+#gcfModal thead th { position:sticky; top:0; background:var(--gp); color:#fff; padding:9px 10px; text-align:left; white-space:nowrap; z-index:1; }
+#gcfModal tbody td { padding:8px 10px; border-bottom:1px solid var(--gb); vertical-align:middle; }
+#gcfModal tbody tr:nth-child(even) { background:#fafbfd; }
+#gcfModal .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+#gcfModal .sub { font-size:.78rem; color:var(--gm); }
+#gcfModal .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:.72rem; font-weight:700; background:#e3e8f0; }
+#gcfModal .gcf-tot { display:flex; justify-content:space-between; align-items:center; background:var(--gp); color:#fff; padding:12px 18px; border-radius:10px; margin-top:12px; gap:10px; flex-wrap:wrap; }
+#gcfModal .gcf-amt { font-size:1.9rem; font-weight:900; color:#8ecae6; font-variant-numeric:tabular-nums; }
+#gcfModal .gcf-porcat { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:8px; margin-top:12px; }
+#gcfModal .gcf-porcat div { background:#fff; border:1px solid var(--gb); border-radius:8px; padding:8px 10px; display:flex; justify-content:space-between; gap:8px; font-size:.9rem; }
+#gcfModal .gcf-aviso { background:#fff8e6; border:1px solid #f0d58c; color:#7a5a00; border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:.88rem; }
+@media (max-width:640px) { #gcfModal .gcf-filtros { grid-template-columns:1fr 1fr; } #gcfModal .col-opt { display:none; } #gcfModal .gcf-nav { width:100%; justify-content:space-between; margin-left:0; } }
+</style>
+<div id="gcfModal" onclick="if(event.target===this)app.cerrarGastosCF()">
+  <div class="gcf">
+    <div class="gcf-head"><div class="gcf-logo">Brazos<em>Gastos</em> <span style="font-size:.8rem;font-weight:600;opacity:.75">· solo lectura</span></div>
+      <button class="gcf-x" onclick="app.cerrarGastosCF()" aria-label="Cerrar">✕</button></div>
+    <div class="gcf-sync"><div class="gcf-dot" id="gcfDot"></div><span id="gcfSyncLbl">—</span>
+      <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+        <button onclick="app.actualizarGastosCF(true)">🔄 Actualizar</button>
+        <button id="gcfBtnClave" onclick="app.configurarClaveGastosCF()">🔑 Clave</button>
+        <a href="BrazosGastos.html" target="_blank" rel="noopener">Abrir app de Gastos ↗</a>
+      </span></div>
+    <div class="gcf-body"><div class="gcf-card">
+      <div id="gcfAviso"></div>
+      <div class="gcf-chips">
+        <button class="gcf-chip" data-p="week" onclick="app._gcfSetPeriodo('week')">Semana</button>
+        <button class="gcf-chip on" data-p="month" onclick="app._gcfSetPeriodo('month')">Mes</button>
+        <button class="gcf-chip" data-p="year" onclick="app._gcfSetPeriodo('year')">Año</button>
+        <button class="gcf-chip" data-p="all" onclick="app._gcfSetPeriodo('all')">Todo</button>
+        <div class="gcf-nav"><button class="gcf-chip" onclick="app._gcfMover(-1)" aria-label="Anterior">◀</button>
+          <span class="gcf-lbl" id="gcfPeriodoLbl"></span>
+          <button class="gcf-chip" onclick="app._gcfMover(1)" aria-label="Siguiente">▶</button></div>
+      </div>
+      <button class="gcf-btn" id="gcfBtnFiltros" onclick="document.getElementById('gcfFiltros').classList.toggle('on')">🔎 Filtros</button>
+      <div class="gcf-filtros" id="gcfFiltros">
+        <label>Categoría<select id="gcfCat" onchange="app._gcfLlenarSub();app.pintarGastosCF()"></select></label>
+        <label>Subcategoría<select id="gcfSub" onchange="app.pintarGastosCF()"></select></label>
+        <label>Pago<select id="gcfPago" onchange="app.pintarGastosCF()"><option value="all">Todos</option><option value="Debito">Débito</option><option value="Credito">Crédito</option><option value="Cash">Cash</option><option value="Otro">Otro</option></select></label>
+        <label>Buscar monto exacto<input id="gcfMonto" type="number" step="0.01" inputmode="decimal" placeholder="ej. 45.20" oninput="app.pintarGastosCF()"></label>
+        <label style="grid-column:span 2">Buscar texto<input id="gcfTexto" placeholder="proveedor, concepto, notas…" oninput="app.pintarGastosCF()"></label>
+      </div>
+      <div class="gcf-wrap" style="margin-top:10px"><table>
+        <thead><tr><th>Fecha</th><th class="col-opt">Categoría</th><th>Proveedor / Concepto</th><th class="col-opt">Pago</th><th class="num">Monto</th><th>📎</th><th class="col-opt">Registró</th></tr></thead>
+        <tbody id="gcfTbody"></tbody></table></div>
+      <div class="gcf-tot">
+        <div><div style="font-size:.8rem;opacity:.8" id="gcfCuenta"></div><div class="gcf-amt" id="gcfTotal">$0.00</div></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="gcf-btn" onclick="app.imprimirGastosCF()">🖨️ Reporte</button><button class="gcf-btn" onclick="app.csvGastosCF()">⬇️ CSV</button></div>
+      </div>
+      <div class="gcf-porcat" id="gcfPorCat"></div>
+    </div></div>
+  </div>
 </div>
 <!-- Modal Cancelación -->
 <div id="cancelModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:99998; align-items:center; justify-content:center;">
