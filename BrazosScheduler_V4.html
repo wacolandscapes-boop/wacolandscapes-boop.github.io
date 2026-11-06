@@ -1947,7 +1947,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-05.5';
+const SCHED_BUILD = '2026-11-06.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -22808,6 +22808,18 @@ Motivo de cancelación (opcional):`);
     // No cambia el cálculo normal de Nómina %: es un modo aparte.
     // ═══════════════════════════════════════════════════════════════════
     _nxeKey() { return 'brazos_nomina_xemp'; }
+    // 2026-11-06 (Ranu, opción A): % de pago PROPIO por empleado. Cada quien cobra SU %
+    // de SU parte del servicio (la parte se reparte igual que antes: entre quienes
+    // trabajaron, según su % de tiempo). Vacío = usa el "% pago" general. Se guarda
+    // para todas las semanas. { empId: pct }
+    _nxePctLeer() { try { return JSON.parse(localStorage.getItem('brazos_nomina_xemp_pct') || '{}') || {}; } catch(e) { return {}; } }
+    _nxePctSet(id, valor) {
+        const m = this._nxePctLeer();
+        const v = parseFloat(valor);
+        if (isNaN(v) || v <= 0) delete m[String(id)]; else m[String(id)] = Math.min(100, v);
+        try { localStorage.setItem('brazos_nomina_xemp_pct', JSON.stringify(m)); } catch(e) {}
+        this._nxeRender();
+    }
     _nxeLeer(monStr) {
         try { const all = JSON.parse(localStorage.getItem(this._nxeKey()) || '{}'); return all[monStr] || { faltas: {}, extra: {} }; }
         catch(e) { return { faltas: {}, extra: {} }; }
@@ -22823,6 +22835,8 @@ Motivo de cancelación (opcional):`);
     // Calcula todo: devuelve { dias:[{fecha, grupos:[{g, roster, presentes, servicios:[{cli,precio,pago,cadaUno}]}]}], porEmp:{id:{...}} }
     _nxeCalcular(monStr) {
         const pct = (parseFloat(document.getElementById('nmPct').value) || 60) / 100;
+        const pctMap = this._nxePctLeer();
+        const pctDe = id => { const v = parseFloat(pctMap[String(id)]); return isNaN(v) ? pct : v / 100; };
         const datos = this._nxeLeer(monStr);
         const faltas = datos.faltas || {};
         const fechas = this._nxeSemana(monStr);
@@ -22854,8 +22868,10 @@ Motivo de cancelación (opcional):`);
                 const servicios = svs.map(s => {
                     const cli = (this.clis || []).find(c => String(c.id) === String(s.cliId)) || {};
                     const precio = this.nmPricePerVisit(cli);
-                    const pago = precio * pct;
-                    presentes.forEach(id => { const m = sumaPesos > 0 ? pago * pesos[id] / sumaPesos : 0; porPersona[id] += m; add(id, fecha, g, cli.name || s.cliId, m); });
+                    // Parte de cada quien = precio × su peso de tiempo; cobra SU % de esa parte.
+                    let pago = 0;
+                    presentes.forEach(id => { const m = sumaPesos > 0 ? precio * pesos[id] / sumaPesos * pctDe(id) : 0; porPersona[id] += m; pago += m; add(id, fecha, g, cli.name || s.cliId, m); });
+                    if (sumaPesos <= 0) pago = precio * pct; // nadie marcado: para el aviso de "sin asignar"
                     return { cli: cli.name || s.cliId, precio, pago };
                 });
                 gruposDia.push({ g, roster, presentes: sumaPesos > 0 ? presentes : [], pesos, porPersona, servicios });
@@ -22864,12 +22880,13 @@ Motivo de cancelación (opcional):`);
             delDia.filter(s => !grupos.includes(s.empId) && (this.emps || []).some(e => String(e.id) === String(s.empId))).forEach(s => {
                 const cli = (this.clis || []).find(c => String(c.id) === String(s.cliId)) || {};
                 const precio = this.nmPricePerVisit(cli);
-                add(s.empId, fecha, '(individual)', cli.name || s.cliId, precio * pct);
-                gruposDia.push({ g: '(individual)', roster: [String(s.empId)], presentes: [String(s.empId)], servicios: [{ cli: cli.name || s.cliId, precio, pago: precio * pct, cadaUno: precio * pct }] });
+                const pInd = precio * pctDe(s.empId);
+                add(s.empId, fecha, '(individual)', cli.name || s.cliId, pInd);
+                gruposDia.push({ g: '(individual)', roster: [String(s.empId)], presentes: [String(s.empId)], servicios: [{ cli: cli.name || s.cliId, precio, pago: pInd, cadaUno: pInd }] });
             });
             return { fecha, grupos: gruposDia };
         });
-        return { dias, porEmp, pct };
+        return { dias, porEmp, pct, pctMap };
     }
     _nxeHoras(pago, rate) {
         const otRate = rate * 1.5;
@@ -23008,14 +23025,14 @@ Motivo de cancelación (opcional):`);
             <table style="width:100%;border-collapse:collapse;font-size:0.88rem;">
               <thead><tr style="background:#374151;color:#a78bfa;">
                 <th style="padding:7px;text-align:left;">Empleado</th><th style="padding:7px;">Servicios</th>
-                <th style="padding:7px;text-align:right;">Pago por % (${Math.round(calc.pct*100)}%)</th>
+                <th style="padding:7px;text-align:right;" title="Escribe un % en el empleado que cobre distinto; vacío = el general">% y pago (general ${Math.round(calc.pct*100)}%)</th>
                 <th style="padding:7px;">Hrs directas</th><th style="padding:7px;">Bonus $</th>
                 <th style="padding:7px;">Reg hrs</th><th style="padding:7px;">OT hrs</th>
                 <th style="padding:7px;text-align:right;">TOTAL</th></tr></thead>
               <tbody>${filas.map(f => `<tr style="border-bottom:1px solid #374151;">
                 <td style="padding:7px;font-weight:700;">${f.nombre}</td>
                 <td style="padding:7px;text-align:center;">${f.servicios}</td>
-                <td style="padding:7px;text-align:right;color:#86efac;">${fmt(f.pagoPct)}</td>
+                <td style="padding:7px;text-align:right;color:#86efac;white-space:nowrap;"><input type="number" min="1" max="100" step="1" value="${calc.pctMap[String(f.id)] !== undefined ? calc.pctMap[String(f.id)] : ''}" placeholder="${Math.round(calc.pct*100)}" title="% propio de este empleado (vacío = el % general)" onchange="app._nxePctSet('${f.id}',this.value)" style="width:48px;padding:2px 3px;border:1px solid ${calc.pctMap[String(f.id)] !== undefined ? '#f59e0b' : '#4a5568'};border-radius:4px;background:#2d3748;color:#e2e8f0;text-align:center;font-size:0.8rem;">% ${fmt(f.pagoPct)}</td>
                 <td style="padding:7px;text-align:center;"><input type="number" min="0" step="0.25" value="${f.hrsDir}" onchange="app._nxeExtra('${f.id}','hrs',this.value)" style="width:62px;padding:3px;border:1px solid #4a5568;border-radius:4px;background:#2d3748;color:#e2e8f0;text-align:center;"></td>
                 <td style="padding:7px;text-align:center;"><input type="number" min="0" step="0.01" value="${f.bonus}" onchange="app._nxeExtra('${f.id}','bonus',this.value)" style="width:70px;padding:3px;border:1px solid #4a5568;border-radius:4px;background:#2d3748;color:#e2e8f0;text-align:center;"></td>
                 ${f.fijo !== undefined || f.socio ? `<td colspan="2" style="padding:7px;text-align:center;font-size:0.78rem;color:#93c5fd;">${f.fijo !== undefined ? '💰 sueldo fijo' : 'cubierto por el fijo'}</td>` : `<td style="padding:7px;text-align:center;">${f.regHrs.toFixed(2)}</td>
@@ -23045,7 +23062,7 @@ Motivo de cancelación (opcional):`);
                   <div style="min-width:80px;font-weight:700;">${gr.g}</div>
                   <div style="flex:1;min-width:220px;">${chips}${sel}
                     <div style="font-size:0.78rem;color:#94a3b8;margin-top:3px;">${gr.servicios.map(s=>s.cli+' '+fmt(s.precio)).join(' · ')}</div></div>
-                  <div style="text-align:right;font-size:0.82rem;">${fmt(totalG)} ÷ ${gr.presentes.length||0}<br>${gr.pesos && gr.presentes.length && gr.presentes.some(id => gr.pesos[id] !== 100) ? '<b style="color:#fbbf24;">por % de tiempo</b>' : `<b style="color:#fbbf24;">${fmt(gr.presentes.length?totalG/gr.presentes.length:0)} c/u</b>`}</div>
+                  <div style="text-align:right;font-size:0.82rem;">${fmt(totalG)} ÷ ${gr.presentes.length||0}<br>${gr.pesos && gr.presentes.length && gr.presentes.some(id => gr.pesos[id] !== 100) ? '<b style="color:#fbbf24;">por % de tiempo</b>' : (gr.presentes.some(id => calc.pctMap[String(id)] !== undefined) ? '<b style="color:#fbbf24;">por % de cada quien</b>' : `<b style="color:#fbbf24;">${fmt(gr.presentes.length?totalG/gr.presentes.length:0)} c/u</b>`)}</div>
                 </div>`;
               }).join('')}
             </div>`;
@@ -23089,7 +23106,7 @@ Motivo de cancelación (opcional):`);
         const nomP = id => { const e = (this.emps || []).find(x => String(x.id) === String(id)); return e ? e.name : ''; };
         let html = `<h1 style="color:#7c3aed;">📊 Nómina % por empleado</h1><h3 style="font-weight:normal;color:#555;">Semana: ${f2(mon)} — ${f2(sun)} · ${Math.round(calc.pct*100)}% · ${fmt(rate)}/hr</h3>
           <table><thead><tr style="background:#f3f4f6;"><th>Empleado</th><th>Servicios</th><th>Pago por %</th><th>Hrs directas</th><th>Bonus</th><th>Reg hrs</th><th>OT hrs</th><th>Total</th></tr></thead><tbody>
-          ${filas.map(f=>`<tr><td>${f.nombre}</td><td style="text-align:center">${f.servicios}</td><td style="text-align:right">${fmt(f.pagoPct)}</td><td style="text-align:center">${f.hrsDir}</td><td style="text-align:right">${fmt(f.bonus)}</td>${f.fijo !== undefined || f.socio ? `<td colspan="2" style="text-align:center;font-size:0.85em">${f.fijo !== undefined ? 'Sueldo fijo' : 'Cubierto por el fijo'}</td>` : `<td style="text-align:center">${f.regHrs.toFixed(2)}</td><td style="text-align:center">${f.otHrs.toFixed(2)}</td>`}<td style="text-align:right;font-weight:bold">${fmt(f.total)}</td></tr>`).join('')}
+          ${filas.map(f=>`<tr><td>${f.nombre}</td><td style="text-align:center">${f.servicios}</td><td style="text-align:right">${calc.pctMap && calc.pctMap[String(f.id)] !== undefined ? '(' + calc.pctMap[String(f.id)] + '%) ' : ''}${fmt(f.pagoPct)}</td><td style="text-align:center">${f.hrsDir}</td><td style="text-align:right">${fmt(f.bonus)}</td>${f.fijo !== undefined || f.socio ? `<td colspan="2" style="text-align:center;font-size:0.85em">${f.fijo !== undefined ? 'Sueldo fijo' : 'Cubierto por el fijo'}</td>` : `<td style="text-align:center">${f.regHrs.toFixed(2)}</td><td style="text-align:center">${f.otHrs.toFixed(2)}</td>`}<td style="text-align:right;font-weight:bold">${fmt(f.total)}</td></tr>`).join('')}
           <tr style="font-weight:bold;background:#f3f4f6"><td colspan="7">TOTAL</td><td style="text-align:right">${fmt(filas.reduce((a,f)=>a+f.total,0))}</td></tr></tbody></table>`;
         if (fijoCfg) {
             const fF = filas.find(f => String(f.id) === String(fijoCfg.empId)), fS = fijoCfg.socioId ? filas.find(f => String(f.id) === String(fijoCfg.socioId)) : null;
