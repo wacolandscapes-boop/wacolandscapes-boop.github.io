@@ -1966,7 +1966,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-06.8';
+const SCHED_BUILD = '2026-11-09.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -12091,126 +12091,86 @@ Motivo de cancelación (opcional):`);
             totalGastos += g.monto;
         });
         
-        const _cob = this._cobrosPeriodo(startStr, endStr);
-        const gananciaNeta = _cob.cobrado - totalGastos - totalNomina;   // 2026-11-06.7: base cobrado
-        const _ganEst = totalIngresos - totalGastos - totalNomina;      // 2026-11-06.8: estimado con lo agendado
-        const gananciaColor = gananciaNeta >= 0 ? '#007bff' : '#dc3545';  // Azul si positivo, rojo si negativo
-        
-        console.log('Resumen Debug:', {
-            filtered: filtered.length,
-            totalIngresos,
-            totalGastos,
-            gananciaNeta,
-            sampleService: filtered[0]
-        });
-        
-        // Generar HTML - NUEVO FORMATO SIMPLE
+        // 2026-11-06.9 (Ranu): todo sobre los SERVICIOS del período (ver _resumenModelo)
+        const _m = this._resumenModelo(startStr, endStr);
+        const $f = n => (n < -0.004 ? '-$' : '$') + Math.abs(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const _negR = n => (n > 0.004 ? '-' : '') + $f(n);
+        const _escR = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        const programado = totalIngresos;
+        const porCobrar = Math.max(0, _m.facturado - _m.pagado);
+        const faltaFacturar = Math.max(0, programado - _m.facturado);
+        const nominaTotal = _m.nomReal + _m.nomEst;
+        // Período ya terminado → todo con datos REALES (lo facturado), sin estimados.
+        const _hoyR = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+        const pasado = endStr < _hoyR;
+        const ganEst = (pasado ? _m.facturado : programado) - nominaTotal - totalGastos;
+        const ganCob = _m.pagado - nominaTotal - totalGastos;
+        const fmtD = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+        const fila = (label, nota, monto, color, big, sangria) => `
+                <div style="display:flex; align-items:center; padding:${big ? '10px 0' : '4px 0'}; ${sangria ? 'padding-left:' + sangria + 'px;' : ''} font-size:${big ? '1rem' : '0.88rem'};">
+                    <span style="font-weight:${big ? 700 : 500}; color:${big ? '#2c3e50' : '#555'};">${label}</span>
+                    ${nota ? `<span style="color:#8a939c; font-size:0.8rem; margin-left:8px;">${nota}</span>` : ''}
+                    <span style="flex:1; border-bottom:${big ? '2px' : '1px'} dotted #ddd; margin:0 10px;"></span>
+                    <span style="font-weight:${big ? 800 : 600}; font-size:${big ? '1.2rem' : '0.95rem'}; color:${color}; font-variant-numeric:tabular-nums;">${monto}</span>
+                </div>`;
+        const titulo = t => `<div style="margin-top:16px; padding-bottom:4px; border-bottom:2px solid #2c3e50; font-size:0.75rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#2c3e50;">${t}</div>`;
+
         let html = `
             <div style="background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                 <h3 style="margin-top: 0; color: #2c3e50;">📊 Resumen Financiero</h3>
-                <p style="color: #666; margin-bottom: 25px; font-size: 0.9rem;">
-                    ${String(start.getMonth() + 1).padStart(2, '0')}/${String(start.getDate()).padStart(2, '0')}/${start.getFullYear()} - ${String(end.getMonth() + 1).padStart(2, '0')}/${String(end.getDate()).padStart(2, '0')}/${end.getFullYear()}
-                </p>
-                
-                <!-- Ingresos (2026-11-06.7: lo COBRADO; lo demás es referencia) -->
-                <div style="display: flex; align-items: center; padding: 12px 0 6px;">
-                    <span style="font-weight: 600; color: #2c3e50;">Ingresos cobrados</span>
-                    <span style="color: #6c757d; font-size: 0.85rem; margin-left: 10px;">(${_cob.nPagos} pagos)</span>
-                    <span style="flex: 1; border-bottom: 2px dotted #ddd; margin: 0 10px;"></span>
-                    <div style="font-size: 1.2rem; font-weight: 700; color: #28a745;">
-                        $${_cob.cobrado.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                    </div>
-                </div>
-                <div style="padding: 0 0 12px 20px; border-bottom: 1px solid #e9ecef; font-size: 0.85rem; color: #6c757d; display: grid; gap: 3px;">
-                    <div style="display:flex; gap:10px;"><span>Facturado en el período (${_cob.nFact} facturas)</span><span style="flex:1; border-bottom:1px dotted #ddd;"></span><span>$${_cob.facturado.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></div>
-                    <div style="display:flex; gap:10px;"><span>Por cobrar al cierre (${_cob.nPend} facturas con saldo)</span><span style="flex:1; border-bottom:1px dotted #ddd;"></span><span style="color:${_cob.porCobrar > 0 ? '#e67e22' : '#6c757d'}; font-weight:${_cob.porCobrar > 0 ? 600 : 400};">$${_cob.porCobrar.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></div>
-                    <div style="display:flex; gap:10px;"><span>Servicios agendados (${filtered.length}, estimado)</span><span style="flex:1; border-bottom:1px dotted #ddd;"></span><span>$${totalIngresos.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></div>
-                </div>
-                
-                <!-- Gastos con desglose -->
-                <div style="padding: 12px 0; border-bottom: 2px solid #2c3e50;">
-                    <div style="display: flex; align-items: center; margin-bottom: 10px;">
-                        <span style="font-weight: 600; color: #2c3e50;">Gastos</span>
-                        <span style="color: #6c757d; font-size: 0.85rem; margin-left: 10px;">(${filteredGastos.length} registros)</span>
-                        <span style="flex: 1; border-bottom: 2px dotted #ddd; margin: 0 10px;"></span>
-                        <div style="font-size: 1.2rem; font-weight: 700; color: #dc3545;">
-                            -$${totalGastos.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                        </div>
-                    </div>
-        `;
-        
-        // Desglose de gastos
-        if (Object.keys(gastosPorCategoria).length > 0) {
-            html += `<div style="padding-left: 20px; margin-top: 10px;">`;
-            Object.keys(gastosPorCategoria).sort().forEach(cat => {
-                const catData = gastosPorCategoria[cat];
-                html += `
-                    <div style="display: flex; align-items: center; padding: 5px 0; font-size: 0.9rem; color: #495057;">
-                        <span style="font-weight: 500;">${cat}</span>
-                        <span style="flex: 1; border-bottom: 1px dotted #ccc; margin: 0 10px;"></span>
-                        <span>$${catData.total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
-                    </div>
-                `;
-                
-                // Subcategorías (indentadas)
-                Object.keys(catData.subcategorias).sort().forEach(subcat => {
-                    const monto = catData.subcategorias[subcat];
-                    html += `
-                        <div style="display: flex; align-items: center; padding: 3px 0 3px 20px; font-size: 0.85rem; color: #6c757d;">
-                            <span>• ${subcat}</span>
-                            <span style="flex: 1; border-bottom: 1px dotted #ddd; margin: 0 8px;"></span>
-                            <span>$${monto.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
-                        </div>
-                    `;
-                });
-            });
-            html += `</div>`;
-        }
-        
-        html += `</div>`;  // Cierre de gastos
+                <p style="color: #666; margin-bottom: 6px; font-size: 0.9rem;">${fmtD(start)} - ${fmtD(end)} · servicios de este período</p>`;
 
-        // 💰 Línea de Nómina
-        if (totalNomina > 0) {
-            html += `
-                <div style="display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid #e9ecef;">
-                    <span style="font-weight: 600; color: #2c3e50;">💼 Nómina</span>
-                    <span style="color: #6c757d; font-size: 0.85rem; margin-left: 10px;">(${nominaPeriodo ? nominaPeriodo.numEmpleados + ' empleados' : 'importado'})</span>
-                    <span style="flex: 1; border-bottom: 2px dotted #ddd; margin: 0 10px;"></span>
-                    <div style="font-size: 1.2rem; font-weight: 700; color: #e67e22;">
-                        -$${totalNomina.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                    </div>
-                </div>`;
+        html += titulo('1 · Facturación del período');
+        if (pasado) {
+            html += fila('Facturado', `(${_m.nFact} facturas · período cerrado, datos reales)`, $f(_m.facturado), '#2c3e50', true);
+            html += fila('✅ Pagado', '', $f(_m.pagado), '#28a745', false, 18);
+            html += fila('🟠 Por cobrar', '', $f(porCobrar), porCobrar > 0.004 ? '#e67e22' : '#8a939c', false, 18);
+            html += fila('Servicios agendados', `(${filtered.length}, referencia)`, $f(programado), '#8a939c', false, 18);
+            if (faltaFacturar > 0.004) html += fila('⏳ Sin facturar', '(agendado − facturado)', $f(faltaFacturar), '#2980b9', false, 18);
+        } else {
+            html += fila('Facturación programada', `(${filtered.length} servicios)`, $f(programado), '#2c3e50', true);
+            html += fila('Ya facturado', `(${_m.nFact} facturas)`, $f(_m.facturado), '#2c3e50', false, 18);
+            html += fila('✅ Pagado', '', $f(_m.pagado), '#28a745', false, 36);
+            html += fila('🟠 Por cobrar', '', $f(porCobrar), porCobrar > 0.004 ? '#e67e22' : '#8a939c', false, 36);
+            html += fila('⏳ Falta por facturar', '', $f(faltaFacturar), faltaFacturar > 0.004 ? '#2980b9' : '#8a939c', false, 18);
+        }
+
+        html += titulo('2 · Costos');
+        if (_m.nNom || _m.nomEst > 0) {
+            html += fila('💼 Nómina', '', _negR(nominaTotal), '#e67e22', true);
+            html += fila('Nóminas guardadas', `(${_m.nNom} nómina${_m.nNom === 1 ? '' : 's'}${_m.empleados ? ', ' + _m.empleados + ' empleados' : ''})`, _negR(_m.nomReal), '#555', false, 18);
+            if (_m.diasSinNom > 0) html += fila('Estimada', `(${_m.diasSinNom} día${_m.diasSinNom === 1 ? '' : 's'} sin nómina × promedio ${$f(_m.diarioProm * 7)}/semana)`, _negR(_m.nomEst), '#555', false, 18);
         } else {
             html += `
-                <div style="display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #e9ecef;">
-                    <span style="font-weight: 600; color: #aaa;">💼 Nómina</span>
+                <div style="display: flex; align-items: center; padding: 10px 0;">
+                    <span style="font-weight: 700; color: #aaa;">💼 Nómina</span>
                     <span style="color: #bbb; font-size: 0.85rem; margin-left: 10px;">(no importada)</span>
                     <span style="flex: 1; border-bottom: 2px dotted #eee; margin: 0 10px;"></span>
                     <button onclick="app.importNominaFromDrive()" style="background:#8e44ad; color:white; border:none; border-radius:5px; padding:4px 10px; cursor:pointer; font-size:0.8rem;">📥 Importar</button>
                 </div>`;
         }
+        html += fila('💸 Gastos', `(${filteredGastos.length} registros)`, _negR(totalGastos), '#dc3545', true);
+        Object.keys(gastosPorCategoria).sort().forEach(cat => {
+            html += fila(_escR(cat), '', $f(gastosPorCategoria[cat].total), '#555', false, 18);
+        });
+        html += `</div>`;
 
-        html += `</div>`;  // Cierre del contenedor principal
-        
-        // Ganancias Netas - SEPARADO en su propio contenedor fijo
         const gananciasHTML = `
-            <div style="display: flex; align-items: center; padding: 15px 20px;">
-                <div style="font-weight: 700; color: #2c3e50; font-size: 1.2rem;">Ganancias Netas</div>
+            <div style="padding: 6px 20px 2px; font-size:0.75rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#2c3e50;">3 · Resultado</div>
+            <div style="display: flex; align-items: center; padding: 8px 20px;">
+                <div><div style="font-weight: 700; color: #2c3e50; font-size: 1.1rem;">${pasado ? 'Ganancia del período' : 'Ganancia estimada'}</div>
+                    <div style="font-size:0.75rem; color:#8a939c;">${pasado ? 'facturado − nómina − gastos · datos reales' : 'programado − nómina − gastos · si todos pagan'}</div></div>
                 <span style="flex: 1; border-bottom: 2px dotted #999; margin: 0 15px;"></span>
-                <div style="font-size: 1.6rem; font-weight: 900; color: ${gananciaColor};">
-                    $${gananciaNeta.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                </div>
+                <div style="font-size: 1.5rem; font-weight: 900; color: ${ganEst >= 0 ? '#007bff' : '#dc3545'}; font-variant-numeric:tabular-nums;">${$f(ganEst)}</div>
             </div>
-            <div style="display: flex; align-items: center; padding: 0 20px 4px; color: #6c757d;">
-                <div style="font-weight: 600; font-size: 0.95rem;">Ganancia estimada <span style="font-weight:400; font-size:0.8rem;">(servicios agendados − gastos − nómina)</span></div>
+            <div style="display: flex; align-items: center; padding: 4px 20px 14px;">
+                <div><div style="font-weight: 600; color: #555; font-size: 1rem;">Ganancia cobrada</div>
+                    <div style="font-size:0.75rem; color:#8a939c;">pagado − nómina − gastos · lo que ya entró de este período</div></div>
                 <span style="flex: 1; border-bottom: 1px dotted #bbb; margin: 0 15px;"></span>
-                <div style="font-size: 1.15rem; font-weight: 700; color: ${_ganEst >= 0 ? '#5a7fa8' : '#dc3545'};">
-                    $${_ganEst.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                </div>
+                <div style="font-size: 1.2rem; font-weight: 800; color: ${ganCob >= 0 ? '#28a745' : '#dc3545'}; font-variant-numeric:tabular-nums;">${$f(ganCob)}</div>
             </div>
-            <div style="padding: 0 20px 12px; font-size: 0.75rem; color: #999;">Si todos los servicios agendados del período se cobran. Las Ganancias Netas usan solo lo ya cobrado.</div>
         `;
-        
+
         document.getElementById('resumenContent').innerHTML = html;
         document.getElementById('resumenGanancias').innerHTML = gananciasHTML;
     }	
@@ -13052,11 +13012,12 @@ Motivo de cancelación (opcional):`);
                 totalGastos += g.monto;
             });
             
-            // 2026-11-06.7: igual que en pantalla (cobrado − gastos − nómina)
-            const _cob = this._cobrosPeriodo(startStr, endStr);
-            let totalNomina = 0;
-            (this.nominaTotales || []).forEach(p => { if (p.fechaInicio && p.fechaFin && p.fechaInicio <= endStr && p.fechaFin >= startStr) totalNomina += p.totalNeto || 0; });
-            const gananciaNeta = _cob.cobrado - totalGastos - totalNomina;
+            // 2026-11-06.9: mismo modelo que en pantalla (servicios del período)
+            const _m = this._resumenModelo(startStr, endStr);
+            const totalNomina = _m.nomReal + _m.nomEst;
+            const gananciaNeta = _m.pagado - totalGastos - totalNomina;
+            const _hoyC = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+            const _pasadoC = endStr < _hoyC;
             
             // Nombre del período para el archivo
             const periodNames = {
@@ -13072,10 +13033,11 @@ Motivo de cancelación (opcional):`);
             let csv = 'Resumen Financiero\n\n';
             csv += `Período,${periodName} (${startStr} a ${endStr})\n\n`;
             csv += 'Concepto,Monto\n';
-            csv += `Ingresos cobrados (${_cob.nPagos} pagos),${_cob.cobrado.toFixed(2)}\n`;
-            csv += `  Facturado en el período (${_cob.nFact} facturas) - referencia,${_cob.facturado.toFixed(2)}\n`;
-            csv += `  Por cobrar al cierre (${_cob.nPend} facturas) - referencia,${_cob.porCobrar.toFixed(2)}\n`;
-            csv += `  Servicios agendados (${filteredServs.length}) - estimado,${totalIngresos.toFixed(2)}\n\n`;
+            csv += `Facturación programada (${filteredServs.length} servicios),${totalIngresos.toFixed(2)}\n`;
+            csv += `  Ya facturado (${_m.nFact} facturas),${_m.facturado.toFixed(2)}\n`;
+            csv += `    Pagado,${_m.pagado.toFixed(2)}\n`;
+            csv += `    Por cobrar,${(_m.facturado - _m.pagado).toFixed(2)}\n`;
+            csv += `  Falta por facturar,${Math.max(0, totalIngresos - _m.facturado).toFixed(2)}\n\n`;
             csv += `Gastos (${filteredGastos.length} registros),-${totalGastos.toFixed(2)}\n`;
             
             // Desglose de gastos
@@ -13089,9 +13051,12 @@ Motivo de cancelación (opcional):`);
                 });
             });
             
-            csv += `\nNómina,-${totalNomina.toFixed(2)}\n`;
-            csv += `\nGanancias Netas,${gananciaNeta.toFixed(2)}\n`;
-            csv += `Ganancia estimada (agendado - gastos - nómina),${(totalIngresos - totalGastos - totalNomina).toFixed(2)}\n`;
+            csv += `\nNómina real,-${_m.nomReal.toFixed(2)}\n`;
+            csv += `Nómina estimada (${_m.diasSinNom} días sin nómina),-${_m.nomEst.toFixed(2)}\n`;
+            csv += _pasadoC
+                ? `\nGanancia del período (facturado - nómina - gastos; datos reales),${(_m.facturado - totalGastos - totalNomina).toFixed(2)}\n`
+                : `\nGanancia estimada (programado - nómina - gastos),${(totalIngresos - totalGastos - totalNomina).toFixed(2)}\n`;
+            csv += `Ganancia cobrada (pagado - nómina - gastos),${gananciaNeta.toFixed(2)}\n`;
             
             // Descargar
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -14547,6 +14512,68 @@ Motivo de cancelación (opcional):`);
     // facturado = facturas generadas en [a, b] (referencia).
     // porCobrar = saldo de las facturas generadas hasta b, con lo pagado hasta b.
     // Facturas canceladas no cuentan. Facturas viejas sin payments[]: paidAt + paidAmount/total.
+    // 2026-11-06.9 (Ranu): Resumen financiero POR SERVICIOS DEL PERÍODO.
+    //  facturas: se cuenta la parte de cada factura cuyos servicios caen en [a, b]
+    //    (por la fecha de cada renglón; si no hay renglones con fecha, por los días de
+    //    startDate–endDate; si tampoco, por generatedDate). Pagado = esa parte × lo pagado
+    //    de la factura (pagos de cualquier fecha, incluido saldo a favor).
+    //  nómina: real = parte de cada nómina importada que cae en [a, b] (por días);
+    //    días del período sin nómina → estimados con el promedio diario de las últimas 4.
+    _resumenModelo(a, b) {
+        const dias = (x, y) => Math.round((Date.parse(y + 'T12:00:00') - Date.parse(x + 'T12:00:00')) / 864e5) + 1;
+        const mx = (x, y) => x > y ? x : y, mn = (x, y) => x < y ? x : y;
+        const d10 = v => String(v || '').slice(0, 10);
+        const r = { facturado: 0, pagado: 0, nFact: 0, nomReal: 0, nomEst: 0, diasSinNom: 0, diarioProm: 0, nNom: 0, empleados: 0 };
+        (this.generatedInvoices || []).forEach(inv => {
+            if (!inv || inv.status === 'cancelada') return;
+            const total = parseFloat(inv.total) || 0;
+            if (total <= 0) return;
+            const items = (Array.isArray(inv.items) ? inv.items : []).filter(i => d10(i.fecha));
+            const sumIt = items.reduce((t, i) => t + (parseFloat(i.precio) || 0), 0);
+            let parte = 0;
+            if (items.length && sumIt > 0) {
+                const enP = items.filter(i => d10(i.fecha) >= a && d10(i.fecha) <= b).reduce((t, i) => t + (parseFloat(i.precio) || 0), 0);
+                parte = total * enP / sumIt;
+            } else if (d10(inv.startDate) && d10(inv.endDate)) {
+                const s0 = mx(d10(inv.startDate), a), e0 = mn(d10(inv.endDate), b);
+                if (s0 <= e0) parte = total * dias(s0, e0) / Math.max(1, dias(d10(inv.startDate), d10(inv.endDate)));
+            } else {
+                const g = d10(inv.generatedDate || inv.sentAt);
+                if (g && g >= a && g <= b) parte = total;
+            }
+            if (parte <= 0.004) return;
+            const pagos = (inv.payments || []).reduce((t, p) => t + (parseFloat(p.amount) || 0), 0) || parseFloat(inv.paidAmount) || 0;
+            const frac = inv.status === 'pagada' ? 1 : Math.min(1, pagos / total);
+            r.facturado += parte; r.pagado += parte * frac; r.nFact++;
+        });
+        // nómina (sin duplicar el mismo período)
+        const vistos = {};
+        (this.nominaTotales || []).forEach(p => { if (p && d10(p.fechaInicio) && d10(p.fechaFin)) vistos[d10(p.fechaInicio) + '|' + d10(p.fechaFin)] = p; });
+        const noms = Object.values(vistos);
+        const cub = new Set();
+        noms.forEach(p => {
+            const i0 = d10(p.fechaInicio), f0 = d10(p.fechaFin);
+            const s0 = mx(i0, a), e0 = mn(f0, b);
+            if (s0 > e0) return;
+            r.nomReal += (parseFloat(p.totalNeto) || 0) * dias(s0, e0) / Math.max(1, dias(i0, f0));
+            r.nNom++; r.empleados = Math.max(r.empleados, parseInt(p.numEmpleados) || 0);
+            const d = new Date(s0 + 'T12:00:00'), fin = new Date(e0 + 'T12:00:00');
+            while (d <= fin) { cub.add(d.toISOString().slice(0, 10)); d.setDate(d.getDate() + 1); }
+        });
+        // Solo se estiman los días DESPUÉS de la última nómina guardada (nóminas que aún no
+        // se crean). Un hueco en el pasado se deja como está: es dato real (no hubo nómina).
+        const ultFin = noms.reduce((m, p) => d10(p.fechaFin) > m ? d10(p.fechaFin) : m, '');
+        { const d = new Date(a + 'T12:00:00'), fin = new Date(b + 'T12:00:00'); let n = 0;
+          while (d <= fin) { const k = d.toISOString().slice(0, 10); if (!cub.has(k) && (!ultFin || k > ultFin)) n++; d.setDate(d.getDate() + 1); }
+          // Período ya terminado → solo nóminas reales, sin estimar.
+          const h = new Date(), hoy = `${h.getFullYear()}-${String(h.getMonth()+1).padStart(2,'0')}-${String(h.getDate()).padStart(2,'0')}`;
+          r.diasSinNom = (noms.length && b >= hoy) ? n : 0; }
+        const ult = noms.slice().sort((x, y) => d10(y.fechaFin).localeCompare(d10(x.fechaFin))).slice(0, 4);
+        const dTot = ult.reduce((t, p) => t + dias(d10(p.fechaInicio), d10(p.fechaFin)), 0);
+        r.diarioProm = dTot ? ult.reduce((t, p) => t + (parseFloat(p.totalNeto) || 0), 0) / dTot : 0;
+        r.nomEst = r.diasSinNom * r.diarioProm;
+        return r;
+    }
     _cobrosPeriodo(a, b) {
         const r = { cobrado: 0, nPagos: 0, facturado: 0, nFact: 0, porCobrar: 0, nPend: 0 };
         (this.generatedInvoices || []).forEach(inv => {
@@ -21994,7 +22021,8 @@ Motivo de cancelación (opcional):`);
         if (!a) return b || a;
         if (!b) return a;
         if (String(a.ref || '') !== String(b.ref || '')) return String(b.fecha || '') > String(a.fecha || '') ? b : a;
-        const rango = (x) => (x.estado === 'transito' ? 1 : 2);
+        // 2026-11-09: verificar (espera microdepósitos) < tránsito < pagado/rechazado/cancelado
+        const rango = (x) => (x.estado === 'verificar' ? 0 : x.estado === 'transito' ? 1 : 2);
         if (rango(b) !== rango(a)) return rango(b) > rango(a) ? b : a;
         if (!!b.oculto !== !!a.oculto) return b.oculto ? b : a;
         return a;
@@ -22008,6 +22036,14 @@ Motivo de cancelación (opcional):`);
         if (a.estado === 'transito') {
             return `<div title="El cliente pagó con cuenta bancaria (ACH). Stripe tarda varios días en cobrarlo; la factura se marca pagada sola cuando se confirme." style="font-size:0.68rem;color:#2471a3;margin-top:2px;">🏦 ACH en tránsito · ${monto} · desde ${f(a.fecha)}</div>`;
         }
+        if (a.estado === 'verificar') {
+            const _id = inv.id || inv.invoiceNumber;
+            return `<div title="El cliente pagó con ACH, pero Stripe espera que verifique su banco con el código SM del depósito de $0.01 (tiene 10 días). Mándale el enlace." style="font-size:0.68rem;color:#b9770e;margin-top:2px;font-weight:bold;">⚠️ ACH: falta verificar banco · ${monto} · desde ${f(a.fecha)}${a.verifyUrl ? ` · <a href="#" onclick="event.preventDefault();app.copiarEnlaceVerificacionAch('${_id}')" style="color:#b9770e;font-weight:normal;">copiar enlace</a>` : ''}</div>`;
+        }
+        if (a.estado === 'cancelado' && !a.oculto) {
+            const _id = inv.id || inv.invoiceNumber;
+            return `<div title="Stripe canceló el pago ACH (normalmente porque no verificaron su banco a tiempo). La factura sigue sin pagar." style="font-size:0.68rem;color:#7f8c8d;margin-top:2px;font-weight:bold;">⚪ ACH cancelado · ${monto} · ${f(a.fechaEstado)} · <a href="#" onclick="event.preventDefault();app.ocultarAvisoAch('${_id}')" style="color:#7f8c8d;font-weight:normal;">quitar aviso</a></div>`;
+        }
         if (a.estado === 'rechazado' && !a.oculto) {
             const _id = inv.id || inv.invoiceNumber;
             return `<div style="font-size:0.68rem;color:#c0392b;margin-top:2px;font-weight:bold;">🔴 ACH rechazado · ${monto} · ${f(a.fechaEstado)} · <a href="#" onclick="event.preventDefault();app.ocultarAvisoAch('${_id}')" style="color:#c0392b;font-weight:normal;">quitar aviso</a></div>`;
@@ -22015,10 +22051,19 @@ Motivo de cancelación (opcional):`);
         return '';
     }
 
+    // 2026-11-09: copia el enlace de verificación de Stripe (microdepósitos) para mandárselo al cliente
+    copiarEnlaceVerificacionAch(idOrNum) {
+        const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(idOrNum) || String(i.invoiceNumber) === String(idOrNum));
+        const url = inv && inv.achStripe && inv.achStripe.verifyUrl;
+        if (!url) { alert('Esta factura no tiene enlace de verificación.'); return; }
+        const ok = () => alert('Enlace copiado. Pégalo en el correo para el cliente:\n\n' + url);
+        try { navigator.clipboard.writeText(url).then(ok, () => prompt('Copia el enlace:', url)); } catch (e) { prompt('Copia el enlace:', url); }
+    }
+
     ocultarAvisoAch(idOrNum) {
         const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(idOrNum) || String(i.invoiceNumber) === String(idOrNum));
         if (!inv || !inv.achStripe) return;
-        if (!confirm('¿Quitar el aviso de ACH rechazado de la factura #' + inv.invoiceNumber + '?\n(La factura sigue sin pagar.)')) return;
+        if (!confirm('¿Quitar el aviso de ACH ' + (inv.achStripe.estado === 'cancelado' ? 'cancelado' : 'rechazado') + ' de la factura #' + inv.invoiceNumber + '?\n(La factura sigue sin pagar.)')) return;
         inv.achStripe.oculto = true;
         localStorage.setItem('v35_generatedInvoices', JSON.stringify(this.generatedInvoices));
         this.save();
