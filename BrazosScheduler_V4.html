@@ -1966,7 +1966,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-09.1';
+const SCHED_BUILD = '2026-11-12.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -11558,8 +11558,12 @@ Motivo de cancelación (opcional):`);
             if (i % 2 === 1) { doc.setFillColor(245,247,250); doc.rect(20, y, 170, 8, 'F'); }
             doc.text('#' + String(inv.invoiceNumber).padStart(4,'0'), 24, y+5.5);
             doc.text(fmt(inv.startDate) + ' - ' + fmt(inv.endDate), 58, y+5.5);
-            const est = inv.status === 'parcial' ? 'Partial' : 'Unpaid';
+            // 2026-11-12: marca las vencidas (mismo cálculo que el sello PAST DUE)
+            const _venc = this._atrasoFactura(inv);
+            const est = (inv.status === 'parcial' ? 'Partial' : 'Unpaid') + (_venc ? ' \u00b7 Past due' : '');
+            if (_venc) doc.setTextColor(192,57,43);
             doc.text(est, 120, y+5.5);
+            doc.setTextColor(50,50,50);
             doc.text(money(saldo), 186, y+5.5, { align:'right' });
             // Si es parcial, mostrar cuánto pagó abajo
             if (inv.status === 'parcial' && parseFloat(inv.paidAmount||0) > 0) {
@@ -11578,6 +11582,24 @@ Motivo de cancelación (opcional):`);
         doc.setFont(undefined,'bold'); doc.setFontSize(13); doc.setTextColor(220,38,38);
         doc.text('TOTAL DUE:', 114, y+2);
         doc.text(money(grandTotal), 186, y+2, { align:'right' });
+
+        // 2026-11-12 (Ranu): nota de facturas atrasadas — solo si al menos una está vencida
+        if (facturas.some(inv => this._atrasoFactura(inv))) {
+            const nota = 'Our records show that the invoices listed on this statement are past due. Please note that this statement may also include invoices that are not yet due. If you have already made these payments, please disregard this notice and kindly reply with the payment date and reference (check number or transaction ID) so we can update our records. Thank you!';
+            doc.setFont(undefined,'normal'); doc.setFontSize(8.5);
+            const lineas = doc.splitTextToSize(nota, 162);
+            const boxH = 10 + lineas.length * 4.2;
+            let ny = y + 12;
+            if (ny + boxH + 50 > 270) { doc.addPage(); ny = 20; }   // nota + formas de pago juntas
+            doc.setDrawColor(231,76,60); doc.setFillColor(254,245,243);
+            doc.roundedRect(20, ny, 170, boxH, 2, 2, 'FD');
+            doc.setFont(undefined,'bold'); doc.setTextColor(192,57,43);
+            doc.text('PAST DUE NOTICE', 24, ny + 6);
+            doc.setFont(undefined,'normal'); doc.setTextColor(60,60,60);
+            let ty = ny + 11;
+            lineas.forEach(l => { doc.text(l, 24, ty); ty += 4.2; });
+            y = ny + boxH - 8;   // las formas de pago van debajo (en y + 14)
+        }
 
         // Formas de pago
         try { this.drawPaymentOptions(doc, 20, y + 14, 170, 'STATEMENT', clientName, grandTotal); }
