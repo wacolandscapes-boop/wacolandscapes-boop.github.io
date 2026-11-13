@@ -1966,7 +1966,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-13.6';
+const SCHED_BUILD = '2026-11-13.7';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -18153,7 +18153,9 @@ Motivo de cancelación (opcional):`);
                 this._addSentHistory(alreadyExists, 'reenviado (PDF)');
                 if (!this._isInvoiceStatusAdvanced(alreadyExists.status)) {
                     alreadyExists.status = 'enviada';
-                    alreadyExists.sentAt = new Date().toISOString().split('T')[0];
+                    // 2026-11-13 (Ranu): reimprimir/reenviar NO cambia la fecha del primer envío
+                    // (antes la pisaba con hoy y el plazo de pago volvía a empezar — Bob Mills #7846).
+                    if (!alreadyExists.sentAt) alreadyExists.sentAt = new Date().toISOString().split('T')[0];
                 }
             }
             if (!alreadyExists.clientIds || alreadyExists.clientIds.length === 0) {
