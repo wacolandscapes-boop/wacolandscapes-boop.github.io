@@ -1966,7 +1966,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-13.2';
+const SCHED_BUILD = '2026-11-13.3';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -8076,6 +8076,18 @@ Brazos Cleaning Services</textarea>
                 </table>
                 <div style="text-align:right;margin-top:12px;font-weight:700;">Total: $${(inv.total||0).toFixed(2)}</div>
                 ${(() => {
+                    // 2026-11-13: estados de cuenta enviados por correo que incluyeron esta factura
+                    const sh = (inv.statementHistory || []).slice().reverse();
+                    if (!sh.length) return '<div style="margin-top:14px;font-size:12px;color:#64748b;">📄 Sin estados de cuenta enviados con esta factura.</div>';
+                    const filas = sh.map(h => {
+                        const d = new Date(h.date);
+                        const fecha = d.toLocaleDateString('es-MX', {day:'2-digit', month:'short', year:'numeric'}) + ' · ' + d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+                        return `<tr><td style="padding:4px 8px;color:#cbd5e1;white-space:nowrap;">${fecha}</td><td style="padding:4px 8px;color:#94a3b8;">📧 ${String(h.to||'').replace(/</g,'&lt;')}</td><td style="padding:4px 8px;color:#94a3b8;">${(h.facturas||[]).join(', ')}</td><td style="padding:4px 8px;color:#e2e8f0;text-align:right;white-space:nowrap;">$${(parseFloat(h.total)||0).toFixed(2)}</td></tr>`;
+                    }).join('');
+                    return `<div style="margin-top:16px;"><div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:6px;">📄 Estados de cuenta enviados (${sh.length})</div>
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;background:#0f172a;border-radius:8px;overflow:hidden;">${filas}</table></div>`;
+                })()}
+                ${(() => {
                     const hist = (inv.sentHistory || []).slice().reverse(); // más reciente primero
                     if (hist.length === 0) {
                         // Factura de antes de que existiera este registro — no hay historial
@@ -8865,7 +8877,7 @@ Brazos Cleaning Services</textarea>
                 <td style="text-align:center;">${isCancelled ? '' : `<input type="checkbox" class="genInvSel" ${_marcada ? 'checked' : ''} onchange="app.toggleSelFactura('${inv.id}', this.checked)" title="Marcar para imprimir">`}</td>
                 <td><strong>#${invoiceNumberFormatted}</strong>${isDuplicate ? ' <span title="Número duplicado" style="color:#e74c3c;font-size:0.8rem;">⚠️</span>' : ''}</td>
                 <td>${genFormatted}</td>
-                <td>${inv.clientName}${isCancelled ? `<br><small style="color:#c0392b;font-style:italic;text-decoration:none;display:inline-block;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;" title="${(inv.cancelledReason||'Cancelada').replace(/"/g,'&quot;')}">${inv.cancelledReason||'Cancelada'}</small> <a href="#" onclick="event.preventDefault();app.editarMotivoCancelacion('${inv.id}')" title="Editar motivo de cancelación" style="text-decoration:none;font-size:0.7rem;">✏️</a>` : ''}</td>
+                <td>${inv.clientName}${isCancelled ? '' : this._infoClienteEnviadas(inv)}${isCancelled ? `<br><small style="color:#c0392b;font-style:italic;text-decoration:none;display:inline-block;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;" title="${(inv.cancelledReason||'Cancelada').replace(/"/g,'&quot;')}">${inv.cancelledReason||'Cancelada'}</small> <a href="#" onclick="event.preventDefault();app.editarMotivoCancelacion('${inv.id}')" title="Editar motivo de cancelación" style="text-decoration:none;font-size:0.7rem;">✏️</a>` : ''}</td>
                 <td style="font-size: 0.85rem;">${periodFormatted}</td>
                 <td><span style="background:${isCancelled?'#95a5a6':'var(--color-'+inv.type+')'}; color:white; padding:3px 8px; border-radius:4px; font-size:0.7rem">${isCancelled?'CANCELADA':inv.type.toUpperCase()}</span></td>
                 <td style="text-align: center;">${(inv.items && inv.items.length > 0) ? inv.items.length : (inv.serviceCount || '—')}</td>
@@ -11777,6 +11789,7 @@ Motivo de cancelación (opcional):`);
                     invoice_number: 'Statement', pdf_content: base64PDF, pdf_name: nombreArchivo
                 });
             }
+            try { this._registrarEstadoCuentaEnviado(d, destino); } catch (e) { console.warn('registro estado de cuenta:', e); }
             alert(`✅ Estado de cuenta enviado a ${destino}`);
             this._volverAEstadoCuenta();
         } catch(e) { alert('Error enviando: ' + e.message); rehab(); }
@@ -16545,6 +16558,42 @@ Motivo de cancelación (opcional):`);
     // (construcción/airbnb) solo UNA de las propiedades suele tener el email guardado.
     // Busca primero en la propiedad específica y, si está vacío, en cualquier otra
     // propiedad que comparta el mismo nombre de cliente.
+    // 2026-11-13 (Ranu): en Enviadas, debajo del nombre: correo del cliente y el último
+    // estado de cuenta enviado que incluyó esta factura (inv.statementHistory).
+    _infoClienteEnviadas(inv) {
+        try {
+            const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            const cli = ((inv.clientIds && inv.clientIds.length) ? (this.clis || []).find(c => String(c.id) === String(inv.clientIds[0])) : null)
+                || (this.clis || []).find(c => c.name === inv.clientName);
+            const email = (cli && this.getClientEmail(cli)) || inv.clientEmail || '';
+            let out = email
+                ? `<div style="font-size:0.7rem;color:#2563eb;margin-top:1px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(email)}">📧 ${esc(email)}</div>`
+                : `<div style="font-size:0.7rem;color:#e67e22;margin-top:1px;">📧 sin correo</div>`;
+            const h = inv.statementHistory || [];
+            if (h.length) {
+                const u = h[h.length - 1]; const d = new Date(u.date);
+                const f = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+                out += `<div style="font-size:0.7rem;color:#6d28d9;margin-top:1px;" title="Estados de cuenta enviados con esta factura: ${h.length}">📄 Estado de cuenta: ${f}${h.length > 1 ? ' (' + h.length + ')' : ''}</div>`;
+            }
+            return out;
+        } catch (e) { return ''; }
+    }
+    // Deja constancia en CADA factura incluida de que se mandó un estado de cuenta.
+    _registrarEstadoCuentaEnviado(d, destino) {
+        const ahora = new Date().toISOString();
+        const nums = (d.facturas || []).map(f => '#' + String(f.invoiceNumber).padStart(4, '0'));
+        (d.facturas || []).forEach(f => {
+            const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(f.id));
+            if (!inv) return;
+            inv.statementHistory = inv.statementHistory || [];
+            inv.statementHistory.push({ date: ahora, to: destino, total: Math.round((d.grandTotal || 0) * 100) / 100, facturas: nums });
+            if (inv.statementHistory.length > 30) inv.statementHistory = inv.statementHistory.slice(-30);
+            inv.updatedAt = ahora;
+        });
+        this.save();
+        try { if (document.getElementById('generatedInvoicesModal')?.style.display === 'block') this.refreshGeneratedInvoices(); } catch (e) {}
+    }
+
     getClientEmail(propCli) {
         if (!propCli) return '';
         if (propCli.email) return propCli.email;
