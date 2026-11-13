@@ -1966,7 +1966,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-13.7';
+const SCHED_BUILD = '2026-11-13.10';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -8502,11 +8502,9 @@ Brazos Cleaning Services</textarea>
             // a tiempo, ese retraso no cae sobre el cliente: su reloj empieza cuando la recibe.
             // firstSentStr ya toma el PRIMER envío (no se reinicia al reenviar). Esto mantiene
             // Cobranza consistente con el vencimiento que el cliente ve en su factura.
-            const baseDateStr = firstSentStr;
-            if (!baseDateStr) return;
-            const baseDate = new Date(baseDateStr + 'T00:00:00');
-            const dueDate = new Date(baseDate);
-            dueDate.setDate(dueDate.getDate() + terms);
+            const _fv = this._fechaVence(inv);   // 2026-11-13: misma regla que _atrasoFactura (incluye "Vence el" manual)
+            if (!_fv) return;
+            const dueDate = _fv.fecha;
             const yaVencio = today > dueDate;
             // Por defecto solo las vencidas; con "incluir no vencidas" se muestran todas las no pagadas
             if (!yaVencio && !this._cobranzaIncludeAll) return;
@@ -8950,6 +8948,7 @@ Brazos Cleaning Services</textarea>
                         if (!this._entregaPendiente(inv) || inv.sendChannel !== 'impresa') return '';
                         return `<div style="font-size:0.66rem;color:#8a8f98;margin-top:2px;">🖨️ Impresa · <a href="#" onclick="event.preventDefault();app.confirmarEntregaFactura('${_idE}')" style="color:#8a8f98;text-decoration:underline;">¿ya se entregó?</a></div>`;
                     })()}
+                    ${(inv.dueOverride && !['pagada','cancelada'].includes(inv.status)) ? (() => { const p = String(inv.dueOverride).split('-'); return `<div title="Fecha de vencimiento puesta a mano (se cambia en 💰 Pago)" style="font-size:0.68rem;color:#7c3aed;margin-top:2px;">📌 Vence ${p[1]}/${p[2]}/${p[0].slice(2)}</div>`; })() : ''}
                     ${(() => { const _a = this._atrasoFactura(inv); return _a ? `<div title="Venció el ${String(_a.vence.getMonth()+1).padStart(2,'0')}/${String(_a.vence.getDate()).padStart(2,'0')}/${_a.vence.getFullYear()} (Términos de Pago de la ficha)" style="font-size:0.7rem;color:#c0392b;font-weight:700;margin-top:2px;">🔴 Atrasada ${_a.dias} día${_a.dias === 1 ? '' : 's'}</div>` : ''; })()}
                     ${this._avisoAchHTML(inv)}
                     ${(inv.status==='pagada' || inv.status==='parcial') && (inv.payments || []).length >= 2 ? (() => {
@@ -9400,6 +9399,18 @@ Brazos Cleaning Services</textarea>
         document.getElementById('cobroDetalleTitle').textContent = `💰 #${num} — ${inv.clientName}`;
         document.getElementById('cobroDetalleStatus').value = inv.status || 'pendiente';
         document.getElementById('cobroDetalleSentAt').value = inv.sentAt || '';
+        // 2026-11-13: vencimiento manual + el calculado como referencia
+        try {
+            const _ve = document.getElementById('cobroDetalleVence'), _vh = document.getElementById('cobroDetalleVenceHint');
+            if (_ve) _ve.value = inv.dueOverride || '';
+            if (_vh) {
+                const _sin = Object.assign({}, inv, { dueOverride: null });
+                const _c = this._fechaVence(_sin);
+                const _f = d => `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}`;
+                _vh.style.color = '#888';
+                _vh.textContent = _c ? `Déjalo vacío para usar el cálculo automático: vence el ${_f(_c.fecha)} (fin del período o fecha de la factura + ${_c.terms} días). Ponlo solo para dar más tiempo o un acuerdo especial.` : '';
+            }
+        } catch (e) {}
         // La fecha del pago arranca en HOY. Antes venía VACÍA, y si se capturaba el monto
         // sin poner la fecha, el pago NO se guardaba y la app no avisaba nada: se perdía
         // en silencio (probable origen de varios pagos que quedaron sin historial).
@@ -9811,11 +9822,30 @@ Brazos Cleaning Services</textarea>
         }
 
         mainInv.sentAt = document.getElementById('cobroDetalleSentAt').value || mainInv.sentAt || null;
+        // 2026-11-13: "Vence el" manual (vacío = cálculo automático)
+        { const _v = (document.getElementById('cobroDetalleVence') || {}).value || '';
+          if (_v) mainInv.dueOverride = _v; else if (mainInv.dueOverride) delete mainInv.dueOverride; }
         this.save();
         alert(`✅ Pago de $${amount.toFixed(2)} repartido:\n${numsAplicados.join('\n')}${creditoMsg}`);
         document.getElementById('cobroDetalleModal').style.display = 'none';
         this.refreshGeneratedInvoices();
         this.updateCobrosBadge();
+    }
+
+    // 2026-11-13: guarda SOLO el "Vence el" manual — sin pasar por Guardar, que registraría
+    // el pago precargado en el formulario.
+    guardarVenceManual() {
+        const id = document.getElementById('cobroDetalleId').value;
+        const inv = (this.generatedInvoices || []).find(i => String(i.id) === String(id));
+        if (!inv) return;
+        const v = (document.getElementById('cobroDetalleVence') || {}).value || '';
+        if (v) inv.dueOverride = v; else delete inv.dueOverride;
+        inv.updatedAt = new Date().toISOString();
+        this.save();
+        try { this.refreshGeneratedInvoices(); } catch (e) {}
+        try { this.updateCobrosBadge(); } catch (e) {}
+        const h = document.getElementById('cobroDetalleVenceHint');
+        if (h) { h.style.color = '#7c3aed'; h.textContent = v ? `✅ Guardado: vence el ${v.split('-')[1]}/${v.split('-')[2]}/${v.split('-')[0]}. (Vacíalo y guarda para volver al cálculo automático.)` : '✅ Fecha quitada: se usa el cálculo automático.'; }
     }
 
     saveCobroDetalle() {
@@ -10039,6 +10069,9 @@ Brazos Cleaning Services</textarea>
         }
 
         inv.sentAt = document.getElementById('cobroDetalleSentAt').value || inv.sentAt || null;
+        // 2026-11-13: "Vence el" manual (vacío = cálculo automático)
+        { const _v = (document.getElementById('cobroDetalleVence') || {}).value || '';
+          if (_v) inv.dueOverride = _v; else if (inv.dueOverride) delete inv.dueOverride; }
         inv.notes = notes;
         this.save();
         document.getElementById('cobroDetalleModal').style.display = 'none';
@@ -10118,6 +10151,17 @@ Brazos Cleaning Services</textarea>
         if (inv.sentAt) fechas.push(String(inv.sentAt).split('T')[0]);
         if (!fechas.length) return inv.generatedDate || '';
         return fechas.sort()[0];
+    }
+    // 2026-11-13 (Ranu): BASE DEL VENCIMIENTO = fin del período (ciclo) de la factura.
+    // Vence = endDate + Términos de Pago del cliente. Ya no depende de cuándo se envió o
+    // reimprimió. Respaldo si la factura no trae período: fecha de la factura, y luego el
+    // primer envío.
+    _baseVencimiento(inv) {
+        if (!inv) return '';
+        const fin = String(inv.endDate || inv.startDate || '').split('T')[0];
+        if (/^\d{4}-\d{2}-\d{2}$/.test(fin)) return fin;
+        if (inv.generatedDate) return String(inv.generatedDate).split('T')[0];
+        return this._primerEnvio(inv);
     }
     _addSentHistory(inv, method) {
         if (!inv) return;
@@ -10656,23 +10700,37 @@ Motivo de cancelación (opcional):`);
     // (Inmediato / Net 7 / 15 / 30; si no tiene, 15). Solo facturas enviadas, parciales
     // o vencidas (no pagadas ni canceladas). Cuenta como atrasada desde el día SIGUIENTE
     // a la fecha límite. Devuelve { dias, vence, saldo, parcial } o null.
-    _atrasoFactura(inv) {
-        if (!inv || !['enviada', 'parcial', 'vencida'].includes(inv.status)) return null;
+    // 2026-11-13 (Ranu): FECHA DE VENCIMIENTO de una factura.
+    //  1) Si la factura tiene "Vence el" puesto a mano (inv.dueOverride), esa manda.
+    //  2) Si no: la MÁS TARDÍA entre (fin del período + términos) y (fecha de la factura +
+    //     términos). Así, si la factura se hizo/envió tarde, el cliente recibe su plazo completo
+    //     desde ese día. Se usa la fecha de la FACTURA (no la de envío) porque la de envío se
+    //     perdía al reimprimir en versiones anteriores.
+    _fechaVence(inv) {
+        if (!inv) return null;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(inv.dueOverride || ''))) return { fecha: new Date(inv.dueOverride + 'T00:00:00'), manual: true };
         const cli = ((inv.clientIds && inv.clientIds.length)
                 ? (this.clis || []).find(c => String(c.id) === String(inv.clientIds[0])) : null)
             || (this.clis || []).find(c => c.name === inv.clientName) || {};
-        let terms = (cli.paymentTerms !== undefined) ? parseInt(cli.paymentTerms) : 15;
+        let terms = (cli.paymentTerms !== undefined && cli.paymentTerms !== null && cli.paymentTerms !== '') ? parseInt(cli.paymentTerms) : 15;
         if (isNaN(terms)) terms = 15;
-        const base = this._primerEnvio(inv);   // 2026-11-13: el envío MÁS ANTIGUO (ver _primerEnvio)
-        if (!base) return null;
-        const vence = new Date(base + 'T00:00:00');
-        vence.setDate(vence.getDate() + terms);
+        const mas = (iso) => { if (!iso) return null; const d = new Date(String(iso).split('T')[0] + 'T00:00:00'); if (isNaN(d)) return null; d.setDate(d.getDate() + terms); return d; };
+        const a = mas(this._baseVencimiento(inv));
+        const b = mas(inv.generatedDate || this._primerEnvio(inv));
+        const f = (a && b) ? (b > a ? b : a) : (a || b);
+        return f ? { fecha: f, manual: false, terms } : null;
+    }
+    _atrasoFactura(inv) {
+        if (!inv || !['enviada', 'parcial', 'vencida'].includes(inv.status)) return null;
+        const _fv = this._fechaVence(inv);
+        if (!_fv) return null;
+        const vence = _fv.fecha;
         const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
         const dias = Math.round((hoy - vence) / 86400000);
         if (dias < 1) return null;
         const parcial = inv.status === 'parcial';
         const saldo = parcial ? Math.max(0, parseFloat(inv.total || 0) - parseFloat(inv.paidAmount || 0)) : parseFloat(inv.total || 0);
-        return { dias, vence, saldo, parcial };
+        return { dias, vence, saldo, parcial, manual: _fv.manual };
     }
 
     // Sello rojo "PAST DUE" en la página 1 del PDF de una factura YA registrada que esté
@@ -25754,6 +25812,15 @@ document.addEventListener('click', function(e) {
             <label style="font-size:0.82rem; font-weight:700; color:#444;">Fecha de envío (email)</label>
             <input type="date" id="cobroDetalleSentAt" style="width:100%; padding:9px; margin-top:5px; border:1px solid #ddd; border-radius:8px;">
         </div>
+        <!-- 2026-11-13: fecha de vencimiento manual (opcional) -->
+        <div style="margin-bottom:14px;">
+            <label style="font-size:0.82rem; font-weight:700; color:#444;">📌 Vence el <span style="font-weight:400; color:#888;">(opcional)</span></label>
+            <div style="display:flex; gap:6px; margin-top:5px;">
+                <input type="date" id="cobroDetalleVence" style="flex:1; padding:9px; border:1px solid #ddd; border-radius:8px;">
+                <button type="button" onclick="app.guardarVenceManual()" title="Guarda SOLO esta fecha (no registra pagos)" style="background:#7c3aed; color:#fff; border:none; border-radius:8px; padding:0 12px; font-weight:700; cursor:pointer; white-space:nowrap;">💾 Guardar fecha</button>
+            </div>
+            <div id="cobroDetalleVenceHint" style="font-size:0.75rem; color:#888; margin-top:4px;"></div>
+        </div>
 
         <!-- Notas -->
         <div style="margin-bottom:20px;">
@@ -26047,7 +26114,9 @@ document.addEventListener('click', function(e) {
         const dateStr = d.toLocaleDateString('en-US', {month:'2-digit', day:'2-digit', year:'numeric'});
         const timeStr = d.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:true});
         const el = document.getElementById('versionStamp');
-        if (el) el.textContent = 'v ' + dateStr + ' ' + timeStr + ' CT';
+        // 2026-11-13: se muestra el número de versión (SCHED_BUILD); la fecha es la de publicación.
+        const _b = (typeof SCHED_BUILD !== 'undefined') ? SCHED_BUILD : '';
+        if (el) { el.textContent = (_b ? 'v ' + _b + ' · ' : 'v ') + dateStr + ' ' + timeStr + ' CT'; el.title = 'Versión del Scheduler: ' + _b; }
     } catch(e) { console.warn('No se pudo actualizar el version stamp', e); }
 })();
 </script>
