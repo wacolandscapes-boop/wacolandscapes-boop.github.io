@@ -807,7 +807,7 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
                 <button class="btn-action btn-purple" onclick="app.openCatalog()">📂 Base de Datos</button>
                 
                 <div class="dropdown" id="dropdownFacturacion">
-                    <button class="btn-action" style="background:#e67e22; color:white" onclick="toggleDropdown('dropdownFacturacion')">💼 Facturación</button>
+                    <button class="btn-action" style="background:#e67e22; color:white; position:relative;" onclick="toggleDropdown('dropdownFacturacion')">💼 Facturación<span id="vencidasBadgeFac" title="Facturas vencidas (pasó su plazo de pago)" style="display:none; position:absolute; top:-7px; right:-7px; background:#c0392b; color:#fff; border:2px solid #fff; border-radius:10px; min-width:18px; height:18px; padding:0 4px; font-size:0.68rem; font-weight:800; line-height:14px; box-sizing:border-box;"></span></button>
                     <div class="dropdown-content">
                         <button onclick="app._origenFactura=null; app.openInvoice(); closeAllDropdowns();">📄 Crear Factura</button>
                         <button onclick="app.openEstimateForm(); closeAllDropdowns();">📐 Crear Estimado</button>
@@ -815,7 +815,7 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
                             📋 Pendientes
                             <span id="pendingBadge" style="display: none; position: absolute; top: 50%; transform: translateY(-50%); right: 10px; background: #e74c3c; color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; font-weight: bold; line-height: 18px; text-align: center;"></span>
                         </button>
-                        <button onclick="app.openGeneratedInvoices(); closeAllDropdowns();">📑 Enviadas</button>
+                        <button onclick="app.openGeneratedInvoices(); closeAllDropdowns();">📑 Enviadas<span id="vencidasBadgeEnv" style="display:none; margin-left:6px; background:#c0392b; color:#fff; border-radius:9px; padding:0 6px; font-size:0.7rem; font-weight:800;"></span></button>
                         <button onclick="app.openMensajesClientes(); closeAllDropdowns();">✉️ Mensaje a clientes</button>
                         <button onclick="app.openFichasFacturacion(); closeAllDropdowns();">📇 Fichas de facturación</button>
                         <button onclick="app.openServiceLog(); closeAllDropdowns();">📋 Log</button>
@@ -1966,7 +1966,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-12.1';
+const SCHED_BUILD = '2026-11-13.2';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -7302,6 +7302,80 @@ Brazos Cleaning Services</textarea>
         } else {
             badge.style.display = 'none';
         }
+        try { this._revisarVencidas(); } catch (e) { console.warn('aviso vencidas:', e); }
+    }
+
+    // ═══ 2026-11-13 (Ranu): AVISO DE FACTURAS VENCIDAS ═══════════════════════════
+    // Una factura está vencida al día siguiente de su plazo de pago (fecha de primer envío
+    // + paymentTerms del cliente, 15 si no tiene) — el mismo cálculo del sello PAST DUE
+    // (_atrasoFactura). Contador rojo en "💼 Facturación" y "📑 Enviadas" para todos; al
+    // abrir/sincronizar, el ADMIN ve un aviso con las vencidas que todavía no ha revisado
+    // ("Entendido" las marca como vistas en este equipo: localStorage sched_vencidas_vistas).
+    _facturasVencidas() {
+        return (this.generatedInvoices || [])
+            .map(inv => ({ inv, a: this._atrasoFactura(inv) }))
+            .filter(x => x.a && x.a.saldo > 0.009)
+            .sort((x, y) => y.a.dias - x.a.dias);
+    }
+    _vencidasVistas() { try { return JSON.parse(localStorage.getItem('sched_vencidas_vistas') || '[]') || []; } catch (e) { return []; } }
+    _revisarVencidas() {
+        const L = this._facturasVencidas();
+        ['vencidasBadgeFac', 'vencidasBadgeEnv'].forEach(id => {
+            const b = document.getElementById(id); if (!b) return;
+            b.textContent = L.length; b.style.display = L.length ? 'inline-block' : 'none';
+        });
+        if (this._avisoVencidasMostrado || !this._esAdminSched()) return;
+        const vistas = new Set(this._vencidasVistas());
+        const nuevas = L.filter(x => !vistas.has(String(x.inv.id)));
+        if (!nuevas.length) return;
+        this._avisoVencidasMostrado = true;
+        clearTimeout(this._avisoVencidasT);
+        this._avisoVencidasT = setTimeout(() => this._mostrarAvisoVencidas(), 1500);
+    }
+    _mostrarAvisoVencidas() {
+        const L = this._facturasVencidas();
+        const vistas = new Set(this._vencidasVistas());
+        const nuevas = L.filter(x => !vistas.has(String(x.inv.id)));
+        if (!nuevas.length) return;
+        document.getElementById('avisoVencidasModal')?.remove();
+        const $ = n => '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        const fmt = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+        const totN = nuevas.reduce((s, x) => s + x.a.saldo, 0), totL = L.reduce((s, x) => s + x.a.saldo, 0);
+        const filas = nuevas.map(x => `<tr>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;">${esc(x.inv.clientName)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;">#${String(x.inv.invoiceNumber).padStart(4, '0')}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-variant-numeric:tabular-nums;">${$(x.a.saldo)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">${fmt(x.a.vence)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;color:#c0392b;font-weight:700;">${x.a.dias} d</td></tr>`).join('');
+        const m = document.createElement('div');
+        m.id = 'avisoVencidasModal';
+        m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10050;display:flex;align-items:center;justify-content:center;padding:12px;';
+        m.innerHTML = `<div style="background:#fff;border-radius:12px;max-width:620px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,0.35);overflow:hidden;">
+            <div style="background:#c0392b;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;">
+                <div><div style="font-size:1.1rem;font-weight:800;">⚠️ ${nuevas.length} factura${nuevas.length === 1 ? '' : 's'} vencida${nuevas.length === 1 ? '' : 's'} sin revisar</div>
+                <div style="font-size:0.82rem;opacity:0.9;">Pasaron su plazo de pago · ${$(totN)}</div></div>
+                <button onclick="document.getElementById('avisoVencidasModal').remove()" aria-label="Cerrar" style="background:rgba(255,255,255,0.2);color:#fff;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;font-weight:700;">✕</button>
+            </div>
+            <div style="overflow:auto;padding:4px 10px;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                    <thead><tr style="color:#666;font-size:0.75rem;text-transform:uppercase;"><th style="text-align:left;padding:8px;">Cliente</th><th style="text-align:left;padding:8px;">Factura</th><th style="text-align:right;padding:8px;">Saldo</th><th style="padding:8px;">Venció</th><th style="text-align:right;padding:8px;">Atraso</th></tr></thead>
+                    <tbody>${filas}</tbody></table>
+            </div>
+            <div style="padding:12px 18px;border-top:1px solid #eee;background:#fafafa;">
+                <div style="font-size:0.82rem;color:#555;margin-bottom:10px;">En total hay <b>${L.length}</b> factura${L.length === 1 ? '' : 's'} vencida${L.length === 1 ? '' : 's'} por <b style="color:#c0392b;">${$(totL)}</b>. Si alguna ya se pagó, registra el pago para que deje de aparecer.</div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+                    <button onclick="app._vencidasEntendido(); document.getElementById('avisoVencidasModal').remove(); app.openCobranzaModal();" style="background:#16a085;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-weight:700;cursor:pointer;">💰 Ver Cobranza</button>
+                    <button onclick="app._vencidasEntendido(); document.getElementById('avisoVencidasModal').remove();" style="background:#2c3e50;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-weight:700;cursor:pointer;">Entendido</button>
+                </div>
+                <div style="font-size:0.72rem;color:#999;margin-top:8px;text-align:right;">"Entendido" las marca como revisadas en esta computadora; el aviso vuelve a salir cuando venza otra.</div>
+            </div></div>`;
+        document.body.appendChild(m);
+    }
+    _vencidasEntendido() {
+        const ids = this._facturasVencidas().map(x => String(x.inv.id));
+        const set = new Set([...this._vencidasVistas(), ...ids]);
+        try { localStorage.setItem('sched_vencidas_vistas', JSON.stringify([...set].slice(-3000))); } catch (e) {}
     }
     
     renderPendingInvoices() {
@@ -8931,6 +9005,7 @@ Brazos Cleaning Services</textarea>
             badge.style.display = pending > 0 ? 'inline-block' : 'none';
             badge.textContent = pending;
         }
+        try { this._revisarVencidas(); } catch (e) {}   // 2026-11-13: contador de vencidas
     }
 
     refreshCobros() {
@@ -11320,6 +11395,32 @@ Motivo de cancelación (opcional):`);
 
         if (nombres.length === 0) { alert('No hay clientes con facturas pendientes de pago.'); return; }
 
+        // 2026-11-13 (Ranu): si en Enviadas ya se está consultando un cliente (filtro
+        // "Cliente" o búsqueda que apunta a un solo cliente con saldo), se abre directo su
+        // estado de cuenta, sin volver a elegirlo. Si no, la lista de siempre (con la búsqueda).
+        let _pref = '';
+        if (!this._ecDesdeLista) {
+            const g = document.getElementById('generatedInvoicesModal');
+            if (g && g.style.display === 'block') {
+                const filtro = document.getElementById('genInvClient')?.value || 'all';
+                const q = (document.getElementById('genInvSearch')?.value || '').trim().toLowerCase();
+                let cli = null;
+                if (filtro !== 'all') cli = nombres.find(n => n === filtro) || null;
+                if (!cli && q) {
+                    const exacto = nombres.find(n => n.toLowerCase() === q);
+                    const parecidos = nombres.filter(n => n.toLowerCase().includes(q));
+                    cli = exacto || (parecidos.length === 1 ? parecidos[0] : null);
+                }
+                if (filtro !== 'all' && !cli) {
+                    alert(filtro + ' no tiene facturas pendientes de pago.');
+                    return;
+                }
+                if (cli) { this._ecBusqueda = cli; this.generarEstadoCuenta(cli); return; }
+                if (q) { this._ecBusqueda = q; _pref = q; }   // varios posibles: la lista ya filtrada
+            }
+        }
+        this._ecDesdeLista = false;
+
         const modal = document.createElement('div');
         modal.id = 'estadoCuentaModal';
         modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10002;display:flex;align-items:center;justify-content:center;';
@@ -11345,6 +11446,7 @@ Motivo de cancelación (opcional):`);
                 </div>
             </div>`;
         document.body.appendChild(modal);
+        if (_pref) { const si = document.getElementById('ecSearch'); if (si) { si.value = _pref; this._filterEstadoCuenta(_pref); } }
         setTimeout(() => { const si = document.getElementById('ecSearch'); if (si) si.focus(); }, 50);
     }
 
@@ -11357,6 +11459,7 @@ Motivo de cancelación (opcional):`);
             && (parseFloat(inv.total || 0) - parseFloat(inv.paidAmount || 0)) > 0.01);
         if (!hay) return;
         const q = this._ecBusqueda || '';
+        this._ecDesdeLista = true;   // al volver, mostrar la lista (no reabrir el mismo cliente)
         this.openEstadoCuenta();
         if (q) {
             const si = document.getElementById('ecSearch');
