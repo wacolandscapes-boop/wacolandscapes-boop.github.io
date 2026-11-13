@@ -1966,7 +1966,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-13.3';
+const SCHED_BUILD = '2026-11-13.6';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -8234,6 +8234,7 @@ Brazos Cleaning Services</textarea>
 
     openGeneratedInvoices() {
         this._pausarSync('se abrió Facturas Enviadas');
+        document.getElementById('enviadasMinimizadaBtn')?.remove();   // 2026-11-13
         this._navToInvoiceModal('generated');
     }
 
@@ -8320,7 +8321,36 @@ Brazos Cleaning Services</textarea>
     
     closeGeneratedInvoices() {
         document.getElementById('generatedInvoicesModal').style.display = 'none';
+        document.getElementById('enviadasMinimizadaBtn')?.remove();
         this._maybeReanudarSync();
+    }
+
+    // 2026-11-13 (Ranu): minimizar Enviadas para ver el calendario y regresar con los MISMOS
+    // filtros, búsqueda y posición (el modal solo se oculta; no se vuelve a armar).
+    minimizarEnviadas() {
+        const m = document.getElementById('generatedInvoicesModal'); if (!m) return;
+        this._enviadasScroll = (m.querySelector('.modal-content') || m).scrollTop || m.scrollTop || 0;
+        m.style.display = 'none';
+        this._maybeReanudarSync();
+        document.getElementById('enviadasMinimizadaBtn')?.remove();
+        const b = document.createElement('button');
+        b.id = 'enviadasMinimizadaBtn';
+        const q = (document.getElementById('genInvClient')?.value || 'all') !== 'all' ? document.getElementById('genInvClient').value
+                : (document.getElementById('genInvSearch')?.value || '').trim();
+        b.innerHTML = '📑 Volver a Enviadas' + (q ? ' <span style="opacity:0.85;font-weight:600;">· ' + String(q).replace(/</g, '&lt;').slice(0, 24) + '</span>' : '');
+        b.title = 'Regresar a Facturas Enviadas tal como la dejaste';
+        b.style.cssText = 'position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:9500;background:#16a085;color:#fff;border:none;border-radius:24px;padding:12px 22px;font-weight:800;font-size:0.95rem;box-shadow:0 6px 20px rgba(0,0,0,0.3);cursor:pointer;';
+        b.onclick = () => this.restaurarEnviadas();
+        document.body.appendChild(b);
+    }
+    restaurarEnviadas() {
+        document.getElementById('enviadasMinimizadaBtn')?.remove();
+        const m = document.getElementById('generatedInvoicesModal'); if (!m) return;
+        m.style.display = 'block';
+        this._pausarSync('se abrió Facturas Enviadas');
+        try { this.refreshGeneratedInvoices(); } catch (e) {}   // por si cambió algo mientras estaba minimizada
+        const c = m.querySelector('.modal-content') || m;
+        setTimeout(() => { try { c.scrollTop = this._enviadasScroll || 0; m.scrollTop = this._enviadasScroll || 0; } catch (e) {} }, 30);
     }
     
     filterGenInvClientList() {
@@ -8465,7 +8495,7 @@ Brazos Cleaning Services</textarea>
             const terms = (cli.paymentTerms !== undefined) ? parseInt(cli.paymentTerms) : 15;
             const hist = inv.sentHistory || [];
             // Reenviar un recordatorio NO reinicia el reloj del atraso.
-            const firstSentStr = hist.length > 0 ? hist[0].date.split('T')[0] : (inv.sentAt || inv.generatedDate);
+            const firstSentStr = this._primerEnvio(inv);   // 2026-11-13: envío más antiguo
             const lastSentStr  = hist.length > 0 ? hist[hist.length - 1].date.split('T')[0] : (inv.sentAt || inv.generatedDate);
             // El plazo cuenta desde el PRIMER ENVÍO de la factura + términos del cliente,
             // NO desde el fin del servicio. Así, si a nosotros se nos pasó enviar la factura
@@ -8922,7 +8952,19 @@ Brazos Cleaning Services</textarea>
                     })()}
                     ${(() => { const _a = this._atrasoFactura(inv); return _a ? `<div title="Venció el ${String(_a.vence.getMonth()+1).padStart(2,'0')}/${String(_a.vence.getDate()).padStart(2,'0')}/${_a.vence.getFullYear()} (Términos de Pago de la ficha)" style="font-size:0.7rem;color:#c0392b;font-weight:700;margin-top:2px;">🔴 Atrasada ${_a.dias} día${_a.dias === 1 ? '' : 's'}</div>` : ''; })()}
                     ${this._avisoAchHTML(inv)}
-                    ${(inv.status==='pagada' || inv.status==='parcial') && inv.paidAt ? (() => {
+                    ${(inv.status==='pagada' || inv.status==='parcial') && (inv.payments || []).length >= 2 ? (() => {
+                        // 2026-11-13 (Ranu): con 2+ pagos (ej. dos cheques) se listan TODOS,
+                        // no solo el último. Uno por línea: fecha · método · referencia · monto.
+                        const color = inv.status==='pagada' ? '#27ae60' : '#d4a017';
+                        const ico = m => ({cash:'💵',check:'🏦',credit:'💳',zelle:'📱',ach:'🏛️'}[m] || (String(m||'').includes('Stripe') ? '💳' : (m ? '💰' : '')));
+                        return (inv.payments || []).slice().sort((a, b) => String(a.date||'').localeCompare(String(b.date||''))).map(p => {
+                            const d = String(p.date || '').split('T')[0].split('-');
+                            const f = d.length === 3 ? `${d[1]}/${d[2]}/${d[0].slice(2)}` : '';
+                            const ref = String(p.ref || '').replace(/</g, '&lt;');
+                            return `<div style="font-size:0.68rem;color:${color};margin-top:2px;white-space:nowrap;">📅 ${f}${p.method ? ' · ' + ico(p.method) : ''}${ref ? ' <span style="color:#888;">' + (ref.length > 14 ? ref.slice(0, 12) + '…' : ref) + '</span>' : ''} · <b>$${(parseFloat(p.amount)||0).toFixed(2)}</b></div>`;
+                        }).join('');
+                    })() : ''}
+                    ${(inv.status==='pagada' || inv.status==='parcial') && inv.paidAt && !((inv.payments || []).length >= 2) ? (() => {
                         // Antes la fecha del pago SOLO se mostraba en las pagadas: en las
                         // PARCIALES no aparecía, y parecía que no se hubiera guardado.
                         const d = inv.paidAt.split('T')[0].split('-');
@@ -8931,7 +8973,7 @@ Brazos Cleaning Services</textarea>
                         const color = inv.status==='pagada' ? '#27ae60' : '#d4a017';
                         return `<div style="font-size:0.7rem;color:${color};margin-top:2px;">📅 ${d[1]}/${d[2]}/${d[0].slice(2)}${inv.paymentMethod ? ' · '+icono : ''}</div>`;
                     })() : ''}
-                    ${inv.paymentRef ? `<div style="font-size:0.68rem;color:#888;">${inv.paymentRef}</div>` : ''}
+                    ${inv.paymentRef && !((inv.payments || []).length >= 2) ? `<div style="font-size:0.68rem;color:#888;">${inv.paymentRef}</div>` : ''}
                     ${inv.depositEta ? (() => {
                         // Dinero en tránsito: el cliente ya pagó pero aún no cae en el banco.
                         // Si la fecha ya pasó, se pinta en gris (ya debió reflejarse).
@@ -10067,9 +10109,26 @@ Brazos Cleaning Services</textarea>
 
     // Registra cada vez que una factura se envía o reenvía (por email o impresión/manual),
     // para poder ver cuándo fue la última vez sin importar cuántas veces se haya reenviado.
+    // 2026-11-13 (Ranu): fecha del PRIMER envío = la más antigua entre el historial de
+    // envíos y sentAt. Antes se tomaba sentHistory[0], pero en facturas viejas sin historial
+    // el primer registro era un REENVÍO reciente, y el plazo se reiniciaba (Bob Mills #7846).
+    _primerEnvio(inv) {
+        if (!inv) return '';
+        const fechas = (inv.sentHistory || []).map(h => String(h && h.date || '').split('T')[0]).filter(Boolean);
+        if (inv.sentAt) fechas.push(String(inv.sentAt).split('T')[0]);
+        if (!fechas.length) return inv.generatedDate || '';
+        return fechas.sort()[0];
+    }
     _addSentHistory(inv, method) {
         if (!inv) return;
         inv.sentHistory = inv.sentHistory || [];
+        // 2026-11-13: si es el primer registro y ya había un envío anterior (sentAt), se guarda
+        // primero ese envío original para no perder la fecha real del primer envío.
+        if (!inv.sentHistory.length && inv.sentAt) {
+            const hoy = new Date().toISOString().split('T')[0];
+            const orig = String(inv.sentAt).split('T')[0];
+            if (orig < hoy) inv.sentHistory.push({ date: orig + 'T12:00:00', method: 'envío original' });
+        }
         inv.sentHistory.push({ date: new Date().toISOString(), method: method || 'manual' });
         if (inv.sentHistory.length > 30) inv.sentHistory = inv.sentHistory.slice(-30); // no crecer sin límite
     }
@@ -10604,8 +10663,7 @@ Motivo de cancelación (opcional):`);
             || (this.clis || []).find(c => c.name === inv.clientName) || {};
         let terms = (cli.paymentTerms !== undefined) ? parseInt(cli.paymentTerms) : 15;
         if (isNaN(terms)) terms = 15;
-        const hist = inv.sentHistory || [];
-        const base = hist.length > 0 ? String(hist[0].date).split('T')[0] : (inv.sentAt || inv.generatedDate);
+        const base = this._primerEnvio(inv);   // 2026-11-13: el envío MÁS ANTIGUO (ver _primerEnvio)
         if (!base) return null;
         const vence = new Date(base + 'T00:00:00');
         vence.setDate(vence.getDate() + terms);
@@ -25002,7 +25060,10 @@ document.addEventListener('click', function(e) {
                 <button onclick="app.openEstadoCuenta()" title="Estado de cuenta: junta todas las facturas sin pagar de un cliente en un solo documento" style="background:rgba(255,255,255,0.9); color:#2563eb; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:1rem; font-weight:bold;">📄 Estado de Cuenta</button>
                 📑 Historial de Facturas Enviadas
             </span>
-            <span id="genInvBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.9rem;">0 facturas</span>
+            <span style="display:flex; align-items:center; gap:8px;">
+                <span id="genInvBadge" style="background:rgba(255,255,255,0.25); padding:4px 12px; border-radius:20px; font-size:0.9rem;">0 facturas</span>
+                <button onclick="app.minimizarEnviadas()" title="Minimizar para ver el calendario (regresas con el botón flotante, con los mismos filtros)" style="background:rgba(255,255,255,0.9); color:#16a085; border:none; border-radius:6px; padding:6px 12px; cursor:pointer; font-weight:700; font-size:0.85rem;">➖ Minimizar · 📅 Calendario</button>
+            </span>
         </h2>
         
         <!-- Filtros -->
