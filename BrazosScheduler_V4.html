@@ -1299,6 +1299,17 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
                                     </label>
                                     <div style="font-size:0.72rem; color:#1e40af; margin-top:2px;">Actívala para clientes como 254 Lawns o JGM cuya factura quieres editar a mano. Construcción y servicio único ya se abren en Manual solos, sin necesidad de esto.</div>
                                 </div>
+                                <!-- 2026-11-16 (Ranu): COBRO COMPARTIDO — p. ej. la casa de Joe Maxwell: su factura mensual
+                                     es una mitad y la otra mitad la paga JGM Properties. -->
+                                <div style="grid-column:span 2; background:#f0fdf4; border:1px solid #16a34a; border-radius:6px; padding:8px; margin-top:6px;">
+                                    <div style="font-size:0.82rem; font-weight:700; color:#166534;">🤝 Cobrar también a otra empresa (cobro compartido)</div>
+                                    <div style="font-size:0.72rem; color:#166534; margin:2px 0 6px;">Cada mes que este cliente tenga servicios, sale en Pendientes (Fin de Mes) otra tarjeta a nombre de esa empresa, con la dirección de ESTE cliente y el monto fijo. Déjalo en "— Nadie —" si no aplica.</div>
+                                    <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:6px;">
+                                        <label style="font-size:0.72rem; color:#166534;">Empresa que paga<select id="cliTambienCli" style="width:100%;"></select></label>
+                                        <label style="font-size:0.72rem; color:#166534;">Monto mensual $<input type="number" id="cliTambienMonto" min="0" step="0.01" placeholder="325" style="width:100%;"></label>
+                                        <label style="font-size:0.72rem; color:#166534;">Desde (mes)<input type="month" id="cliTambienDesde" style="width:100%;"></label>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1966,7 +1977,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-13.10';
+const SCHED_BUILD = '2026-11-16.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -6338,6 +6349,101 @@ Brazos Cleaning Services</textarea>
         }, 200);
     }
     
+    // ═══ 2026-11-16 (Ranu): COBRO COMPARTIDO ═══════════════════════════════════════════
+    // Un cliente (p. ej. Joe Maxwell) puede tener c.facturarTambien = {cliId, monto, desde:'YYYY-MM'}.
+    // Cada mes (desde 'desde') en que ese cliente tenga servicios, se arma en Pendientes
+    // (columna Fin de Mes) una tarjeta a nombre de la empresa que paga, por el monto fijo,
+    // con la dirección del cliente original. La factura que sale de esa tarjeta queda marcada
+    // con inv.cobroCompartido = {deCliId, cliId, mes, monto} para no volver a sugerirla.
+    _pintarCobroCompartidoUI(cli) {
+        const sel = document.getElementById('cliTambienCli');
+        if (!sel) return;
+        const ft = (cli && cli.facturarTambien) || {};
+        const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        const lista = (this.clis || []).filter(c => c && (!cli || String(c.id) !== String(cli.id)) && !c.discarded)
+            .slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        sel.innerHTML = '<option value="">— Nadie —</option>' + lista.map(c => {
+            const det = [c.propId && c.propId !== c.name ? c.propId : '', c.address || '', c.price ? '$' + c.price : ''].filter(Boolean).join(' · ');
+            return `<option value="${esc(c.id)}">${esc(c.name)}${det ? ' — ' + esc(det) : ''}</option>`;
+        }).join('');
+        sel.value = ft.cliId ? String(ft.cliId) : '';
+        const m = document.getElementById('cliTambienMonto'); if (m) m.value = ft.cliId ? (ft.monto ?? '') : '';
+        const d = document.getElementById('cliTambienDesde'); if (d) d.value = ft.cliId ? (ft.desde || '') : '';
+    }
+    _leerCobroCompartidoUI(selfId) {
+        const cid = document.getElementById('cliTambienCli')?.value || '';
+        if (!cid || String(cid) === String(selfId)) return null;
+        const monto = parseFloat(document.getElementById('cliTambienMonto')?.value);
+        if (!(monto > 0)) { alert('🤝 Cobro compartido: escribe el monto mensual. No se guardó el cobro compartido.'); return null; }
+        let desde = document.getElementById('cliTambienDesde')?.value || '';
+        if (!/^\d{4}-\d{2}$/.test(desde)) desde = new Date().toLocaleDateString('en-CA').slice(0, 7);
+        return { cliId: cid, monto: Math.round(monto * 100) / 100, desde };
+    }
+    _ccYaFacturado(src, payer, mes, monto, ini, fin) {
+        return (this.generatedInvoices || []).find(g => {
+            if (!g || g.status === 'cancelada') return false;
+            const cc = g.cobroCompartido;
+            if (cc) return String(cc.deCliId) === String(src.id) && String(cc.cliId) === String(payer.id) && cc.mes === mes;
+            // facturas hechas a mano antes de esto: misma empresa (ficha), mismo mes y una línea por el monto
+            if (g.clientName !== payer.name) return false;
+            if (!(g.clientIds || []).map(String).includes(String(payer.id))) return false;
+            if (!(g.startDate && g.endDate && g.startDate <= fin && g.endDate >= ini)) return false;
+            return (g.items || []).some(it => Math.abs((parseFloat(it.precio) || 0) - monto) < 0.01);
+        }) || null;
+    }
+    _pendientesCobroCompartido(today) {
+        const pad = n => String(n).padStart(2, '0');
+        const cy = today.getFullYear(), cm = today.getMonth(), cd = today.getDate();
+        const diasMes = new Date(cy, cm + 1, 0).getDate();
+        const meses = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        const vivas = new Set();
+        (this.clis || []).forEach(src => {
+            const ft = src && src.facturarTambien;
+            if (!ft || !ft.cliId || !(parseFloat(ft.monto) > 0)) return;
+            const payer = (this.clis || []).find(c => String(c.id) === String(ft.cliId));
+            if (!payer || (typeof this._cliSinFacturar === 'function' && this._cliSinFacturar(payer))) return;
+            const monto = parseFloat(ft.monto);
+            let y, m;
+            if (/^\d{4}-\d{2}$/.test(ft.desde || '')) { y = +ft.desde.slice(0, 4); m = +ft.desde.slice(5, 7) - 1; } else { y = cy; m = cm; }
+            let guard = 0;
+            while ((y < cy || (y === cy && m <= cm)) && guard++ < 36) {
+                const esActual = (y === cy && m === cm);
+                const mes = `${y}-${pad(m + 1)}`;
+                const ini = `${mes}-01`, fin = `${mes}-${pad(new Date(y, m + 1, 0).getDate())}`;
+                const periodKey = `${payer.name}-compartido-${src.id}-${mes}`;
+                const servsMes = (this.servs || []).filter(s => String(s.cliId) === String(src.id) && !s.cancelled && s.date >= ini && s.date <= fin);
+                const listo = !esActual || cd >= diasMes - 5;
+                if (listo && servsMes.length && !this._ccYaFacturado(src, payer, mes, monto, ini, fin)) {
+                    vivas.add(periodKey);
+                    const datos = {
+                        periodKey, column: 'finmes',
+                        clientName: payer.name,
+                        clientEmail: this.getClientEmail ? this.getClientEmail(payer) : (payer.email || ''),
+                        clientIds: [payer.id],
+                        serviceIds: [],               // los servicios son de OTRO cliente: no se ligan aquí
+                        type: payer.type, billingPeriod: 'monthly',
+                        startDate: ini, endDate: fin,
+                        serviceCount: servsMes.length,
+                        total: monto,
+                        urgency: esActual ? 'normal' : 'overdue',
+                        reason: `🤝 Cobro compartido — ${src.name} (${meses[m]} ${y})${esActual ? '' : ' · mes ya terminó, enviar'}`,
+                        cobroCompartido: {
+                            deCliId: src.id, deNombre: src.name, cliId: payer.id, mes, monto,
+                            desc: `Cleaning Service - ${meses[m]} ${y}`,
+                            address: src.address || '', city: src.city || '', state: src.state || '', zip: src.zip || '',
+                            serviceIds: servsMes.map(s => s.id)
+                        }
+                    };
+                    const ex = this.pendingInvoices.find(p => p.periodKey === periodKey);
+                    if (ex) Object.assign(ex, datos);
+                    else this.pendingInvoices.push({ id: Date.now() + Math.random(), ...datos, createdAt: today.toISOString() });
+                }
+                m++; if (m > 11) { m = 0; y++; }
+            }
+        });
+        // retirar tarjetas de cobro compartido que ya no aplican (facturadas, o se quitó la configuración)
+        this.pendingInvoices = this.pendingInvoices.filter(p => !p.cobroCompartido || vivas.has(p.periodKey));
+    }
     detectPendingInvoices() {
         const today = new Date();
         const todayStr = today.toLocaleDateString('en-CA');
@@ -7270,6 +7376,9 @@ Brazos Cleaning Services</textarea>
             });
         })();
 
+        // 2026-11-16: cobro compartido (p. ej. JGM paga la otra mitad de la casa de Joe Maxwell)
+        try { this._pendientesCobroCompartido(today); } catch (e) { console.warn('cobro compartido:', e); }
+
         // Quitar cualquier pendiente que el usuario ya haya descartado a propósito
         // (botón ❌) — por clave Y por servicio real, así ninguna regla (incluida la red
         // de seguridad) puede resucitar un servicio ya descartado con una clave distinta.
@@ -7636,6 +7745,27 @@ Brazos Cleaning Services</textarea>
         
         // Abrir modal de facturación
         this.openInvoice();
+
+        // 2026-11-16: COBRO COMPARTIDO → Manual, a nombre de la empresa que paga, una línea
+        // "Cleaning Service - <Mes> <Año>" por el monto fijo. La dirección del cliente original
+        // y el período del mes completo se ponen al armar el PDF (showManualInvoicePreview).
+        if (pending.cobroCompartido) {
+            const cc = pending.cobroCompartido;
+            setTimeout(() => {
+                this.switchInvoiceTab('manual');
+                const payer = this.clis.find(c => String(c.id) === String(cc.cliId));
+                if (payer) {
+                    document.getElementById('manualInvClient').value = payer.id;
+                    document.getElementById('manualInvClientSearch').value = payer.name + (payer.propId && payer.propId !== payer.name ? ' — ' + payer.propId : '');
+                    if (document.getElementById('manualInvEmail')) document.getElementById('manualInvEmail').value = this.getClientEmail(payer);
+                    this._cargarImpuestoDelCliente(payer, 'manualInvApplyTax', 'manualInvTaxRate', 'toggleManualTaxField');
+                }
+                const listEl = document.getElementById('manualInvItemsList');
+                if (listEl) { listEl.innerHTML = ''; this.addManualInvoiceItem(pending.endDate, cc.desc, cc.monto, '', payer ? payer.id : ''); }
+                document.getElementById('btnBackToPending').style.display = 'block';
+            }, 200);
+            return;
+        }
 
         // Construcción: precio siempre editable por trabajo → abrir en la pestaña Manual,
         // pre-llenada con la propiedad y una línea por cada servicio sin facturar.
@@ -14199,6 +14329,8 @@ Motivo de cancelación (opcional):`);
                         servicePaused, pausedSince
                     };
                 }
+                // 2026-11-16: cobro compartido (solo en ESTE registro)
+                if (document.getElementById('cliTambienCli')) this.clis[idx].facturarTambien = this._leerCobroCompartidoUI(this.clis[idx].id);
                 if (oldType !== type && oldType) {
                     // 2026-10-16: al cambiar la recurrencia, los servicios YA PASADOS
                     // conservan el tipo (y color) que tenían; los de hoy en adelante
@@ -14383,6 +14515,7 @@ Motivo de cancelación (opcional):`);
             if (document.getElementById('cliAbrirManual')) {
                 document.getElementById('cliAbrirManual').checked = cli.abrirManual || false;
             }
+            this._pintarCobroCompartidoUI(cli);
             if (document.getElementById('cliServicePaused')) {
                 document.getElementById('cliServicePaused').checked = cli.servicePaused || false;
                 const ps = document.getElementById('cliPausedSince');
@@ -16855,6 +16988,13 @@ Motivo de cancelación (opcional):`);
         });
     }
 
+    // 2026-11-16: datos de cobro compartido de la tarjeta que se está facturando (o null)
+    _ccActivo() {
+        if (this.currentPendingIndex === undefined || this.currentPendingIndex === null) return null;
+        const p = this.pendingToLoad;
+        return (p && p.cobroCompartido && this.pendingInvoices[this.currentPendingIndex] === p) ? p.cobroCompartido : null;
+    }
+
     showManualInvoicePreview() {
         const clientId = document.getElementById('manualInvClient').value;
         if (!clientId) { alert('Por favor selecciona un cliente'); return; }
@@ -16864,7 +17004,7 @@ Motivo de cancelación (opcional):`);
         // real del cliente, solo para esta factura. Necesario para clientes de
         // construcción multipropiedad donde la ficha de la propiedad no tiene email propio.
         const emailOverride = document.getElementById('manualInvEmail')?.value.trim();
-        const client = emailOverride ? { ...rawClient, email: emailOverride } : rawClient;
+        let client = emailOverride ? { ...rawClient, email: emailOverride } : rawClient;
 
         const rawItems = this.getManualInvoiceItems();
         for (const it of rawItems) {
@@ -16875,10 +17015,19 @@ Motivo de cancelación (opcional):`);
         }
         if (rawItems.length === 0) { alert('Agrega al menos una línea a la factura'); return; }
 
-        const items = rawItems.map(it => ({ ...it, propId: client.propId || client.name }));
+        let items = rawItems.map(it => ({ ...it, propId: client.propId || client.name }));
         items.sort((a, b) => new Date(a.date) - new Date(b.date));
-        const startDate = items[0].date;
-        const endDate = items[items.length - 1].date;
+        let startDate = items[0].date;
+        let endDate = items[items.length - 1].date;
+        // 2026-11-16: factura de COBRO COMPARTIDO (viene de su tarjeta de Pendientes y sigue
+        // siendo la misma empresa): dirección de la residencia y período del mes completo.
+        const _cc = this._ccActivo();
+        if (_cc && String(_cc.cliId) === String(clientId)) {
+            client = { ...client, address: _cc.address, city: _cc.city, state: _cc.state, zip: _cc.zip };
+            if (startDate >= this.pendingToLoad.startDate && endDate <= this.pendingToLoad.endDate) {
+                startDate = this.pendingToLoad.startDate; endDate = this.pendingToLoad.endDate;
+            }
+        }
 
         const paymentDue = document.getElementById('manualInvPaymentDue').value || '';
         const applyTax = document.getElementById('manualInvApplyTax').checked;
@@ -17988,7 +18137,15 @@ Motivo de cancelación (opcional):`);
         } else {
             // Create new record
             const cli = this.clis ? this.clis.find(c => c.name === clientName) : null;
+            // 2026-11-16: cobro compartido — no duplicar el mismo mes y dejar la factura marcada
+            const _ccE = this._ccActivo();
+            if (_ccE) {
+                const ya = this.generatedInvoices.find(g => g.status !== 'cancelada' && g.cobroCompartido &&
+                    String(g.cobroCompartido.deCliId) === String(_ccE.deCliId) && String(g.cobroCompartido.cliId) === String(_ccE.cliId) && g.cobroCompartido.mes === _ccE.mes);
+                if (ya) { alert(`⛔ No se registró.\n\nEl cobro compartido de ${_ccE.deNombre} (${_ccE.mes}) ya está en la factura #${String(ya.invoiceNumber).padStart(4,'0')}.`); return; }
+            }
             this.generatedInvoices.push({
+                ...(_ccE ? { clientIds: [_ccE.cliId], cobroCompartido: { deCliId: _ccE.deCliId, deNombre: _ccE.deNombre, cliId: _ccE.cliId, mes: _ccE.mes, monto: _ccE.monto } } : {}),
                 id: Date.now() + Math.random(),
                 invoiceNumber,
                 generatedDate: today,
@@ -18254,7 +18411,14 @@ Motivo de cancelación (opcional):`);
         // (_avisoPeriodoYaFacturado, dentro de generateInvoice()). Pendientes nunca
         // tiene esa razón legítima — es trabajo detectado del calendario — así que
         // aquí se bloquea sin preguntar. Nace de Azar Szantos/#7680 y #7682.
-        if (this.currentPendingIndex !== undefined && this.currentPendingIndex !== null) {
+        const _ccReg = this._ccActivo();
+        if (_ccReg) {
+            // cobro compartido: la empresa puede tener otras facturas del mismo mes (construcción);
+            // solo se bloquea si ESTE cobro compartido de ESTE mes ya se facturó.
+            const ya = (this.generatedInvoices || []).find(g => g.status !== 'cancelada' && g.cobroCompartido &&
+                String(g.cobroCompartido.deCliId) === String(_ccReg.deCliId) && String(g.cobroCompartido.cliId) === String(_ccReg.cliId) && g.cobroCompartido.mes === _ccReg.mes);
+            if (ya) { alert(`⛔ No se generó la factura.\n\nEl cobro compartido de ${_ccReg.deNombre} (${_ccReg.mes}) ya está en la factura #${String(ya.invoiceNumber).padStart(4,'0')}.`); return false; }
+        } else if (this.currentPendingIndex !== undefined && this.currentPendingIndex !== null) {
             const yaFacturada = this._facturaActivaExistente(clientName, pdfData.startDate, pdfData.endDate);
             if (yaFacturada) {
                 console.warn(`⛔ Factura bloqueada por posible duplicado: ${clientName} (${pdfData.startDate} a ${pdfData.endDate}) — ya existe #${yaFacturada.invoiceNumber} (${yaFacturada.status})`);
@@ -18279,7 +18443,8 @@ Motivo de cancelación (opcional):`);
             status,
             sentAt: status === 'enviada' ? new Date().toISOString().split('T')[0] : null,
             paidAt: null, paidAmount: null, notes: '',
-            invoiceConfig: pdfData.invoiceConfig || null
+            invoiceConfig: pdfData.invoiceConfig || null,
+            ...(_ccReg ? { cobroCompartido: { deCliId: _ccReg.deCliId, deNombre: _ccReg.deNombre, cliId: _ccReg.cliId, mes: _ccReg.mes, monto: _ccReg.monto } } : {})
         });
         // Eliminar de pendientes — SOLO la propiedad exacta que se acaba de facturar,
         // nunca todas las pendientes de ese nombre (un cliente de construcción puede tener
