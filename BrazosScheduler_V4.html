@@ -1977,7 +1977,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-16.1';
+const SCHED_BUILD = '2026-11-17.2';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -10846,9 +10846,35 @@ Motivo de cancelación (opcional):`);
         if (isNaN(terms)) terms = 15;
         const mas = (iso) => { if (!iso) return null; const d = new Date(String(iso).split('T')[0] + 'T00:00:00'); if (isNaN(d)) return null; d.setDate(d.getDate() + terms); return d; };
         const a = mas(this._baseVencimiento(inv));
-        const b = mas(inv.generatedDate || this._primerEnvio(inv));
+        // 2026-11-17 (Ranu): factura enviada TARDE → 7 días HÁBILES (lun–vie) desde que se generó.
+        const habiles = (iso, n) => { if (!iso) return null; const d = new Date(String(iso).split('T')[0] + 'T00:00:00'); if (isNaN(d)) return null; let k = 0; while (k < n) { d.setDate(d.getDate() + 1); const w = d.getDay(); if (w !== 0 && w !== 6) k++; } return d; };
+        const genIso = inv.generatedDate || this._primerEnvio(inv);
+        const b = habiles(genIso, 7);
+        // 2026-11-17 (Ranu): clientes MENSUALES (una limpieza al mes) → pago INMEDIATO: vence el
+        // día del servicio. Solo si la factura salió más de 7 días después del servicio, se le dan
+        // 7 días hábiles desde que se generó.
+        if (cli.type === 'mensual') {
+            const base = this._baseVencimiento(inv);
+            const fb = base ? new Date(String(base).split('T')[0] + 'T00:00:00') : null;
+            const g = genIso ? new Date(String(genIso).split('T')[0] + 'T00:00:00') : null;
+            if (fb && !isNaN(fb)) {
+                const tarde = g && !isNaN(g) && (g - fb) / 86400000 > 7;
+                return { fecha: (tarde && b) ? b : fb, manual: false, terms: 0 };
+            }
+        }
         const f = (a && b) ? (b > a ? b : a) : (a || b);
         return f ? { fecha: f, manual: false, terms } : null;
+    }
+    // 2026-11-17 (Ranu): el "Due" IMPRESO es la MISMA fecha que usa el sello PAST DUE.
+    // Factura ya registrada → su fecha de vencimiento (respeta "📌 Vence el"); nueva → la misma
+    // regla calculada con la fecha de hoy. Así ya no cambia al reabrir/reimprimir.
+    _dueISOParaPDF(client, startDate, endDate, invoiceNumber, fallback) {
+        try {
+            const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            const inv = (this.generatedInvoices || []).find(i => Number(i.invoiceNumber) === Number(invoiceNumber) && i.status !== 'cancelada');
+            const fv = this._fechaVence(inv || { clientIds: client && client.id ? [client.id] : [], clientName: client ? client.name : '', startDate, endDate, generatedDate: iso(new Date()) });
+            return fv ? iso(fv.fecha) : (fallback || '');
+        } catch (e) { return fallback || ''; }
     }
     _atrasoFactura(inv) {
         if (!inv || !['enviada', 'parcial', 'vencida'].includes(inv.status)) return null;
@@ -11047,11 +11073,11 @@ Motivo de cancelación (opcional):`);
     prepararEmailFacturasSeleccionadas() {
         const sel = this._selFacturasSet();
         const visibles = (this._lastFilteredInvoices || []);
-        const lista = [
-            ...visibles.filter(i => sel.has(String(i.id))),
-            ...(this.generatedInvoices || []).filter(i => sel.has(String(i.id)) && !visibles.includes(i))
-        ].filter(i => i.status !== 'cancelada');
-        if (!lista.length) { alert('Marca primero las facturas que quieres enviar (casilla a la izquierda).'); return; }
+        // 2026-11-16 (Ranu): solo las marcadas que se VEN con el filtro actual. Antes también
+        // entraban las marcadas que el filtro escondía (salían 7 con el filtro en Joe Maxwell).
+        const lista = visibles.filter(i => sel.has(String(i.id)) && i.status !== 'cancelada');
+        const _ocultas = (this.generatedInvoices || []).filter(i => sel.has(String(i.id)) && !visibles.includes(i) && i.status !== 'cancelada').length;
+        if (!lista.length) { alert('Marca primero las facturas que quieres enviar (casilla a la izquierda).' + (_ocultas ? `\n\n(Hay ${_ocultas} marcada(s) que el filtro actual no muestra; esas no se envían.)` : '')); return; }
         this._loteEmail = lista;
         const esc = t => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
         const filas = lista.map(inv => {
@@ -11075,6 +11101,7 @@ Motivo de cancelación (opcional):`);
             <div style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:10px;">
               <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">${filas}</table>
             </div>
+            ${_ocultas ? `<div style="font-size:0.8rem;color:#8a5a00;background:#fef5e7;border-radius:6px;padding:6px 10px;margin-bottom:10px;">ℹ️ Hay ${_ocultas} factura(s) marcada(s) que el filtro actual no muestra. <b>No se envían.</b></div>` : ''}
             <label style="font-size:0.82rem;font-weight:700;color:#555;">📝 Nota para el cliente (opcional, la misma para todos — en inglés)</label>
             <textarea id="loteEmailNota" rows="2" placeholder="Ej: This is a friendly reminder that the attached invoice is past due." style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:0.9rem;font-family:inherit;resize:vertical;box-sizing:border-box;margin:4px 0 12px;"></textarea>
             <div id="loteEmailProgreso" style="font-size:0.85rem;color:#1A4FCC;font-weight:700;min-height:1.2em;margin-bottom:8px;"></div>
@@ -11145,6 +11172,7 @@ Motivo de cancelación (opcional):`);
                 this._marcarCanalEnvio(inv, 'email');
                 inv.updatedAt = new Date().toISOString();
                 enviadas.push(`${etq} → ${emails.join(', ')}`);
+                this._selFacturasSet().delete(String(inv.id)); // 2026-11-16: ya enviada → se desmarca
             } catch (e) {
                 errores.push(`${etq}: ${(e && (e.text || e.message)) || 'error desconocido'}`);
             }
@@ -18827,6 +18855,7 @@ Motivo de cancelación (opcional):`);
         
         // Formatear fecha límite de pago
         let paymentDueFormatted = "";
+        paymentDue = this._dueISOParaPDF(client, startDate, endDate, invoiceNumber, paymentDue); // 2026-11-17
         if (paymentDue) {
             const [dueYear, dueMonth, dueDay] = paymentDue.split("-");
             paymentDueFormatted = `${dueMonth}/${dueDay}/${dueYear}`;
@@ -19391,6 +19420,7 @@ Motivo de cancelación (opcional):`);
         
         // Formatear fecha límite de pago
         let paymentDueFormatted = "";
+        paymentDue = this._dueISOParaPDF(client, startDate, endDate, invoiceNumber, paymentDue); // 2026-11-17
         if (paymentDue) {
             const [dueYear, dueMonth, dueDay] = paymentDue.split("-");
             paymentDueFormatted = `${dueMonth}/${dueDay}/${dueYear}`;
