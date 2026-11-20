@@ -143,6 +143,8 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
         #dropModal.show{display:flex;}
         .drop-modal-content{background:white;border-radius:14px;padding:22px;width:340px;max-width:95vw;box-shadow:0 20px 50px rgba(0,0,0,.3);max-height:90vh;overflow-y:auto;}
         /* ── fin sidebar flotante ── */
+        /* 2026-11-20 (Ranu): ya no se usan — ◀◀ de grupos y botón flotante de Clientes */
+        .sidebar-toggle-btn, .toggle-clients-btn { display: none !important; }
         .sidebar-toggle-btn { position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 100;
             background: var(--primary); color: white; border: none; border-radius: 0 6px 6px 0;
             padding: 8px 5px; cursor: pointer; font-size: 0.7rem; writing-mode: vertical-rl;
@@ -862,6 +864,11 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
                 <button class="btn-nav-final" onclick="app.moveDate(-1)">◀</button>
                 <button class="btn-today-final" onclick="app.goToday()">Hoy</button>
                 <button class="btn-nav-final" onclick="app.moveDate(1)">▶</button>
+                <span title="Tamaño del calendario (se recuerda en esta computadora)" style="display:inline-flex;align-items:center;gap:2px;margin-left:6px;">
+                    <button class="btn-nav-final" onclick="app._zoomCal(-5)" style="padding:4px 8px;">−</button>
+                    <span id="zoomCalLbl" style="font-size:0.75rem;font-weight:700;color:#555;min-width:36px;text-align:center;">80%</span>
+                    <button class="btn-nav-final" onclick="app._zoomCal(5)" style="padding:4px 8px;">+</button>
+                </span>
                 <button id="btnClientPrices" onclick="app.togglePrices()" title="Mostrar/ocultar precios sobre los servicios" style="background:transparent;border:none;color:#c9c9c9;cursor:pointer;font-size:0.8rem;opacity:0.45;padding:2px 6px;line-height:1;">💲</button>
             </div>
             
@@ -1977,7 +1984,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-17.2';
+const SCHED_BUILD = '2026-11-20.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -2486,6 +2493,7 @@ class Scheduler {
 
     render() {
         try { this._aplicarRotacionDeHoy(); } catch(e) { console.warn('aplicarRotacionDeHoy', e); }
+        try { this._aplicarZoomCal(); } catch(e) {}
         const todayStr = new Date().toLocaleDateString('en-CA');
         const grid = document.getElementById('mainSchedulerGrid');
         grid.innerHTML = '';
@@ -2766,10 +2774,21 @@ class Scheduler {
         row.style.cssText = 'display:flex;flex-direction:row;border-bottom:2px solid #ddd;background:#f8f9fa;';
         const lbl = document.createElement('div');
         lbl.style.cssText = 'width:32px;min-width:32px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#34495e;color:white;font-size:0.95rem;';
-        lbl.title = 'Empleados de cada grupo por día';
+        // 2026-11-20 (Ranu): clic en el ícono = contraer/expandir el renglón (se recuerda)
+        let _oculta = false; try { _oculta = localStorage.getItem('sched_filaGruposOculta') === '1'; } catch (e) {}
+        lbl.title = _oculta ? 'Mostrar empleados de cada grupo por día' : 'Empleados de cada grupo por día — clic para contraer';
+        lbl.style.cursor = 'pointer';
+        lbl.onclick = () => { try { localStorage.setItem('sched_filaGruposOculta', _oculta ? '0' : '1'); } catch (e) {} this.render(); };
         // Ícono BLANCO (SVG) — el emoji 👥 no se veía sobre el fondo oscuro.
         lbl.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="#ffffff" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 19c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6v1h-13z"/><circle cx="16.5" cy="9" r="2.6"/><path d="M14.8 13.4c.5-.1 1.1-.2 1.7-.2 3 0 5.5 2 5.5 5.2V20h-4.6v-1c0-2.2-.9-4.2-2.6-5.6z"/></svg>';
         row.appendChild(lbl);
+        if (_oculta) {
+            const t = document.createElement('div');
+            t.style.cssText = 'flex:1;padding:4px 10px;font-size:0.72rem;color:#7f8c8d;cursor:pointer;';
+            t.textContent = '▸ Empleados por grupo (clic para mostrar)';
+            t.onclick = lbl.onclick;
+            row.appendChild(t); grid.appendChild(row); return;
+        }
         const cells = document.createElement('div');
         cells.style.cssText = 'display:grid;grid-template-columns:repeat(7,1fr);flex:1;';
         for (let i = 0; i < 7; i++) {
@@ -4977,6 +4996,19 @@ Brazos Cleaning Services</textarea>
     }
     moveDate(n) { if(this.view==='day') this.curDate.setDate(this.curDate.getDate()+n); else if(this.view==='week') this.curDate.setDate(this.curDate.getDate()+(n*7)); else this.curDate.setMonth(this.curDate.getMonth()+n); this.render(); }
     goToday() { this.curDate = new Date(); this.render(); }
+    // 2026-11-20 (Ranu): tamaño del calendario (pantalla principal) sin tener que bajar el zoom
+    // del navegador. Solo afecta encabezado + calendario; las ventanas siguen a tamaño normal.
+    _zoomCalLeer() { try { const v = parseInt(localStorage.getItem('sched_zoomCal')); return (v >= 50 && v <= 120) ? v : 80; } catch (e) { return 80; } }
+    _aplicarZoomCal() {
+        const v = this._zoomCalLeer();
+        const c = document.querySelector('body > .container'); if (c) c.style.zoom = (v / 100);
+        const l = document.getElementById('zoomCalLbl'); if (l) l.textContent = v + '%';
+    }
+    _zoomCal(delta) {
+        const v = Math.max(50, Math.min(120, this._zoomCalLeer() + delta));
+        try { localStorage.setItem('sched_zoomCal', String(v)); } catch (e) {}
+        this._aplicarZoomCal();
+    }
 
     // ── Precios sobre las tarjetas (vista SEMANA) ──
     // El botón 💲 prende/apaga la vista de precios directamente sobre cada servicio.
