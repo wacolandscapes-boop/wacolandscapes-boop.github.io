@@ -1984,7 +1984,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-20.1';
+const SCHED_BUILD = '2026-11-23.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -23675,8 +23675,12 @@ Motivo de cancelación (opcional):`);
     }
 
     nmPricePerVisit(cli) {
-        const pfm = parseFloat(cli.price || cli.fee || 0);
+        let pfm = parseFloat(cli.price || cli.fee || 0);
         if (cli.invoicingType !== 'fixed_monthly') return pfm;
+        // 2026-11-23 (Ranu): cobro compartido (casa de Joe: su mitad + la de JGM) → para la
+        // nómina cuenta lo que se cobra en TOTAL por el servicio, no solo la mitad de la ficha.
+        const _ft = cli.facturarTambien;
+        if (_ft && _ft.cliId && parseFloat(_ft.monto) > 0) pfm += parseFloat(_ft.monto);
         const freq = cli.type || 'mensual';
         if (freq === 'semanal') return (pfm * 12) / 52;
         if (freq === 'quincenal') return (pfm * 12) / 26;
