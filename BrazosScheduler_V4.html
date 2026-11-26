@@ -888,6 +888,10 @@ document.getElementById('pwaManifest').href=URL.createObjectURL(new Blob([JSON.s
                     </div>
                 </div>
 
+                <!-- 2026-11-25 (Ranu): ver solo los servicios en que participó un empleado -->
+                <select id="empFilter" onchange="app.render()" class="filter-select-final" style="min-width:140px;" title="Servicios en que participó el empleado (por su grupo de ese día o asignados a él)">
+                    <option value="all">EMPLEADO (TODOS)</option>
+                </select>
                 <select id="recurrenceFilter" onchange="app.render()" class="filter-select-final" style="min-width:140px;">
                     <option value="all">RECURRENCIA (TODOS)</option>
                     <option value="semanal">Semanal</option>
@@ -1984,7 +1988,7 @@ function getTextColor(bgColor) {
 // 2026-10-14: número de versión del Scheduler. SUBIRLO en cada versión nueva.
 // Si Drive fue escrito por una versión MÁS NUEVA que esta, esta copia es vieja:
 // queda en solo lectura (no sube nada) y muestra un aviso rojo.
-const SCHED_BUILD = '2026-11-23.1';
+const SCHED_BUILD = '2026-11-25.1';
 
 // 2026-10-14: recargar la app desde un botón (en iPhone es latoso cerrarla y abrirla).
 // Agrega ?r=<hora> para que el teléfono baje la versión más reciente y no use la guardada.
@@ -2494,6 +2498,7 @@ class Scheduler {
     render() {
         try { this._aplicarRotacionDeHoy(); } catch(e) { console.warn('aplicarRotacionDeHoy', e); }
         try { this._aplicarZoomCal(); } catch(e) {}
+        try { this._llenarFiltroEmpleado(); } catch(e) {}
         const todayStr = new Date().toLocaleDateString('en-CA');
         const grid = document.getElementById('mainSchedulerGrid');
         grid.innerHTML = '';
@@ -2667,6 +2672,7 @@ class Scheduler {
                         daily = daily.filter(s => !this._cliPausado(this.clis.find(c => String(c.id) === String(s.cliId)), s.date));
                         if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
                         if(fRecurrence !== 'all'){daily=daily.filter(s=>{const _c=this.clis.find(c=>c.id==s.cliId);return _c && _c.type===fRecurrence;});}
+                        { const _fe = document.getElementById('empFilter')?.value || 'all'; if (_fe !== 'all') daily = daily.filter(sv => this._svcDeEmpleado(sv, _fe)); }
                         daily.forEach(s => { if(!seen.has(s.id)) { seen.add(s.id); allServs.push({...s, grupo: g}); } });
                     });
 
@@ -3931,6 +3937,28 @@ Brazos Cleaning Services</textarea>
         return !!(cli && (cli.excludeInvoicing || cli.servicePaused));
     }
 
+    // 2026-11-25 (Ranu): ¿el empleado participó en este servicio? — asignado directo a él, o
+    // asignado a un grupo en el que él estaba ESE día (según la Rotación).
+    _svcDeEmpleado(s, empId) {
+        if (!s || !empId) return false;
+        if (String(s.empId) === String(empId)) return true;
+        if (this.grupos && this.grupos[s.empId] !== undefined) {
+            try { return this._rosterParaFecha(s.empId, s.date).map(String).includes(String(empId)); } catch (e) { return false; }
+        }
+        return false;
+    }
+    _llenarFiltroEmpleado() {
+        const sel = document.getElementById('empFilter'); if (!sel) return;
+        const lista = (this.emps || []).filter(e => e && e.name).slice().sort((a, b) => a.name.localeCompare(b.name));
+        const firma = lista.map(e => e.id + ':' + e.name).join('|');
+        if (sel.dataset.firma === firma) return;
+        const actual = sel.value || 'all';
+        const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        sel.innerHTML = '<option value="all">EMPLEADO (TODOS)</option>' + lista.map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('');
+        sel.value = lista.some(e => String(e.id) === actual) ? actual : 'all';
+        sel.dataset.firma = firma;
+    }
+
     _fillCell(cell, dStr, nombreGrupo, fCli, fRecurrence='all') {
         let daily = this.servs.filter(s => {
             if(s.date !== dStr) return false;
@@ -3945,6 +3973,7 @@ Brazos Cleaning Services</textarea>
         });
         if(fCli !== 'all'){const _fIds=fCli.split(',');daily=daily.filter(s=>_fIds.includes(String(s.cliId)));}
                         if(fRecurrence !== 'all'){daily=daily.filter(s=>{const _c=this.clis.find(c=>c.id==s.cliId);return _c && _c.type===fRecurrence;});}
+                        { const _fe = document.getElementById('empFilter')?.value || 'all'; if (_fe !== 'all') daily = daily.filter(sv => this._svcDeEmpleado(sv, _fe)); }
         daily.sort((a,b) => {
             // ✅ La Prioridad manda cuando está definida (es su propósito: forzar el orden manual).
             const aPrio = parseInt(a.priority);
